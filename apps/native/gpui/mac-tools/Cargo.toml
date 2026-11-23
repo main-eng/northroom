@@ -1,0 +1,14 @@
+[package]
+name = "mac-tools"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "The Mac's own answers the checks hold the app to: Core Text's widths and lines (text-widths) and the first window's time and memory (window-time)"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-core-text = "0.3.2"
+# Splits text into grapheme clusters for Core Text glyph queries. Already in the tree via GPUI.
+unicode-segmentation = "1"

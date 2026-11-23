@@ -1,0 +1,30 @@
+name: Setup Bun and install dependencies
+description: >-
+  Installs the pinned Bun, restores the install cache and runs the retrying workspace install
+  (scripts/ci-bun-install.sh). CI's Bun version is pinned here.
+
+inputs:
+  bun-version:
+    description: Bun version to install
+    required: false
+    default: "1.4.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Cache Bun install cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-
+
+    - name: Install dependencies
+      shell: bash
+      run: bash scripts/ci-bun-install.sh

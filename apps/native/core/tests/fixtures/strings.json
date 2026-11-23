@@ -1,0 +1,3319 @@
+[
+  {
+    "message": "Cancel",
+    "args": {},
+    "expected": "Cancel"
+  },
+  {
+    "message": "Change folder",
+    "args": {},
+    "expected": "Change folder"
+  },
+  {
+    "message": "Delete",
+    "args": {},
+    "expected": "Delete"
+  },
+  {
+    "message": "Delete Account",
+    "args": {},
+    "expected": "Delete Account"
+  },
+  {
+    "message": "This schedules permanent deletion after a seven-day restoration window. Type {word} to confirm.",
+    "args": {
+      "word": "delete"
+    },
+    "expected": "This schedules permanent deletion after a seven-day restoration window. Type delete to confirm."
+  },
+  {
+    "message": "This schedules permanent deletion after a seven-day restoration window. Type {word} to confirm.",
+    "args": {
+      "word": "{word}"
+    },
+    "expected": "This schedules permanent deletion after a seven-day restoration window. Type {word} to confirm."
+  },
+  {
+    "message": "This schedules permanent deletion after a seven-day restoration window. Type {word} to confirm.",
+    "args": {
+      "word": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "This schedules permanent deletion after a seven-day restoration window. Type {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} to confirm."
+  },
+  {
+    "message": "This schedules permanent deletion after a seven-day restoration window. Type {word} to confirm.",
+    "args": {},
+    "expected": "This schedules permanent deletion after a seven-day restoration window. Type undefined to confirm."
+  },
+  {
+    "message": "Type 'delete' to confirm",
+    "args": {},
+    "expected": "Type 'delete' to confirm"
+  },
+  {
+    "message": "delete",
+    "args": {},
+    "expected": "delete"
+  },
+  {
+    "message": "Deleting...",
+    "args": {},
+    "expected": "Deleting..."
+  },
+  {
+    "message": "Cancel deletion",
+    "args": {},
+    "expected": "Cancel deletion"
+  },
+  {
+    "message": "Failed to cancel account deletion",
+    "args": {},
+    "expected": "Failed to cancel account deletion"
+  },
+  {
+    "message": "Cancelling...",
+    "args": {},
+    "expected": "Cancelling..."
+  },
+  {
+    "message": "Deletion is being processed",
+    "args": {},
+    "expected": "Deletion is being processed"
+  },
+  {
+    "message": "Failed to schedule account deletion",
+    "args": {},
+    "expected": "Failed to schedule account deletion"
+  },
+  {
+    "message": "Scheduled for {when}",
+    "args": {
+      "when": "Nov 19, 2026, 3:04 PM"
+    },
+    "expected": "Scheduled for Nov 19, 2026, 3:04 PM"
+  },
+  {
+    "message": "Scheduled for {when}",
+    "args": {
+      "when": "{when}"
+    },
+    "expected": "Scheduled for {when}"
+  },
+  {
+    "message": "Scheduled for {when}",
+    "args": {
+      "when": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Scheduled for {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+  },
+  {
+    "message": "Scheduled for {when}",
+    "args": {},
+    "expected": "Scheduled for undefined"
+  },
+  {
+    "message": "Account deletion scheduled",
+    "args": {},
+    "expected": "Account deletion scheduled"
+  },
+  {
+    "message": "Account deletion status could not be verified.",
+    "args": {},
+    "expected": "Account deletion status could not be verified."
+  },
+  {
+    "message": "Account deletion cancelled",
+    "args": {},
+    "expected": "Account deletion cancelled"
+  },
+  {
+    "message": "You can cancel until {when}.",
+    "args": {
+      "when": "Nov 19, 2026, 3:04 PM"
+    },
+    "expected": "You can cancel until Nov 19, 2026, 3:04 PM."
+  },
+  {
+    "message": "You can cancel until {when}.",
+    "args": {
+      "when": "{when}"
+    },
+    "expected": "You can cancel until {when}."
+  },
+  {
+    "message": "You can cancel until {when}.",
+    "args": {
+      "when": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "You can cancel until {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}."
+  },
+  {
+    "message": "You can cancel until {when}.",
+    "args": {},
+    "expected": "You can cancel until undefined."
+  },
+  {
+    "message": "The folder shown in Local on this computer. Changing it leaves your files where they are.",
+    "args": {},
+    "expected": "The folder shown in Local on this computer. Changing it leaves your files where they are."
+  },
+  {
+    "message": "Not signed in",
+    "args": {},
+    "expected": "Not signed in"
+  },
+  {
+    "message": "Account",
+    "args": {},
+    "expected": "Account"
+  },
+  {
+    "message": "Retry",
+    "args": {},
+    "expected": "Retry"
+  },
+  {
+    "message": "Danger Zone",
+    "args": {},
+    "expected": "Danger Zone"
+  },
+  {
+    "message": "Language",
+    "args": {},
+    "expected": "Language"
+  },
+  {
+    "message": "Local workspace",
+    "args": {},
+    "expected": "Local workspace"
+  },
+  {
+    "message": "Dark",
+    "args": {},
+    "expected": "Dark"
+  },
+  {
+    "message": "Theme",
+    "args": {},
+    "expected": "Theme"
+  },
+  {
+    "message": "Light",
+    "args": {},
+    "expected": "Light"
+  },
+  {
+    "message": "System",
+    "args": {},
+    "expected": "System"
+  },
+  {
+    "message": "Try again in a moment.",
+    "args": {},
+    "expected": "Try again in a moment."
+  },
+  {
+    "message": "User",
+    "args": {},
+    "expected": "User"
+  },
+  {
+    "message": "Accent",
+    "args": {},
+    "expected": "Accent"
+  },
+  {
+    "message": "Amber",
+    "args": {},
+    "expected": "Amber"
+  },
+  {
+    "message": "Blue",
+    "args": {},
+    "expected": "Blue"
+  },
+  {
+    "message": "Custom",
+    "args": {},
+    "expected": "Custom"
+  },
+  {
+    "message": "Green",
+    "args": {},
+    "expected": "Green"
+  },
+  {
+    "message": "Monochrome",
+    "args": {},
+    "expected": "Monochrome"
+  },
+  {
+    "message": "Orange",
+    "args": {},
+    "expected": "Orange"
+  },
+  {
+    "message": "Pink",
+    "args": {},
+    "expected": "Pink"
+  },
+  {
+    "message": "Red",
+    "args": {},
+    "expected": "Red"
+  },
+  {
+    "message": "Teal",
+    "args": {},
+    "expected": "Teal"
+  },
+  {
+    "message": "Violet",
+    "args": {},
+    "expected": "Violet"
+  },
+  {
+    "message": "Background",
+    "args": {},
+    "expected": "Background"
+  },
+  {
+    "message": "Contrast",
+    "args": {},
+    "expected": "Contrast"
+  },
+  {
+    "message": "Primary",
+    "args": {},
+    "expected": "Primary"
+  },
+  {
+    "message": "Dark theme",
+    "args": {},
+    "expected": "Dark theme"
+  },
+  {
+    "message": "Foreground",
+    "args": {},
+    "expected": "Foreground"
+  },
+  {
+    "message": "Light theme",
+    "args": {},
+    "expected": "Light theme"
+  },
+  {
+    "message": "Colors, type and motion for the app. Each theme is configured on its own; your system or theme setting picks which one applies.",
+    "args": {},
+    "expected": "Colors, type and motion for the app. Each theme is configured on its own; your system or theme setting picks which one applies."
+  },
+  {
+    "message": "Appearance",
+    "args": {},
+    "expected": "Appearance"
+  },
+  {
+    "message": "Graphite",
+    "args": {},
+    "expected": "Graphite"
+  },
+  {
+    "message": "Ink",
+    "args": {},
+    "expected": "Ink"
+  },
+  {
+    "message": "Northroom",
+    "args": {},
+    "expected": "Northroom"
+  },
+  {
+    "message": "Parchment",
+    "args": {},
+    "expected": "Parchment"
+  },
+  {
+    "message": "Terminal",
+    "args": {},
+    "expected": "Terminal"
+  },
+  {
+    "message": "Could not open the local sign-in callback. Please try again.",
+    "args": {},
+    "expected": "Could not open the local sign-in callback. Please try again."
+  },
+  {
+    "message": "Could not complete desktop sign-in. Please try again.",
+    "args": {},
+    "expected": "Could not complete desktop sign-in. Please try again."
+  },
+  {
+    "message": "Invalid sign-in callback.",
+    "args": {},
+    "expected": "Invalid sign-in callback."
+  },
+  {
+    "message": "Returning to Northroom. You can close this window.",
+    "args": {},
+    "expected": "Returning to Northroom. You can close this window."
+  },
+  {
+    "message": "Northroom sign-in",
+    "args": {},
+    "expected": "Northroom sign-in"
+  },
+  {
+    "message": "Sign in",
+    "args": {},
+    "expected": "Sign in"
+  },
+  {
+    "message": "Couldn’t sign in",
+    "args": {},
+    "expected": "Couldn’t sign in"
+  },
+  {
+    "message": "Sign-in timed out. Please try again.",
+    "args": {},
+    "expected": "Sign-in timed out. Please try again."
+  },
+  {
+    "message": "Sign-in was cancelled or did not finish. Please try again.",
+    "args": {},
+    "expected": "Sign-in was cancelled or did not finish. Please try again."
+  },
+  {
+    "message": "Waiting for your browser…",
+    "args": {},
+    "expected": "Waiting for your browser…"
+  },
+  {
+    "message": "Add balance",
+    "args": {},
+    "expected": "Add balance"
+  },
+  {
+    "message": "add",
+    "args": {},
+    "expected": "add"
+  },
+  {
+    "message": "Card",
+    "args": {},
+    "expected": "Card"
+  },
+  {
+    "message": "A card is saved for auto top-up.",
+    "args": {},
+    "expected": "A card is saved for auto top-up."
+  },
+  {
+    "message": "When your balance falls below {threshold}, add {amount} from your saved card. A 5.5% service fee is added to each top-up, at least $0.80.",
+    "args": {
+      "threshold": "$5.00",
+      "amount": "$12.40"
+    },
+    "expected": "When your balance falls below $5.00, add $12.40 from your saved card. A 5.5% service fee is added to each top-up, at least $0.80."
+  },
+  {
+    "message": "When your balance falls below {threshold}, add {amount} from your saved card. A 5.5% service fee is added to each top-up, at least $0.80.",
+    "args": {
+      "threshold": "{threshold}",
+      "amount": "{amount} $1 \\ %s"
+    },
+    "expected": "When your balance falls below {threshold}, add {amount} $1 \\ %s from your saved card. A 5.5% service fee is added to each top-up, at least $0.80."
+  },
+  {
+    "message": "When your balance falls below {threshold}, add {amount} from your saved card. A 5.5% service fee is added to each top-up, at least $0.80.",
+    "args": {
+      "threshold": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "amount": ""
+    },
+    "expected": "When your balance falls below {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}, add  from your saved card. A 5.5% service fee is added to each top-up, at least $0.80."
+  },
+  {
+    "message": "When your balance falls below {threshold}, add {amount} from your saved card. A 5.5% service fee is added to each top-up, at least $0.80.",
+    "args": {},
+    "expected": "When your balance falls below undefined, add undefined from your saved card. A 5.5% service fee is added to each top-up, at least $0.80."
+  },
+  {
+    "message": "Auto top-up turned off because your bank asked you to confirm a charge. Turn it on again to continue.",
+    "args": {},
+    "expected": "Auto top-up turned off because your bank asked you to confirm a charge. Turn it on again to continue."
+  },
+  {
+    "message": "Auto top-up turned off because a charge failed. Check your card, then turn it on again.",
+    "args": {},
+    "expected": "Auto top-up turned off because a charge failed. Check your card, then turn it on again."
+  },
+  {
+    "message": "Top up automatically",
+    "args": {},
+    "expected": "Top up automatically"
+  },
+  {
+    "message": "Save a card to turn on auto top-up.",
+    "args": {},
+    "expected": "Save a card to turn on auto top-up."
+  },
+  {
+    "message": "Auto top-up saved",
+    "args": {},
+    "expected": "Auto top-up saved"
+  },
+  {
+    "message": "Below",
+    "args": {},
+    "expected": "Below"
+  },
+  {
+    "message": "{amount} left",
+    "args": {
+      "amount": "$12.40"
+    },
+    "expected": "$12.40 left"
+  },
+  {
+    "message": "{amount} left",
+    "args": {
+      "amount": "{amount}"
+    },
+    "expected": "{amount} left"
+  },
+  {
+    "message": "{amount} left",
+    "args": {
+      "amount": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} left"
+  },
+  {
+    "message": "{amount} left",
+    "args": {},
+    "expected": "undefined left"
+  },
+  {
+    "message": "Pays for generation and other AI features. It never expires.",
+    "args": {},
+    "expected": "Pays for generation and other AI features. It never expires."
+  },
+  {
+    "message": "AI balance",
+    "args": {},
+    "expected": "AI balance"
+  },
+  {
+    "message": "Loading…",
+    "args": {},
+    "expected": "Loading…"
+  },
+  {
+    "message": "Billing details are unavailable.",
+    "args": {},
+    "expected": "Billing details are unavailable."
+  },
+  {
+    "message": "Could not save auto top-up",
+    "args": {},
+    "expected": "Could not save auto top-up"
+  },
+  {
+    "message": "Save a card before you turn on auto top-up.",
+    "args": {},
+    "expected": "Save a card before you turn on auto top-up."
+  },
+  {
+    "message": "Could not open card setup",
+    "args": {},
+    "expected": "Could not open card setup"
+  },
+  {
+    "message": "Could not start checkout",
+    "args": {},
+    "expected": "Could not start checkout"
+  },
+  {
+    "message": "Billing",
+    "args": {},
+    "expected": "Billing"
+  },
+  {
+    "message": "Replace card",
+    "args": {},
+    "expected": "Replace card"
+  },
+  {
+    "message": "Save",
+    "args": {},
+    "expected": "Save"
+  },
+  {
+    "message": "Save a card",
+    "args": {},
+    "expected": "Save a card"
+  },
+  {
+    "message": "Auto top-up",
+    "args": {},
+    "expected": "Auto top-up"
+  },
+  {
+    "message": "Balance",
+    "args": {},
+    "expected": "Balance"
+  },
+  {
+    "message": "{min} to {max}, paid once, plus a 5.5% service fee (at least $0.80)",
+    "args": {
+      "min": "$10.00",
+      "max": "$500.00"
+    },
+    "expected": "$10.00 to $500.00, paid once, plus a 5.5% service fee (at least $0.80)"
+  },
+  {
+    "message": "{min} to {max}, paid once, plus a 5.5% service fee (at least $0.80)",
+    "args": {
+      "min": "{min}",
+      "max": "{amount} $1 \\ %s"
+    },
+    "expected": "{min} to {amount} $1 \\ %s, paid once, plus a 5.5% service fee (at least $0.80)"
+  },
+  {
+    "message": "{min} to {max}, paid once, plus a 5.5% service fee (at least $0.80)",
+    "args": {
+      "min": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "max": ""
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} to , paid once, plus a 5.5% service fee (at least $0.80)"
+  },
+  {
+    "message": "{min} to {max}, paid once, plus a 5.5% service fee (at least $0.80)",
+    "args": {},
+    "expected": "undefined to undefined, paid once, plus a 5.5% service fee (at least $0.80)"
+  },
+  {
+    "message": "{count}d",
+    "args": {
+      "count": "5"
+    },
+    "expected": "5d"
+  },
+  {
+    "message": "{count}d",
+    "args": {
+      "count": "{count}"
+    },
+    "expected": "{count}d"
+  },
+  {
+    "message": "{count}d",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}d"
+  },
+  {
+    "message": "{count}d",
+    "args": {},
+    "expected": "undefinedd"
+  },
+  {
+    "message": "{count}h",
+    "args": {
+      "count": "5"
+    },
+    "expected": "5h"
+  },
+  {
+    "message": "{count}h",
+    "args": {
+      "count": "{count}"
+    },
+    "expected": "{count}h"
+  },
+  {
+    "message": "{count}h",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}h"
+  },
+  {
+    "message": "{count}h",
+    "args": {},
+    "expected": "undefinedh"
+  },
+  {
+    "message": "{count}m",
+    "args": {
+      "count": "5"
+    },
+    "expected": "5m"
+  },
+  {
+    "message": "{count}m",
+    "args": {
+      "count": "{count}"
+    },
+    "expected": "{count}m"
+  },
+  {
+    "message": "{count}m",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}m"
+  },
+  {
+    "message": "{count}m",
+    "args": {},
+    "expected": "undefinedm"
+  },
+  {
+    "message": "{count}w",
+    "args": {
+      "count": "5"
+    },
+    "expected": "5w"
+  },
+  {
+    "message": "{count}w",
+    "args": {
+      "count": "{count}"
+    },
+    "expected": "{count}w"
+  },
+  {
+    "message": "{count}w",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}w"
+  },
+  {
+    "message": "{count}w",
+    "args": {},
+    "expected": "undefinedw"
+  },
+  {
+    "message": "HTML artifact",
+    "args": {},
+    "expected": "HTML artifact"
+  },
+  {
+    "message": "{count} column",
+    "args": {
+      "count": "5"
+    },
+    "expected": "5 column"
+  },
+  {
+    "message": "{count} column",
+    "args": {
+      "count": "{count}"
+    },
+    "expected": "{count} column"
+  },
+  {
+    "message": "{count} column",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} column"
+  },
+  {
+    "message": "{count} column",
+    "args": {},
+    "expected": "undefined column"
+  },
+  {
+    "message": "{count} columns",
+    "args": {
+      "count": "5"
+    },
+    "expected": "5 columns"
+  },
+  {
+    "message": "{count} columns",
+    "args": {
+      "count": "{count}"
+    },
+    "expected": "{count} columns"
+  },
+  {
+    "message": "{count} columns",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} columns"
+  },
+  {
+    "message": "{count} columns",
+    "args": {},
+    "expected": "undefined columns"
+  },
+  {
+    "message": "Empty folder",
+    "args": {},
+    "expected": "Empty folder"
+  },
+  {
+    "message": "Couldn’t open this folder",
+    "args": {},
+    "expected": "Couldn’t open this folder"
+  },
+  {
+    "message": "Please try again.",
+    "args": {},
+    "expected": "Please try again."
+  },
+  {
+    "message": "Copy Claude / Cursor JSON",
+    "args": {},
+    "expected": "Copy Claude / Cursor JSON"
+  },
+  {
+    "message": "Copy Codex TOML",
+    "args": {},
+    "expected": "Copy Codex TOML"
+  },
+  {
+    "message": "Let AI work in your Northroom folder: see and export its films, read what you point at in the player, organise its folders, and generate pictures, video and sound with your credits. Copy the configuration into your AI client's MCP settings, then restart the client.",
+    "args": {},
+    "expected": "Let AI work in your Northroom folder: see and export its films, read what you point at in the player, organise its folders, and generate pictures, video and sound with your credits. Copy the configuration into your AI client's MCP settings, then restart the client."
+  },
+  {
+    "message": "Done",
+    "args": {},
+    "expected": "Done"
+  },
+  {
+    "message": "Connect to Desktop MCP",
+    "args": {},
+    "expected": "Connect to Desktop MCP"
+  },
+  {
+    "message": "The MCP server (northroom-frames) is not inside this app.",
+    "args": {},
+    "expected": "The MCP server (northroom-frames) is not inside this app."
+  },
+  {
+    "message": "Could not open AI Connections",
+    "args": {},
+    "expected": "Could not open AI Connections"
+  },
+  {
+    "message": "Generation failed",
+    "args": {},
+    "expected": "Generation failed"
+  },
+  {
+    "message": "Unavailable",
+    "args": {},
+    "expected": "Unavailable"
+  },
+  {
+    "message": "The timeline editor is not in this build yet. The timeline’s folder is unchanged.",
+    "args": {},
+    "expected": "The timeline editor is not in this build yet. The timeline’s folder is unchanged."
+  },
+  {
+    "message": "Couldn’t add the files",
+    "args": {},
+    "expected": "Couldn’t add the files"
+  },
+  {
+    "message": "Open {terminal} and try again.",
+    "args": {
+      "terminal": "<terminal>"
+    },
+    "expected": "Open <terminal> and try again."
+  },
+  {
+    "message": "Open {terminal} and try again.",
+    "args": {
+      "terminal": "{terminal}"
+    },
+    "expected": "Open {terminal} and try again."
+  },
+  {
+    "message": "Open {terminal} and try again.",
+    "args": {
+      "terminal": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Open {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} and try again."
+  },
+  {
+    "message": "Open {terminal} and try again.",
+    "args": {},
+    "expected": "Open undefined and try again."
+  },
+  {
+    "message": "Import",
+    "args": {},
+    "expected": "Import"
+  },
+  {
+    "message": "New folder",
+    "args": {},
+    "expected": "New folder"
+  },
+  {
+    "message": "Untitled",
+    "args": {},
+    "expected": "Untitled"
+  },
+  {
+    "message": "Couldn’t update the file",
+    "args": {},
+    "expected": "Couldn’t update the file"
+  },
+  {
+    "message": "This file is no longer available. Reopen its folder",
+    "args": {},
+    "expected": "This file is no longer available. Reopen its folder"
+  },
+  {
+    "message": "The file moved out of this folder. Refresh it before changing the file",
+    "args": {},
+    "expected": "The file moved out of this folder. Refresh it before changing the file"
+  },
+  {
+    "message": "This file was replaced. Refresh its folder before continuing",
+    "args": {},
+    "expected": "This file was replaced. Refresh its folder before continuing"
+  },
+  {
+    "message": "A filename cannot contain a path",
+    "args": {},
+    "expected": "A filename cannot contain a path"
+  },
+  {
+    "message": "A folder cannot move inside itself",
+    "args": {},
+    "expected": "A folder cannot move inside itself"
+  },
+  {
+    "message": "A file named “{name}” already exists",
+    "args": {
+      "name": "<name>"
+    },
+    "expected": "A file named “<name>” already exists"
+  },
+  {
+    "message": "A file named “{name}” already exists",
+    "args": {
+      "name": "{name}"
+    },
+    "expected": "A file named “{name}” already exists"
+  },
+  {
+    "message": "A file named “{name}” already exists",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "A file named “{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}” already exists"
+  },
+  {
+    "message": "A file named “{name}” already exists",
+    "args": {},
+    "expected": "A file named “undefined” already exists"
+  },
+  {
+    "message": "Every name like {name} is taken in this folder",
+    "args": {
+      "name": "<name>"
+    },
+    "expected": "Every name like <name> is taken in this folder"
+  },
+  {
+    "message": "Every name like {name} is taken in this folder",
+    "args": {
+      "name": "{name}"
+    },
+    "expected": "Every name like {name} is taken in this folder"
+  },
+  {
+    "message": "Every name like {name} is taken in this folder",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Every name like {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} is taken in this folder"
+  },
+  {
+    "message": "Every name like {name} is taken in this folder",
+    "args": {},
+    "expected": "Every name like undefined is taken in this folder"
+  },
+  {
+    "message": "This device cannot move files to the trash",
+    "args": {},
+    "expected": "This device cannot move files to the trash"
+  },
+  {
+    "message": "“{name}” is not a file",
+    "args": {
+      "name": "<name>"
+    },
+    "expected": "“<name>” is not a file"
+  },
+  {
+    "message": "“{name}” is not a file",
+    "args": {
+      "name": "{name}"
+    },
+    "expected": "“{name}” is not a file"
+  },
+  {
+    "message": "“{name}” is not a file",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "“{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}” is not a file"
+  },
+  {
+    "message": "“{name}” is not a file",
+    "args": {},
+    "expected": "“undefined” is not a file"
+  },
+  {
+    "message": "The selected location is not a folder",
+    "args": {},
+    "expected": "The selected location is not a folder"
+  },
+  {
+    "message": "This file is outside the drive",
+    "args": {},
+    "expected": "This file is outside the drive"
+  },
+  {
+    "message": "This standard location cannot be renamed, moved, or sent to Trash. You can organize its contents.",
+    "args": {},
+    "expected": "This standard location cannot be renamed, moved, or sent to Trash. You can organize its contents."
+  },
+  {
+    "message": "This system item is protected. You can browse it, but cannot change it in Northroom.",
+    "args": {},
+    "expected": "This system item is protected. You can browse it, but cannot change it in Northroom."
+  },
+  {
+    "message": "Northroom couldn’t verify this item’s protection. Refresh the folder before changing it.",
+    "args": {},
+    "expected": "Northroom couldn’t verify this item’s protection. Refresh the folder before changing it."
+  },
+  {
+    "message": "The saved drive belongs to another folder",
+    "args": {},
+    "expected": "The saved drive belongs to another folder"
+  },
+  {
+    "message": "A tag needs a name",
+    "args": {},
+    "expected": "A tag needs a name"
+  },
+  {
+    "message": "{count}/{max} characters",
+    "args": {
+      "count": "5",
+      "max": "$500.00"
+    },
+    "expected": "5/$500.00 characters"
+  },
+  {
+    "message": "{count}/{max} characters",
+    "args": {
+      "count": "{count}",
+      "max": "{amount} $1 \\ %s"
+    },
+    "expected": "{count}/{amount} $1 \\ %s characters"
+  },
+  {
+    "message": "{count}/{max} characters",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "max": ""
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}/ characters"
+  },
+  {
+    "message": "{count}/{max} characters",
+    "args": {},
+    "expected": "undefined/undefined characters"
+  },
+  {
+    "message": "Send bugs and feedback. We often thank useful reports with free balance.",
+    "args": {},
+    "expected": "Send bugs and feedback. We often thank useful reports with free balance."
+  },
+  {
+    "message": "Invalid email address",
+    "args": {},
+    "expected": "Invalid email address"
+  },
+  {
+    "message": "Contact Email (Optional)",
+    "args": {},
+    "expected": "Contact Email (Optional)"
+  },
+  {
+    "message": "You don't have access to do that.",
+    "args": {},
+    "expected": "You don't have access to do that."
+  },
+  {
+    "message": "That changed. Refresh and try again.",
+    "args": {},
+    "expected": "That changed. Refresh and try again."
+  },
+  {
+    "message": "Check your connection and try again.",
+    "args": {},
+    "expected": "Check your connection and try again."
+  },
+  {
+    "message": "Check your information and try again.",
+    "args": {},
+    "expected": "Check your information and try again."
+  },
+  {
+    "message": "We couldn't find that.",
+    "args": {},
+    "expected": "We couldn't find that."
+  },
+  {
+    "message": "That needs a purchase.",
+    "args": {},
+    "expected": "That needs a purchase."
+  },
+  {
+    "message": "Please sign in and try again.",
+    "args": {},
+    "expected": "Please sign in and try again."
+  },
+  {
+    "message": "That file is too large.",
+    "args": {},
+    "expected": "That file is too large."
+  },
+  {
+    "message": "This took too long. Try again.",
+    "args": {},
+    "expected": "This took too long. Try again."
+  },
+  {
+    "message": "Too many requests. Try again soon.",
+    "args": {},
+    "expected": "Too many requests. Try again soon."
+  },
+  {
+    "message": "This is temporarily unavailable. Try again.",
+    "args": {},
+    "expected": "This is temporarily unavailable. Try again."
+  },
+  {
+    "message": "Something went wrong. Try again.",
+    "args": {},
+    "expected": "Something went wrong. Try again."
+  },
+  {
+    "message": "Failed to send feedback",
+    "args": {},
+    "expected": "Failed to send feedback"
+  },
+  {
+    "message": "Message",
+    "args": {},
+    "expected": "Message"
+  },
+  {
+    "message": "Please describe the bug, steps to reproduce, and expected behavior...",
+    "args": {},
+    "expected": "Please describe the bug, steps to reproduce, and expected behavior..."
+  },
+  {
+    "message": "Please describe the feature you'd like to see and how it would help...",
+    "args": {},
+    "expected": "Please describe the feature you'd like to see and how it would help..."
+  },
+  {
+    "message": "Please share your feedback or thoughts...",
+    "args": {},
+    "expected": "Please share your feedback or thoughts..."
+  },
+  {
+    "message": "Please describe what you need help with...",
+    "args": {},
+    "expected": "Please describe what you need help with..."
+  },
+  {
+    "message": "Message is required",
+    "args": {},
+    "expected": "Message is required"
+  },
+  {
+    "message": "Message must be under 2000 characters",
+    "args": {},
+    "expected": "Message must be under 2000 characters"
+  },
+  {
+    "message": "Critical",
+    "args": {},
+    "expected": "Critical"
+  },
+  {
+    "message": "High",
+    "args": {},
+    "expected": "High"
+  },
+  {
+    "message": "Priority",
+    "args": {},
+    "expected": "Priority"
+  },
+  {
+    "message": "Low",
+    "args": {},
+    "expected": "Low"
+  },
+  {
+    "message": "Medium",
+    "args": {},
+    "expected": "Medium"
+  },
+  {
+    "message": "Subject",
+    "args": {},
+    "expected": "Subject"
+  },
+  {
+    "message": "Brief {kind} summary...",
+    "args": {
+      "kind": "<kind>"
+    },
+    "expected": "Brief <kind> summary..."
+  },
+  {
+    "message": "Brief {kind} summary...",
+    "args": {
+      "kind": "{kind}"
+    },
+    "expected": "Brief {kind} summary..."
+  },
+  {
+    "message": "Brief {kind} summary...",
+    "args": {
+      "kind": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Brief {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} summary..."
+  },
+  {
+    "message": "Brief {kind} summary...",
+    "args": {},
+    "expected": "Brief undefined summary..."
+  },
+  {
+    "message": "Subject is required",
+    "args": {},
+    "expected": "Subject is required"
+  },
+  {
+    "message": "Subject must be under 200 characters",
+    "args": {},
+    "expected": "Subject must be under 200 characters"
+  },
+  {
+    "message": "Submit Feedback",
+    "args": {},
+    "expected": "Submit Feedback"
+  },
+  {
+    "message": "Submitting...",
+    "args": {},
+    "expected": "Submitting..."
+  },
+  {
+    "message": "Send Feedback",
+    "args": {},
+    "expected": "Send Feedback"
+  },
+  {
+    "message": "Bug Report",
+    "args": {},
+    "expected": "Bug Report"
+  },
+  {
+    "message": "Feature Request",
+    "args": {},
+    "expected": "Feature Request"
+  },
+  {
+    "message": "General Feedback",
+    "args": {},
+    "expected": "General Feedback"
+  },
+  {
+    "message": "Feedback Type",
+    "args": {},
+    "expected": "Feedback Type"
+  },
+  {
+    "message": "Support",
+    "args": {},
+    "expected": "Support"
+  },
+  {
+    "message": "Copied",
+    "args": {},
+    "expected": "Copied"
+  },
+  {
+    "message": "Exporting {name}: baking the sound pages make. Esc or click to cancel.",
+    "args": {
+      "name": "<name>"
+    },
+    "expected": "Exporting <name>: baking the sound pages make. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: baking the sound pages make. Esc or click to cancel.",
+    "args": {
+      "name": "{name}"
+    },
+    "expected": "Exporting {name}: baking the sound pages make. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: baking the sound pages make. Esc or click to cancel.",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Exporting {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}: baking the sound pages make. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: baking the sound pages make. Esc or click to cancel.",
+    "args": {},
+    "expected": "Exporting undefined: baking the sound pages make. Esc or click to cancel."
+  },
+  {
+    "message": "Export of {name} cancelled.",
+    "args": {
+      "name": "<name>"
+    },
+    "expected": "Export of <name> cancelled."
+  },
+  {
+    "message": "Export of {name} cancelled.",
+    "args": {
+      "name": "{name}"
+    },
+    "expected": "Export of {name} cancelled."
+  },
+  {
+    "message": "Export of {name} cancelled.",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Export of {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} cancelled."
+  },
+  {
+    "message": "Export of {name} cancelled.",
+    "args": {},
+    "expected": "Export of undefined cancelled."
+  },
+  {
+    "message": "Cancelling the export…",
+    "args": {},
+    "expected": "Cancelling the export…"
+  },
+  {
+    "message": "Exported {name}.",
+    "args": {
+      "name": "<name>"
+    },
+    "expected": "Exported <name>."
+  },
+  {
+    "message": "Exported {name}.",
+    "args": {
+      "name": "{name}"
+    },
+    "expected": "Exported {name}."
+  },
+  {
+    "message": "Exported {name}.",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Exported {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}."
+  },
+  {
+    "message": "Exported {name}.",
+    "args": {},
+    "expected": "Exported undefined."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames. Esc or click to cancel.",
+    "args": {
+      "name": "<name>",
+      "done": "<done>",
+      "total": "<total>"
+    },
+    "expected": "Exporting <name>: <done> of <total> frames. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames. Esc or click to cancel.",
+    "args": {
+      "name": "{name}",
+      "done": "{amount} $1 \\ %s",
+      "total": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Exporting {name}: {amount} $1 \\ %s of {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} frames. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames. Esc or click to cancel.",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "done": "",
+      "total": "{total}"
+    },
+    "expected": "Exporting {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}:  of {total} frames. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames. Esc or click to cancel.",
+    "args": {},
+    "expected": "Exporting undefined: undefined of undefined frames. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames, {left} s left. Esc or click to cancel.",
+    "args": {
+      "name": "<name>",
+      "done": "<done>",
+      "total": "<total>",
+      "left": "<left>"
+    },
+    "expected": "Exporting <name>: <done> of <total> frames, <left> s left. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames, {left} s left. Esc or click to cancel.",
+    "args": {
+      "name": "{name}",
+      "done": "{amount} $1 \\ %s",
+      "total": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "left": ""
+    },
+    "expected": "Exporting {name}: {amount} $1 \\ %s of {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} frames,  s left. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames, {left} s left. Esc or click to cancel.",
+    "args": {
+      "name": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "done": "",
+      "total": "{total}",
+      "left": "{amount} $1 \\ %s"
+    },
+    "expected": "Exporting {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}:  of {total} frames, {amount} $1 \\ %s s left. Esc or click to cancel."
+  },
+  {
+    "message": "Exporting {name}: {done} of {total} frames, {left} s left. Esc or click to cancel.",
+    "args": {},
+    "expected": "Exporting undefined: undefined of undefined frames, undefined s left. Esc or click to cancel."
+  },
+  {
+    "message": "Describe the sound…",
+    "args": {},
+    "expected": "Describe the sound…"
+  },
+  {
+    "message": "Describe how it moves…",
+    "args": {},
+    "expected": "Describe how it moves…"
+  },
+  {
+    "message": "Describe the change…",
+    "args": {},
+    "expected": "Describe the change…"
+  },
+  {
+    "message": "Add audio reference",
+    "args": {},
+    "expected": "Add audio reference"
+  },
+  {
+    "message": "Add image reference",
+    "args": {},
+    "expected": "Add image reference"
+  },
+  {
+    "message": "Add media reference",
+    "args": {},
+    "expected": "Add media reference"
+  },
+  {
+    "message": "Add video reference",
+    "args": {},
+    "expected": "Add video reference"
+  },
+  {
+    "message": "Add section",
+    "args": {},
+    "expected": "Add section"
+  },
+  {
+    "message": "Continuity with surrounding sections",
+    "args": {},
+    "expected": "Continuity with surrounding sections"
+  },
+  {
+    "message": "Duration (seconds)",
+    "args": {},
+    "expected": "Duration (seconds)"
+  },
+  {
+    "message": "The saved arrangement is invalid and was not loaded: {why}",
+    "args": {
+      "why": "<why>"
+    },
+    "expected": "The saved arrangement is invalid and was not loaded: <why>"
+  },
+  {
+    "message": "The saved arrangement is invalid and was not loaded: {why}",
+    "args": {
+      "why": "{why}"
+    },
+    "expected": "The saved arrangement is invalid and was not loaded: {why}"
+  },
+  {
+    "message": "The saved arrangement is invalid and was not loaded: {why}",
+    "args": {
+      "why": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "The saved arrangement is invalid and was not loaded: {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+  },
+  {
+    "message": "The saved arrangement is invalid and was not loaded: {why}",
+    "args": {},
+    "expected": "The saved arrangement is invalid and was not loaded: undefined"
+  },
+  {
+    "message": "Each section supports up to 30 lines of 200 characters.",
+    "args": {},
+    "expected": "Each section supports up to 30 lines of 200 characters."
+  },
+  {
+    "message": "Use an HTTP(S) audio URL without credentials.",
+    "args": {},
+    "expected": "Use an HTTP(S) audio URL without credentials."
+  },
+  {
+    "message": "The composition must be at most 10 minutes.",
+    "args": {},
+    "expected": "The composition must be at most 10 minutes."
+  },
+  {
+    "message": "The audio reference window must be positive and at most 30 seconds.",
+    "args": {},
+    "expected": "The audio reference window must be positive and at most 30 seconds."
+  },
+  {
+    "message": "Automatic",
+    "args": {},
+    "expected": "Automatic"
+  },
+  {
+    "message": "Very high",
+    "args": {},
+    "expected": "Very high"
+  },
+  {
+    "message": "Lyrics and performance directions",
+    "args": {},
+    "expected": "Lyrics and performance directions"
+  },
+  {
+    "message": "Move up",
+    "args": {},
+    "expected": "Move up"
+  },
+  {
+    "message": "Arrange sections",
+    "args": {},
+    "expected": "Arrange sections"
+  },
+  {
+    "message": "End (optional)",
+    "args": {},
+    "expected": "End (optional)"
+  },
+  {
+    "message": "Up to 30s",
+    "args": {},
+    "expected": "Up to 30s"
+  },
+  {
+    "message": "Start (seconds)",
+    "args": {},
+    "expected": "Start (seconds)"
+  },
+  {
+    "message": "Reference strength",
+    "args": {},
+    "expected": "Reference strength"
+  },
+  {
+    "message": "Audio reference URL (optional)",
+    "args": {},
+    "expected": "Audio reference URL (optional)"
+  },
+  {
+    "message": "Remove",
+    "args": {},
+    "expected": "Remove"
+  },
+  {
+    "message": "Save arrangement",
+    "args": {},
+    "expected": "Save arrangement"
+  },
+  {
+    "message": "Section {number}",
+    "args": {
+      "number": "<number>"
+    },
+    "expected": "Section <number>"
+  },
+  {
+    "message": "Section {number}",
+    "args": {
+      "number": "{number}"
+    },
+    "expected": "Section {number}"
+  },
+  {
+    "message": "Section {number}",
+    "args": {
+      "number": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Section {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+  },
+  {
+    "message": "Section {number}",
+    "args": {},
+    "expected": "Section undefined"
+  },
+  {
+    "message": "{count} sections",
+    "args": {
+      "count": "5"
+    },
+    "expected": "5 sections"
+  },
+  {
+    "message": "{count} sections",
+    "args": {
+      "count": "{count}"
+    },
+    "expected": "{count} sections"
+  },
+  {
+    "message": "{count} sections",
+    "args": {
+      "count": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} sections"
+  },
+  {
+    "message": "{count} sections",
+    "args": {},
+    "expected": "undefined sections"
+  },
+  {
+    "message": "Build up to {most} sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total: {total} seconds.",
+    "args": {
+      "most": "<most>",
+      "total": "<total>"
+    },
+    "expected": "Build up to <most> sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total: <total> seconds."
+  },
+  {
+    "message": "Build up to {most} sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total: {total} seconds.",
+    "args": {
+      "most": "{most}",
+      "total": "{amount} $1 \\ %s"
+    },
+    "expected": "Build up to {most} sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total: {amount} $1 \\ %s seconds."
+  },
+  {
+    "message": "Build up to {most} sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total: {total} seconds.",
+    "args": {
+      "most": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "total": ""
+    },
+    "expected": "Build up to {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total:  seconds."
+  },
+  {
+    "message": "Build up to {most} sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total: {total} seconds.",
+    "args": {},
+    "expected": "Build up to undefined sections, each 3–120 seconds. For instrumental sections, use an instrumental direction and leave out lyrics. Total: undefined seconds."
+  },
+  {
+    "message": "Musical styles (comma separated)",
+    "args": {},
+    "expected": "Musical styles (comma separated)"
+  },
+  {
+    "message": "Styles to avoid (comma separated)",
+    "args": {},
+    "expected": "Styles to avoid (comma separated)"
+  },
+  {
+    "message": "Music arrangement",
+    "args": {},
+    "expected": "Music arrangement"
+  },
+  {
+    "message": "Close (Esc)",
+    "args": {},
+    "expected": "Close (Esc)"
+  },
+  {
+    "message": "Northroom is still connecting to your account. Try again in a moment.",
+    "args": {},
+    "expected": "Northroom is still connecting to your account. Try again in a moment."
+  },
+  {
+    "message": "Describe what you want to create.",
+    "args": {},
+    "expected": "Describe what you want to create."
+  },
+  {
+    "message": "Add a short description for this arrangement.",
+    "args": {},
+    "expected": "Add a short description for this arrangement."
+  },
+  {
+    "message": "Describe the change in a few more words.",
+    "args": {},
+    "expected": "Describe the change in a few more words."
+  },
+  {
+    "message": "Generated audio",
+    "args": {},
+    "expected": "Generated audio"
+  },
+  {
+    "message": "Generated image",
+    "args": {},
+    "expected": "Generated image"
+  },
+  {
+    "message": "Generated video",
+    "args": {},
+    "expected": "Generated video"
+  },
+  {
+    "message": "Generate",
+    "args": {},
+    "expected": "Generate"
+  },
+  {
+    "message": "Costs {price} (Enter)",
+    "args": {
+      "price": "<price>"
+    },
+    "expected": "Costs <price> (Enter)"
+  },
+  {
+    "message": "Costs {price} (Enter)",
+    "args": {
+      "price": "{price}"
+    },
+    "expected": "Costs {price} (Enter)"
+  },
+  {
+    "message": "Costs {price} (Enter)",
+    "args": {
+      "price": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Costs {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} (Enter)"
+  },
+  {
+    "message": "Costs {price} (Enter)",
+    "args": {},
+    "expected": "Costs undefined (Enter)"
+  },
+  {
+    "message": "Generate (Enter)",
+    "args": {},
+    "expected": "Generate (Enter)"
+  },
+  {
+    "message": "{model} takes at most {most} images.",
+    "args": {
+      "model": "<model>",
+      "most": "<most>"
+    },
+    "expected": "<model> takes at most <most> images."
+  },
+  {
+    "message": "{model} takes at most {most} images.",
+    "args": {
+      "model": "{model}",
+      "most": "{amount} $1 \\ %s"
+    },
+    "expected": "{model} takes at most {amount} $1 \\ %s images."
+  },
+  {
+    "message": "{model} takes at most {most} images.",
+    "args": {
+      "model": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}",
+      "most": ""
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} takes at most  images."
+  },
+  {
+    "message": "{model} takes at most {most} images.",
+    "args": {},
+    "expected": "undefined takes at most undefined images."
+  },
+  {
+    "message": "Invalid input",
+    "args": {},
+    "expected": "Invalid input"
+  },
+  {
+    "message": "Invalid URL",
+    "args": {},
+    "expected": "Invalid URL"
+  },
+  {
+    "message": "Too big: expected array to have <={most} items",
+    "args": {
+      "most": "<most>"
+    },
+    "expected": "Too big: expected array to have <=<most> items"
+  },
+  {
+    "message": "Too big: expected array to have <={most} items",
+    "args": {
+      "most": "{most}"
+    },
+    "expected": "Too big: expected array to have <={most} items"
+  },
+  {
+    "message": "Too big: expected array to have <={most} items",
+    "args": {
+      "most": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Too big: expected array to have <={{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} items"
+  },
+  {
+    "message": "Too big: expected array to have <={most} items",
+    "args": {},
+    "expected": "Too big: expected array to have <=undefined items"
+  },
+  {
+    "message": "Too small: expected number to be >{least}",
+    "args": {
+      "least": "<least>"
+    },
+    "expected": "Too small: expected number to be ><least>"
+  },
+  {
+    "message": "Too small: expected number to be >{least}",
+    "args": {
+      "least": "{least}"
+    },
+    "expected": "Too small: expected number to be >{least}"
+  },
+  {
+    "message": "Too small: expected number to be >{least}",
+    "args": {
+      "least": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Too small: expected number to be >{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+  },
+  {
+    "message": "Too small: expected number to be >{least}",
+    "args": {},
+    "expected": "Too small: expected number to be >undefined"
+  },
+  {
+    "message": "Too small: expected number to be >={least}",
+    "args": {
+      "least": "<least>"
+    },
+    "expected": "Too small: expected number to be >=<least>"
+  },
+  {
+    "message": "Too small: expected number to be >={least}",
+    "args": {
+      "least": "{least}"
+    },
+    "expected": "Too small: expected number to be >={least}"
+  },
+  {
+    "message": "Too small: expected number to be >={least}",
+    "args": {
+      "least": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Too small: expected number to be >={{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+  },
+  {
+    "message": "Too small: expected number to be >={least}",
+    "args": {},
+    "expected": "Too small: expected number to be >=undefined"
+  },
+  {
+    "message": "Too big: expected number to be <={most}",
+    "args": {
+      "most": "<most>"
+    },
+    "expected": "Too big: expected number to be <=<most>"
+  },
+  {
+    "message": "Too big: expected number to be <={most}",
+    "args": {
+      "most": "{most}"
+    },
+    "expected": "Too big: expected number to be <={most}"
+  },
+  {
+    "message": "Too big: expected number to be <={most}",
+    "args": {
+      "most": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Too big: expected number to be <={{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+  },
+  {
+    "message": "Too big: expected number to be <={most}",
+    "args": {},
+    "expected": "Too big: expected number to be <=undefined"
+  },
+  {
+    "message": "Too big: expected string to have <={most} characters",
+    "args": {
+      "most": "<most>"
+    },
+    "expected": "Too big: expected string to have <=<most> characters"
+  },
+  {
+    "message": "Too big: expected string to have <={most} characters",
+    "args": {
+      "most": "{most}"
+    },
+    "expected": "Too big: expected string to have <={most} characters"
+  },
+  {
+    "message": "Too big: expected string to have <={most} characters",
+    "args": {
+      "most": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Too big: expected string to have <={{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} characters"
+  },
+  {
+    "message": "Too big: expected string to have <={most} characters",
+    "args": {},
+    "expected": "Too big: expected string to have <=undefined characters"
+  },
+  {
+    "message": "Invalid input: expected int, received number",
+    "args": {},
+    "expected": "Invalid input: expected int, received number"
+  },
+  {
+    "message": "Audio",
+    "args": {},
+    "expected": "Audio"
+  },
+  {
+    "message": "Image",
+    "args": {},
+    "expected": "Image"
+  },
+  {
+    "message": "Video",
+    "args": {},
+    "expected": "Video"
+  },
+  {
+    "message": "Composition plans and seeds require composition mode.",
+    "args": {},
+    "expected": "Composition plans and seeds require composition mode."
+  },
+  {
+    "message": "Duration and instrumental controls apply to prompt mode; use section settings in composition mode.",
+    "args": {},
+    "expected": "Duration and instrumental controls apply to prompt mode; use section settings in composition mode."
+  },
+  {
+    "message": "Add at least one music section.",
+    "args": {},
+    "expected": "Add at least one music section."
+  },
+  {
+    "message": "Generation isn’t ready in this build",
+    "args": {},
+    "expected": "Generation isn’t ready in this build"
+  },
+  {
+    "message": "Nothing was sent and nothing was charged.",
+    "args": {},
+    "expected": "Nothing was sent and nothing was charged."
+  },
+  {
+    "message": "Auto",
+    "args": {},
+    "expected": "Auto"
+  },
+  {
+    "message": "All",
+    "args": {},
+    "expected": "All"
+  },
+  {
+    "message": "No media in this folder",
+    "args": {},
+    "expected": "No media in this folder"
+  },
+  {
+    "message": "No tagged files in this folder",
+    "args": {},
+    "expected": "No tagged files in this folder"
+  },
+  {
+    "message": "Files",
+    "args": {},
+    "expected": "Files"
+  },
+  {
+    "message": "Remove preset",
+    "args": {},
+    "expected": "Remove preset"
+  },
+  {
+    "message": "Tagged",
+    "args": {},
+    "expected": "Tagged"
+  },
+  {
+    "message": "Untitled audio",
+    "args": {},
+    "expected": "Untitled audio"
+  },
+  {
+    "message": "Untitled image",
+    "args": {},
+    "expected": "Untitled image"
+  },
+  {
+    "message": "Untitled video",
+    "args": {},
+    "expected": "Untitled video"
+  },
+  {
+    "message": "Describe the audio you want…",
+    "args": {},
+    "expected": "Describe the audio you want…"
+  },
+  {
+    "message": "Describe the image you want…",
+    "args": {},
+    "expected": "Describe the image you want…"
+  },
+  {
+    "message": "Describe the video you want…",
+    "args": {},
+    "expected": "Describe the video you want…"
+  },
+  {
+    "message": "“{title}” can’t be used as a reference",
+    "args": {
+      "title": "<title>"
+    },
+    "expected": "“<title>” can’t be used as a reference"
+  },
+  {
+    "message": "“{title}” can’t be used as a reference",
+    "args": {
+      "title": "{title}"
+    },
+    "expected": "“{title}” can’t be used as a reference"
+  },
+  {
+    "message": "“{title}” can’t be used as a reference",
+    "args": {
+      "title": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "“{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}” can’t be used as a reference"
+  },
+  {
+    "message": "“{title}” can’t be used as a reference",
+    "args": {},
+    "expected": "“undefined” can’t be used as a reference"
+  },
+  {
+    "message": "Use a PNG, JPEG, WebP or GIF picture, an MP4, MOV or WebM video, or an MP3, WAV, M4A, OGG or FLAC sound.",
+    "args": {},
+    "expected": "Use a PNG, JPEG, WebP or GIF picture, an MP4, MOV or WebM video, or an MP3, WAV, M4A, OGG or FLAC sound."
+  },
+  {
+    "message": "The selected model does not accept references.",
+    "args": {},
+    "expected": "The selected model does not accept references."
+  },
+  {
+    "message": "s",
+    "args": {},
+    "expected": "s"
+  },
+  {
+    "message": "Random",
+    "args": {},
+    "expected": "Random"
+  },
+  {
+    "message": "{setting} is out of range.",
+    "args": {
+      "setting": "<setting>"
+    },
+    "expected": "<setting> is out of range."
+  },
+  {
+    "message": "{setting} is out of range.",
+    "args": {
+      "setting": "{setting}"
+    },
+    "expected": "{setting} is out of range."
+  },
+  {
+    "message": "{setting} is out of range.",
+    "args": {
+      "setting": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} is out of range."
+  },
+  {
+    "message": "{setting} is out of range.",
+    "args": {},
+    "expected": "undefined is out of range."
+  },
+  {
+    "message": "Add",
+    "args": {},
+    "expected": "Add"
+  },
+  {
+    "message": "Select a source video before generating audio.",
+    "args": {},
+    "expected": "Select a source video before generating audio."
+  },
+  {
+    "message": "Couldn’t stop the generation",
+    "args": {},
+    "expected": "Couldn’t stop the generation"
+  },
+  {
+    "message": "Generating {percent}%",
+    "args": {
+      "percent": "<percent>"
+    },
+    "expected": "Generating <percent>%"
+  },
+  {
+    "message": "Generating {percent}%",
+    "args": {
+      "percent": "{percent}"
+    },
+    "expected": "Generating {percent}%"
+  },
+  {
+    "message": "Generating {percent}%",
+    "args": {
+      "percent": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Generating {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}%"
+  },
+  {
+    "message": "Generating {percent}%",
+    "args": {},
+    "expected": "Generating undefined%"
+  },
+  {
+    "message": "Generating…",
+    "args": {},
+    "expected": "Generating…"
+  },
+  {
+    "message": "Ad",
+    "args": {},
+    "expected": "Ad"
+  },
+  {
+    "message": "Age",
+    "args": {},
+    "expected": "Age"
+  },
+  {
+    "message": "Announcer",
+    "args": {},
+    "expected": "Announcer"
+  },
+  {
+    "message": "Any",
+    "args": {},
+    "expected": "Any"
+  },
+  {
+    "message": "Character",
+    "args": {},
+    "expected": "Character"
+  },
+  {
+    "message": "Clear",
+    "args": {},
+    "expected": "Clear"
+  },
+  {
+    "message": "Female",
+    "args": {},
+    "expected": "Female"
+  },
+  {
+    "message": "Filters",
+    "args": {},
+    "expected": "Filters"
+  },
+  {
+    "message": "Gender",
+    "args": {},
+    "expected": "Gender"
+  },
+  {
+    "message": "Male",
+    "args": {},
+    "expected": "Male"
+  },
+  {
+    "message": "Middle",
+    "args": {},
+    "expected": "Middle"
+  },
+  {
+    "message": "Choose a voice before generating.",
+    "args": {},
+    "expected": "Choose a voice before generating."
+  },
+  {
+    "message": "Narration",
+    "args": {},
+    "expected": "Narration"
+  },
+  {
+    "message": "No voices found",
+    "args": {},
+    "expected": "No voices found"
+  },
+  {
+    "message": "Could not play the voice preview",
+    "args": {},
+    "expected": "Could not play the voice preview"
+  },
+  {
+    "message": "Purpose",
+    "args": {},
+    "expected": "Purpose"
+  },
+  {
+    "message": "Search voices",
+    "args": {},
+    "expected": "Search voices"
+  },
+  {
+    "message": "Select voice",
+    "args": {},
+    "expected": "Select voice"
+  },
+  {
+    "message": "Social",
+    "args": {},
+    "expected": "Social"
+  },
+  {
+    "message": "Story",
+    "args": {},
+    "expected": "Story"
+  },
+  {
+    "message": "Young",
+    "args": {},
+    "expected": "Young"
+  },
+  {
+    "message": "About Northroom",
+    "args": {},
+    "expected": "About Northroom"
+  },
+  {
+    "message": "Add column",
+    "args": {},
+    "expected": "Add column"
+  },
+  {
+    "message": "Add row below",
+    "args": {},
+    "expected": "Add row below"
+  },
+  {
+    "message": "AI Connections…",
+    "args": {},
+    "expected": "AI Connections…"
+  },
+  {
+    "message": "Back",
+    "args": {},
+    "expected": "Back"
+  },
+  {
+    "message": "Use Board order",
+    "args": {},
+    "expected": "Use Board order"
+  },
+  {
+    "message": "Bring All to Front",
+    "args": {},
+    "expected": "Bring All to Front"
+  },
+  {
+    "message": "Close Tab",
+    "args": {},
+    "expected": "Close Tab"
+  },
+  {
+    "message": "Command Palette",
+    "args": {},
+    "expected": "Command Palette"
+  },
+  {
+    "message": "Copy",
+    "args": {},
+    "expected": "Copy"
+  },
+  {
+    "message": "Cut",
+    "args": {},
+    "expected": "Cut"
+  },
+  {
+    "message": "Delete column",
+    "args": {},
+    "expected": "Delete column"
+  },
+  {
+    "message": "Delete row",
+    "args": {},
+    "expected": "Delete row"
+  },
+  {
+    "message": "Duplicate",
+    "args": {},
+    "expected": "Duplicate"
+  },
+  {
+    "message": "Edit",
+    "args": {},
+    "expected": "Edit"
+  },
+  {
+    "message": "Filter this folder by tag",
+    "args": {},
+    "expected": "Filter this folder by tag"
+  },
+  {
+    "message": "Keep folders on top",
+    "args": {},
+    "expected": "Keep folders on top"
+  },
+  {
+    "message": "Forward",
+    "args": {},
+    "expected": "Forward"
+  },
+  {
+    "message": "Help",
+    "args": {},
+    "expected": "Help"
+  },
+  {
+    "message": "Show or Hide Hidden Files",
+    "args": {},
+    "expected": "Show or Hide Hidden Files"
+  },
+  {
+    "message": "Hide Northroom",
+    "args": {},
+    "expected": "Hide Northroom"
+  },
+  {
+    "message": "Hide Others",
+    "args": {},
+    "expected": "Hide Others"
+  },
+  {
+    "message": "Import…",
+    "args": {},
+    "expected": "Import…"
+  },
+  {
+    "message": "Log out",
+    "args": {},
+    "expected": "Log out"
+  },
+  {
+    "message": "Minimize",
+    "args": {},
+    "expected": "Minimize"
+  },
+  {
+    "message": "Move column left",
+    "args": {},
+    "expected": "Move column left"
+  },
+  {
+    "message": "Move column right",
+    "args": {},
+    "expected": "Move column right"
+  },
+  {
+    "message": "Move to Trash",
+    "args": {},
+    "expected": "Move to Trash"
+  },
+  {
+    "message": "New page",
+    "args": {},
+    "expected": "New page"
+  },
+  {
+    "message": "New Tab",
+    "args": {},
+    "expected": "New Tab"
+  },
+  {
+    "message": "New tag…",
+    "args": {},
+    "expected": "New tag…"
+  },
+  {
+    "message": "New terminal",
+    "args": {},
+    "expected": "New terminal"
+  },
+  {
+    "message": "New timeline",
+    "args": {},
+    "expected": "New timeline"
+  },
+  {
+    "message": "No tags yet",
+    "args": {},
+    "expected": "No tags yet"
+  },
+  {
+    "message": "Northroom Help",
+    "args": {},
+    "expected": "Northroom Help"
+  },
+  {
+    "message": "Open",
+    "args": {},
+    "expected": "Open"
+  },
+  {
+    "message": "Open Diagnostic Logs",
+    "args": {},
+    "expected": "Open Diagnostic Logs"
+  },
+  {
+    "message": "Open Northroom",
+    "args": {},
+    "expected": "Open Northroom"
+  },
+  {
+    "message": "Paste",
+    "args": {},
+    "expected": "Paste"
+  },
+  {
+    "message": "Paste and Match Style",
+    "args": {},
+    "expected": "Paste and Match Style"
+  },
+  {
+    "message": "Quit Northroom",
+    "args": {},
+    "expected": "Quit Northroom"
+  },
+  {
+    "message": "Redo",
+    "args": {},
+    "expected": "Redo"
+  },
+  {
+    "message": "Reload",
+    "args": {},
+    "expected": "Reload"
+  },
+  {
+    "message": "Rename",
+    "args": {},
+    "expected": "Rename"
+  },
+  {
+    "message": "Restore default view",
+    "args": {},
+    "expected": "Restore default view"
+  },
+  {
+    "message": "Select All",
+    "args": {},
+    "expected": "Select All"
+  },
+  {
+    "message": "Services",
+    "args": {},
+    "expected": "Services"
+  },
+  {
+    "message": "Settings…",
+    "args": {},
+    "expected": "Settings…"
+  },
+  {
+    "message": "Show All",
+    "args": {},
+    "expected": "Show All"
+  },
+  {
+    "message": "Show columns",
+    "args": {},
+    "expected": "Show columns"
+  },
+  {
+    "message": "Speech",
+    "args": {},
+    "expected": "Speech"
+  },
+  {
+    "message": "Start Speaking",
+    "args": {},
+    "expected": "Start Speaking"
+  },
+  {
+    "message": "Stop Speaking",
+    "args": {},
+    "expected": "Stop Speaking"
+  },
+  {
+    "message": "Tags",
+    "args": {},
+    "expected": "Tags"
+  },
+  {
+    "message": "Toggle Full Screen",
+    "args": {},
+    "expected": "Toggle Full Screen"
+  },
+  {
+    "message": "Turn into",
+    "args": {},
+    "expected": "Turn into"
+  },
+  {
+    "message": "Undo",
+    "args": {},
+    "expected": "Undo"
+  },
+  {
+    "message": "View",
+    "args": {},
+    "expected": "View"
+  },
+  {
+    "message": "as Board",
+    "args": {},
+    "expected": "as Board"
+  },
+  {
+    "message": "as Columns",
+    "args": {},
+    "expected": "as Columns"
+  },
+  {
+    "message": "as List",
+    "args": {},
+    "expected": "as List"
+  },
+  {
+    "message": "Window",
+    "args": {},
+    "expected": "Window"
+  },
+  {
+    "message": "Zoom",
+    "args": {},
+    "expected": "Zoom"
+  },
+  {
+    "message": "Invoices, payment confirmations, and billing issues",
+    "args": {},
+    "expected": "Invoices, payment confirmations, and billing issues"
+  },
+  {
+    "message": "Billing & Payments",
+    "args": {},
+    "expected": "Billing & Payments"
+  },
+  {
+    "message": "Tips, inspiration, and the occasional roundup",
+    "args": {},
+    "expected": "Tips, inspiration, and the occasional roundup"
+  },
+  {
+    "message": "Newsletter",
+    "args": {},
+    "expected": "Newsletter"
+  },
+  {
+    "message": "New features, improvements, and announcements",
+    "args": {},
+    "expected": "New features, improvements, and announcements"
+  },
+  {
+    "message": "Product Updates",
+    "args": {},
+    "expected": "Product Updates"
+  },
+  {
+    "message": "Discounts, upgrade offers, and limited-time deals",
+    "args": {},
+    "expected": "Discounts, upgrade offers, and limited-time deals"
+  },
+  {
+    "message": "Promotions",
+    "args": {},
+    "expected": "Promotions"
+  },
+  {
+    "message": "Account security alerts and login notifications",
+    "args": {},
+    "expected": "Account security alerts and login notifications"
+  },
+  {
+    "message": "Security",
+    "args": {},
+    "expected": "Security"
+  },
+  {
+    "message": "Balance and auto top-up notifications",
+    "args": {},
+    "expected": "Balance and auto top-up notifications"
+  },
+  {
+    "message": "Usage Alerts",
+    "args": {},
+    "expected": "Usage Alerts"
+  },
+  {
+    "message": "Failed to load notification preferences. Reload the page before making changes.",
+    "args": {},
+    "expected": "Failed to load notification preferences. Reload the page before making changes."
+  },
+  {
+    "message": "Notifications",
+    "args": {},
+    "expected": "Notifications"
+  },
+  {
+    "message": "Email",
+    "args": {},
+    "expected": "Email"
+  },
+  {
+    "message": "In-App",
+    "args": {},
+    "expected": "In-App"
+  },
+  {
+    "message": "Push",
+    "args": {},
+    "expected": "Push"
+  },
+  {
+    "message": "Failed to update notification preference",
+    "args": {},
+    "expected": "Failed to update notification preference"
+  },
+  {
+    "message": "Use a folder I already have",
+    "args": {},
+    "expected": "Use a folder I already have"
+  },
+  {
+    "message": "Couldn’t open the workspace folder.",
+    "args": {},
+    "expected": "Couldn’t open the workspace folder."
+  },
+  {
+    "message": "Northroom shows the files in one folder on your Mac. Start makes that folder for you, called Northroom.",
+    "args": {},
+    "expected": "Northroom shows the files in one folder on your Mac. Start makes that folder for you, called Northroom."
+  },
+  {
+    "message": "This folder is no longer available.",
+    "args": {},
+    "expected": "This folder is no longer available."
+  },
+  {
+    "message": "Northroom cannot read and write this folder. Choose another one.",
+    "args": {},
+    "expected": "Northroom cannot read and write this folder. Choose another one."
+  },
+  {
+    "message": "You can change this folder later in Settings → Account.",
+    "args": {},
+    "expected": "You can change this folder later in Settings → Account."
+  },
+  {
+    "message": "Choose",
+    "args": {},
+    "expected": "Choose"
+  },
+  {
+    "message": "Start",
+    "args": {},
+    "expected": "Start"
+  },
+  {
+    "message": "Northroom couldn’t make its folder. Use a folder you already have.",
+    "args": {},
+    "expected": "Northroom couldn’t make its folder. Use a folder you already have."
+  },
+  {
+    "message": "Welcome to Northroom",
+    "args": {},
+    "expected": "Welcome to Northroom"
+  },
+  {
+    "message": "This folder is no longer available. Reconnect its drive or choose another folder.",
+    "args": {},
+    "expected": "This folder is no longer available. Reconnect its drive or choose another folder."
+  },
+  {
+    "message": "Basic blocks",
+    "args": {},
+    "expected": "Basic blocks"
+  },
+  {
+    "message": "Bulleted list",
+    "args": {},
+    "expected": "Bulleted list"
+  },
+  {
+    "message": "Code",
+    "args": {},
+    "expected": "Code"
+  },
+  {
+    "message": "Divider",
+    "args": {},
+    "expected": "Divider"
+  },
+  {
+    "message": "Heading 1",
+    "args": {},
+    "expected": "Heading 1"
+  },
+  {
+    "message": "Heading 3",
+    "args": {},
+    "expected": "Heading 3"
+  },
+  {
+    "message": "Heading 2",
+    "args": {},
+    "expected": "Heading 2"
+  },
+  {
+    "message": "Numbered list",
+    "args": {},
+    "expected": "Numbered list"
+  },
+  {
+    "message": "Quote",
+    "args": {},
+    "expected": "Quote"
+  },
+  {
+    "message": "Table",
+    "args": {},
+    "expected": "Table"
+  },
+  {
+    "message": "Text",
+    "args": {},
+    "expected": "Text"
+  },
+  {
+    "message": "To-do list",
+    "args": {},
+    "expected": "To-do list"
+  },
+  {
+    "message": "Add a caption",
+    "args": {},
+    "expected": "Add a caption"
+  },
+  {
+    "message": "Board media",
+    "args": {},
+    "expected": "Board media"
+  },
+  {
+    "message": "Workspace",
+    "args": {},
+    "expected": "Workspace"
+  },
+  {
+    "message": "No matching commands",
+    "args": {},
+    "expected": "No matching commands"
+  },
+  {
+    "message": "Type a command…",
+    "args": {},
+    "expected": "Type a command…"
+  },
+  {
+    "message": "Off",
+    "args": {},
+    "expected": "Off"
+  },
+  {
+    "message": "Date Created",
+    "args": {},
+    "expected": "Date Created"
+  },
+  {
+    "message": "Dimensions",
+    "args": {},
+    "expected": "Dimensions"
+  },
+  {
+    "message": "Duration",
+    "args": {},
+    "expected": "Duration"
+  },
+  {
+    "message": "Kind",
+    "args": {},
+    "expected": "Kind"
+  },
+  {
+    "message": "Date Modified",
+    "args": {},
+    "expected": "Date Modified"
+  },
+  {
+    "message": "Size",
+    "args": {},
+    "expected": "Size"
+  },
+  {
+    "message": "Last Used in Northroom",
+    "args": {},
+    "expected": "Last Used in Northroom"
+  },
+  {
+    "message": "Captions",
+    "args": {},
+    "expected": "Captions"
+  },
+  {
+    "message": "Download",
+    "args": {},
+    "expected": "Download"
+  },
+  {
+    "message": "Picture in Picture",
+    "args": {},
+    "expected": "Picture in Picture"
+  },
+  {
+    "message": "Playback speed",
+    "args": {},
+    "expected": "Playback speed"
+  },
+  {
+    "message": "Normal",
+    "args": {},
+    "expected": "Normal"
+  },
+  {
+    "message": "Display Name",
+    "args": {},
+    "expected": "Display Name"
+  },
+  {
+    "message": "Enter your name",
+    "args": {},
+    "expected": "Enter your name"
+  },
+  {
+    "message": "Failed to load your profile. Reload the page before making changes.",
+    "args": {},
+    "expected": "Failed to load your profile. Reload the page before making changes."
+  },
+  {
+    "message": "Profile",
+    "args": {},
+    "expected": "Profile"
+  },
+  {
+    "message": "Failed to save profile",
+    "args": {},
+    "expected": "Failed to save profile"
+  },
+  {
+    "message": "Timezone",
+    "args": {},
+    "expected": "Timezone"
+  },
+  {
+    "message": "Account Settings",
+    "args": {},
+    "expected": "Account Settings"
+  },
+  {
+    "message": "Settings",
+    "args": {},
+    "expected": "Settings"
+  },
+  {
+    "message": "Ended",
+    "args": {},
+    "expected": "Ended"
+  },
+  {
+    "message": "Finished",
+    "args": {},
+    "expected": "Finished"
+  },
+  {
+    "message": "Idle",
+    "args": {},
+    "expected": "Idle"
+  },
+  {
+    "message": "Needs you",
+    "args": {},
+    "expected": "Needs you"
+  },
+  {
+    "message": "Starting",
+    "args": {},
+    "expected": "Starting"
+  },
+  {
+    "message": "Working",
+    "args": {},
+    "expected": "Working"
+  },
+  {
+    "message": "Add its folder to your PATH, then press Return to try again.",
+    "args": {},
+    "expected": "Add its folder to your PATH, then press Return to try again."
+  },
+  {
+    "message": "{label} ended. Press Return to start it again.",
+    "args": {
+      "label": "<label>"
+    },
+    "expected": "<label> ended. Press Return to start it again."
+  },
+  {
+    "message": "{label} ended. Press Return to start it again.",
+    "args": {
+      "label": "{label}"
+    },
+    "expected": "{label} ended. Press Return to start it again."
+  },
+  {
+    "message": "{label} ended. Press Return to start it again.",
+    "args": {
+      "label": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} ended. Press Return to start it again."
+  },
+  {
+    "message": "{label} ended. Press Return to start it again.",
+    "args": {},
+    "expected": "undefined ended. Press Return to start it again."
+  },
+  {
+    "message": "{label} didn’t install. Press Return to try again.",
+    "args": {
+      "label": "<label>"
+    },
+    "expected": "<label> didn’t install. Press Return to try again."
+  },
+  {
+    "message": "{label} didn’t install. Press Return to try again.",
+    "args": {
+      "label": "{label}"
+    },
+    "expected": "{label} didn’t install. Press Return to try again."
+  },
+  {
+    "message": "{label} didn’t install. Press Return to try again.",
+    "args": {
+      "label": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} didn’t install. Press Return to try again."
+  },
+  {
+    "message": "{label} didn’t install. Press Return to try again.",
+    "args": {},
+    "expected": "undefined didn’t install. Press Return to try again."
+  },
+  {
+    "message": "{label} is installed. Starting it.",
+    "args": {
+      "label": "<label>"
+    },
+    "expected": "<label> is installed. Starting it."
+  },
+  {
+    "message": "{label} is installed. Starting it.",
+    "args": {
+      "label": "{label}"
+    },
+    "expected": "{label} is installed. Starting it."
+  },
+  {
+    "message": "{label} is installed. Starting it.",
+    "args": {
+      "label": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} is installed. Starting it."
+  },
+  {
+    "message": "{label} is installed. Starting it.",
+    "args": {},
+    "expected": "undefined is installed. Starting it."
+  },
+  {
+    "message": "{label} isn’t installed. Press Return to install it with:",
+    "args": {
+      "label": "<label>"
+    },
+    "expected": "<label> isn’t installed. Press Return to install it with:"
+  },
+  {
+    "message": "{label} isn’t installed. Press Return to install it with:",
+    "args": {
+      "label": "{label}"
+    },
+    "expected": "{label} isn’t installed. Press Return to install it with:"
+  },
+  {
+    "message": "{label} isn’t installed. Press Return to install it with:",
+    "args": {
+      "label": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} isn’t installed. Press Return to install it with:"
+  },
+  {
+    "message": "{label} isn’t installed. Press Return to install it with:",
+    "args": {},
+    "expected": "undefined isn’t installed. Press Return to install it with:"
+  },
+  {
+    "message": "{label} is installed, but your shell can’t find it.",
+    "args": {
+      "label": "<label>"
+    },
+    "expected": "<label> is installed, but your shell can’t find it."
+  },
+  {
+    "message": "{label} is installed, but your shell can’t find it.",
+    "args": {
+      "label": "{label}"
+    },
+    "expected": "{label} is installed, but your shell can’t find it."
+  },
+  {
+    "message": "{label} is installed, but your shell can’t find it.",
+    "args": {
+      "label": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} is installed, but your shell can’t find it."
+  },
+  {
+    "message": "{label} is installed, but your shell can’t find it.",
+    "args": {},
+    "expected": "undefined is installed, but your shell can’t find it."
+  },
+  {
+    "message": "Not running",
+    "args": {},
+    "expected": "Not running"
+  },
+  {
+    "message": "Timeline · edited {age} ago",
+    "args": {
+      "age": "<age>"
+    },
+    "expected": "Timeline · edited <age> ago"
+  },
+  {
+    "message": "Timeline · edited {age} ago",
+    "args": {
+      "age": "{age}"
+    },
+    "expected": "Timeline · edited {age} ago"
+  },
+  {
+    "message": "Timeline · edited {age} ago",
+    "args": {
+      "age": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Timeline · edited {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} ago"
+  },
+  {
+    "message": "Timeline · edited {age} ago",
+    "args": {},
+    "expected": "Timeline · edited undefined ago"
+  },
+  {
+    "message": "Timeline · edited just now",
+    "args": {},
+    "expected": "Timeline · edited just now"
+  },
+  {
+    "message": "Untitled timeline",
+    "args": {},
+    "expected": "Untitled timeline"
+  },
+  {
+    "message": "Close tab",
+    "args": {},
+    "expected": "Close tab"
+  },
+  {
+    "message": "Northroom {version} is available",
+    "args": {
+      "version": "<version>"
+    },
+    "expected": "Northroom <version> is available"
+  },
+  {
+    "message": "Northroom {version} is available",
+    "args": {
+      "version": "{version}"
+    },
+    "expected": "Northroom {version} is available"
+  },
+  {
+    "message": "Northroom {version} is available",
+    "args": {
+      "version": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Northroom {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} is available"
+  },
+  {
+    "message": "Northroom {version} is available",
+    "args": {},
+    "expected": "Northroom undefined is available"
+  },
+  {
+    "message": "Download the update now? You can keep working and restart when you're ready.",
+    "args": {},
+    "expected": "Download the update now? You can keep working and restart when you're ready."
+  },
+  {
+    "message": "Update available",
+    "args": {},
+    "expected": "Update available"
+  },
+  {
+    "message": "Downloading update…",
+    "args": {},
+    "expected": "Downloading update…"
+  },
+  {
+    "message": "Restart to update",
+    "args": {},
+    "expected": "Restart to update"
+  },
+  {
+    "message": "Download Update",
+    "args": {},
+    "expected": "Download Update"
+  },
+  {
+    "message": "Could not complete the update",
+    "args": {},
+    "expected": "Could not complete the update"
+  },
+  {
+    "message": "The update feed could not be reached.",
+    "args": {},
+    "expected": "The update feed could not be reached."
+  },
+  {
+    "message": "Later",
+    "args": {},
+    "expected": "Later"
+  },
+  {
+    "message": "Check for Updates…",
+    "args": {},
+    "expected": "Check for Updates…"
+  },
+  {
+    "message": "Checking for Updates…",
+    "args": {},
+    "expected": "Checking for Updates…"
+  },
+  {
+    "message": "Download Update…",
+    "args": {},
+    "expected": "Download Update…"
+  },
+  {
+    "message": "Downloading Update…",
+    "args": {},
+    "expected": "Downloading Update…"
+  },
+  {
+    "message": "Install Downloaded Update…",
+    "args": {},
+    "expected": "Install Downloaded Update…"
+  },
+  {
+    "message": "The update holds no {bundle} with this app's identifier.",
+    "args": {
+      "bundle": "<bundle>"
+    },
+    "expected": "The update holds no <bundle> with this app's identifier."
+  },
+  {
+    "message": "The update holds no {bundle} with this app's identifier.",
+    "args": {
+      "bundle": "{bundle}"
+    },
+    "expected": "The update holds no {bundle} with this app's identifier."
+  },
+  {
+    "message": "The update holds no {bundle} with this app's identifier.",
+    "args": {
+      "bundle": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "The update holds no {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} with this app's identifier."
+  },
+  {
+    "message": "The update holds no {bundle} with this app's identifier.",
+    "args": {},
+    "expected": "The update holds no undefined with this app's identifier."
+  },
+  {
+    "message": "The update has no zip for this Mac.",
+    "args": {},
+    "expected": "The update has no zip for this Mac."
+  },
+  {
+    "message": "No update has been downloaded and prepared for installation.",
+    "args": {},
+    "expected": "No update has been downloaded and prepared for installation."
+  },
+  {
+    "message": "The update could not be unpacked (ditto exited with {exit}).",
+    "args": {
+      "exit": "<exit>"
+    },
+    "expected": "The update could not be unpacked (ditto exited with <exit>)."
+  },
+  {
+    "message": "The update could not be unpacked (ditto exited with {exit}).",
+    "args": {
+      "exit": "{exit}"
+    },
+    "expected": "The update could not be unpacked (ditto exited with {exit})."
+  },
+  {
+    "message": "The update could not be unpacked (ditto exited with {exit}).",
+    "args": {
+      "exit": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "The update could not be unpacked (ditto exited with {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}})."
+  },
+  {
+    "message": "The update could not be unpacked (ditto exited with {exit}).",
+    "args": {},
+    "expected": "The update could not be unpacked (ditto exited with undefined)."
+  },
+  {
+    "message": "OK",
+    "args": {},
+    "expected": "OK"
+  },
+  {
+    "message": "Update ready to install",
+    "args": {},
+    "expected": "Update ready to install"
+  },
+  {
+    "message": "Save your work before restarting. If you choose Later, the update will install when you quit Northroom.",
+    "args": {},
+    "expected": "Save your work before restarting. If you choose Later, the update will install when you quit Northroom."
+  },
+  {
+    "message": "Restart and Install",
+    "args": {},
+    "expected": "Restart and Install"
+  },
+  {
+    "message": "Updates require an installed Northroom release.",
+    "args": {},
+    "expected": "Updates require an installed Northroom release."
+  },
+  {
+    "message": "You're up to date",
+    "args": {},
+    "expected": "You're up to date"
+  },
+  {
+    "message": "Northroom {version} is the latest version available for this device.",
+    "args": {
+      "version": "<version>"
+    },
+    "expected": "Northroom <version> is the latest version available for this device."
+  },
+  {
+    "message": "Northroom {version} is the latest version available for this device.",
+    "args": {
+      "version": "{version}"
+    },
+    "expected": "Northroom {version} is the latest version available for this device."
+  },
+  {
+    "message": "Northroom {version} is the latest version available for this device.",
+    "args": {
+      "version": "{{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}}"
+    },
+    "expected": "Northroom {{when:2026-11-19T15:04:00.000Z|Asia/Tokyo}} is the latest version available for this device."
+  },
+  {
+    "message": "Northroom {version} is the latest version available for this device.",
+    "args": {},
+    "expected": "Northroom undefined is the latest version available for this device."
+  }
+]

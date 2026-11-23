@@ -1,0 +1,172 @@
+name: "🪟 GPUI Shell"
+
+# Checks that the app behaves the same on Windows, Linux and the Mac (ADR-0001). Each runner lints
+# the core and shell workspaces (rustfmt, and clippy with warnings as errors, since each compiles
+# its own platform code) and runs the kit, shell, core and media tests.
+
+# Started by hand only, for a release or a platform code change. Three runners, one of them a Mac,
+# cost more than all other CI combined.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpui-shell-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Linux packages:
+  # - Xvfb and Mesa's lavapipe for a window with software Vulkan.
+  # - FreeType, linked by GPUI's font-kit.
+  # - ffmpeg, which makes the media test fixtures.
+  # - OpenSSL, the TLS for the shell's requests (`shell/src/transport.rs`).
+  # - GStreamer headers and the base, good, bad and libav plugins, which decode video and sound
+  #   for `core/src/media/linux` as a desktop install would. The ugly set adds x264, the H.264
+  #   encoder used by export (`core/src/media/linux/movie.rs`).
+  # - WebKitGTK (webkit2gtk-4.1, GTK 3), the page host's web view (`gpui/webhost/src/elsewhere`).
+  # - The system SQLite for `core/src/sheets/sqlite.rs`. Every WebKitGTK desktop has the library.
+  # - Noto CJK and Noto Color Emoji, the fallback faces for `core/src/terminal_glyphs.rs`. The
+  #   runner image has neither.
+  LINUX_PACKAGES: >-
+    pkg-config libssl-dev libfreetype-dev libfontconfig-dev libxkbcommon-dev libxkbcommon-x11-dev
+    libx11-xcb-dev libxcb1-dev libwayland-dev libegl1 xvfb xauth mesa-vulkan-drivers libvulkan1
+    ffmpeg libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base
+    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+    libgtk-3-dev libwebkit2gtk-4.1-dev libsqlite3-dev fonts-noto-cjk fonts-noto-color-emoji
+
+jobs:
+  lint:
+    name: Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/native
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+          rustup show active-toolchain
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # split the package list on purpose
+          sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          key: lint
+          workspaces: |
+            apps/native/gpui -> target
+            apps/native/core -> target
+
+      - name: Format
+        run: |
+          (cd core && cargo fmt --check)
+          (cd gpui && cargo fmt --check)
+
+      - name: Clippy, warnings as errors
+        if: ${{ !cancelled() }}
+        run: |
+          (cd core && cargo clippy --locked -j 4 --all-targets -- -D warnings)
+          (cd gpui && cargo clippy --locked -j 4 --workspace --all-targets -- -D warnings)
+
+  tests:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/native
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+          rustup show active-toolchain
+
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # split the package list on purpose
+          sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+
+      - name: Install Windows tools
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Turn on Media Foundation
+        if: runner.os == 'Windows'
+        # `core/src/media/windows` reads video and sound through Media Foundation, which is an
+        # optional feature on Windows Server.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $feature = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction SilentlyContinue
+          if ($feature -and -not $feature.Installed) {
+            Install-WindowsFeature -Name Server-Media-Foundation
+          }
+          Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction SilentlyContinue
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/native/gpui -> target
+            apps/native/core -> target
+            apps/native/crates/northroom-media -> target
+
+      - name: Test kit and the shell
+        working-directory: apps/native/gpui
+        run: |
+          cargo test --release --locked -j 4 -p kit --lib
+          cargo test --release --locked -j 4 -p shell
+
+      - name: Test the core
+        working-directory: apps/native/core
+        run: cargo test --release --locked -j 4 --lib
+
+      - name: Test the core's media on this platform
+        # Compares the Windows and Linux media backends with FFmpeg on files made on the runner
+        # (`core/src/media/platform_tests.rs`) and reads back their movie writers
+        # (`core/src/media/movie_tests.rs`). The Mac backend is tested on a Mac. A stalled reader
+        # or writer fails its test after 1 minute. On Linux, tests still running 5 minutes after
+        # the build print every thread's stack and fail (`scripts/stacks-on-hang.sh`).
+        if: ${{ !cancelled() && runner.os != 'macOS' }}
+        timeout-minutes: 30
+        working-directory: apps/native/core
+        run: |
+          export NR_MEDIA_FIXTURES="$RUNNER_TEMP/media-fixtures"
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get install -y --no-install-recommends gdb
+            cargo test --release --locked -j 4 --lib --no-run
+            ../scripts/stacks-on-hang.sh 300 \
+              cargo test --release --locked -j 4 --lib media:: -- --include-ignored
+          else
+            cargo test --release --locked -j 4 --lib media:: -- --include-ignored
+          fi
+          cargo test --release --locked -j 4 --manifest-path ../crates/northroom-media/Cargo.toml --lib

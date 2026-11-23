@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script type="importmap">
+      { "imports": { "three": "{{three}}/three.module.js", "three/addons/": "{{three}}/addons/" } }
+    </script>
+  </head>
+  <body style="margin: 0; background: transparent">
+    <script type="module">
+      import * as THREE from "three";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      const say = (message) => window.__nrPost(message);
+      try {
+        /*{{script}}*/
+        // Each model when the host asks: its turn names the answer.
+        window.__nrDrawStill = async (address, turn) => {
+          try {
+            const bytes = await (await fetch(address)).arrayBuffer();
+            say({ turn, png: await drawStill(bytes) });
+          } catch (cause) {
+            say({ turn, error: String((cause && cause.message) || cause) });
+          }
+        };
+        say({ ready: true });
+      } catch (cause) {
+        say({ error: String((cause && cause.message) || cause) });
+      }
+    </script>
+  </body>
+</html>

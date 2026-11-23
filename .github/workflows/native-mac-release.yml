@@ -1,0 +1,134 @@
+name: Native Mac release
+
+# Builds signed, notarized release files. It leaves the public download and update feeds alone;
+# the maintainer publishes by hand (DECISIONS.md, ADR-0010).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-mac-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test, sign and notarize
+    runs-on: macos-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/native
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate the release version and platform
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          [ "$(uname -m)" = arm64 ] || { echo "This release requires an arm64 runner." >&2; exit 1; }
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release version." >&2; exit 1; }
+          case "$RELEASE_REF" in
+            "refs/tags/v$version" | "refs/tags/v$version-rc."[0-9]*) ;;
+            refs/tags/*)
+              echo "Run on a tag, this must be v$version or a candidate of it (core/Cargo.toml)." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Import the release certificate and notarization credentials
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID KEYCHAIN_PASSWORD; do
+            [ -n "${!name}" ] || { echo "Missing release secret: $name" >&2; exit 1; }
+          done
+          keychain_path="$RUNNER_TEMP/northroom-release.keychain-db"
+          certificate_path="$RUNNER_TEMP/northroom-release.p12"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          chmod 0600 "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path" >/dev/null
+          security list-keychains -d user -s "$keychain_path" "$HOME/Library/Keychains/login.keychain-db"
+          security default-keychain -d user -s "$keychain_path"
+          rm "$certificate_path"
+          identity=$(security find-identity -v -p codesigning "$keychain_path" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | grep -F " ($APPLE_TEAM_ID)")
+          [ "$(printf '%s\n' "$identity" | wc -l | tr -d ' ')" = 1 ] || { echo "Expected one Developer ID Application identity for the release team." >&2; exit 1; }
+          printf 'NR_SIGN_IDENTITY=%s\nNR_NOTARY_PROFILE=northroom-release\n' "$identity" >> "$GITHUB_ENV"
+          xcrun notarytool store-credentials northroom-release --keychain "$keychain_path" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_PASSWORD"
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+
+      - name: Cache Rust builds
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/native/core -> target
+            apps/native/gpui -> target
+
+      - name: Check formatting and lint
+        run: |
+          (cd core && ../scripts/with-build-lock.sh cargo fmt --check)
+          (cd gpui && ../scripts/with-build-lock.sh cargo fmt --check)
+          scripts/with-build-lock.sh cargo clippy --manifest-path core/Cargo.toml --locked -j 4 --all-targets -- -D warnings
+          scripts/with-build-lock.sh cargo clippy --manifest-path gpui/Cargo.toml --locked -j 4 --workspace --all-targets -- -D warnings
+
+      - name: Test the core and shell
+        run: |
+          scripts/with-build-lock.sh cargo test --manifest-path core/Cargo.toml --release --locked -j 4 --lib
+          scripts/with-build-lock.sh cargo test --manifest-path gpui/Cargo.toml --release --locked -j 4 -p kit --lib
+          scripts/with-build-lock.sh cargo test --manifest-path gpui/Cargo.toml --release --locked -j 4 -p shell
+
+      - name: Build, sign, notarize and verify Gatekeeper acceptance
+        run: scripts/release-mac.sh "$RUNNER_TEMP/northroom-release"
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-native-mac-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/northroom-release/Northroom-*.zip
+            ${{ runner.temp }}/northroom-release/native-mac.yml
+            ${{ runner.temp }}/northroom-release/release.log
+            ${{ runner.temp }}/northroom-release/notarytool.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload release diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-native-mac-diagnostics-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/northroom-release/*.log
+            ${{ runner.temp }}/northroom-release/notarytool*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db"
+          if [ -f "$RUNNER_TEMP/northroom-release.keychain-db" ]; then
+            security delete-keychain "$RUNNER_TEMP/northroom-release.keychain-db"
+          fi
+          rm -f "$RUNNER_TEMP/northroom-release.p12"

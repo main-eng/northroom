@@ -1,0 +1,138 @@
+name: "🚦 App CI"
+
+# Started by hand only. The same checks run locally before each push.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflow-lint:
+    name: Workflow Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz" \
+            | tar -xz actionlint
+
+      - name: Run actionlint
+        run: ./actionlint
+
+  # Format and lint the files the branch changed, and run the repo script tests.
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun and install dependencies
+        uses: ./.github/actions/setup-bun-deps
+
+      - name: Check the format of changed files
+        run: |
+          if [ -z "${QUALITY_BASE_SHA:-}" ]; then
+            QUALITY_BASE_SHA="$(git merge-base origin/master HEAD)"
+            if [ "$QUALITY_BASE_SHA" = "$GITHUB_SHA" ]; then
+              QUALITY_BASE_SHA="$(git rev-parse HEAD^)"
+            fi
+            export QUALITY_BASE_SHA
+          fi
+          bun run quality
+        env:
+          QUALITY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+
+      - name: Run repository script tests
+        run: bun run test:repo
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Check the cognitive complexity tool
+        working-directory: tools/cognitive-complexity
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+
+      - name: Hold every Rust function to cognitive complexity 10
+        run: cargo run --release --locked --manifest-path tools/cognitive-complexity/Cargo.toml
+
+  native-rust-quality:
+    name: Native Rust Quality (${{ matrix.workspace }})
+    runs-on: ubuntu-latest
+    # Most of this is a cold build of GPUI and the core.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [core, gpui]
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/native/${{ matrix.workspace }}
+    env:
+      # gpui-shell.yml's LINUX_PACKAGES minus what only its windowed checks need. Mesa's software
+      # Vulkan stands in for the GPU the runner lacks; the CJK and emoji faces are for the
+      # terminal glyph tests.
+      LINUX_PACKAGES: >-
+        pkg-config libssl-dev libfreetype-dev libfontconfig-dev libxkbcommon-dev
+        libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libwayland-dev libegl1 libvulkan1
+        mesa-vulkan-drivers
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base
+        libgtk-3-dev libwebkit2gtk-4.1-dev libsqlite3-dev fonts-noto-cjk fonts-noto-color-emoji
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' ../rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+          rustup show active-toolchain
+
+      - name: Install Linux packages
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # split the package list on purpose
+          sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/native/${{ matrix.workspace }} -> target
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked -j 4 --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: |
+          if [ "${{ matrix.workspace }}" = core ]; then
+            cargo test --release --locked -j 4 --lib
+          else
+            cargo test --release --locked -j 4 -p kit --lib
+            cargo test --release --locked -j 4 -p shell
+          fi

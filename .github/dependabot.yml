@@ -1,0 +1,52 @@
+# Dependabot reads this file from master. Each entry opens one monthly pull request for its
+# minor and patch updates; each major update gets its own.
+version: 2
+updates:
+  # The JavaScript workspace: the site and the repo scripts, with one bun.lock at the root.
+  # The cooldown matches bunfig.toml's minimumReleaseAge, so a proposed version always installs.
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      javascript:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Rust tools that run in CI. The apps/native workspaces build against patched GPUI crates,
+  # so their versions are bumped by hand.
+  - package-ecosystem: "cargo"
+    directories:
+      - "/tools/cognitive-complexity"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      rust:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Actions used by the workflows and by the composite actions under .github/actions.
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"

@@ -1,0 +1,274 @@
+name: "📦 Native packages"
+
+# Builds the Windows per-user setup (scripts/release-windows.sh --unsigned) and the Linux
+# AppImage (scripts/release-linux.sh --unsigned), both unsigned and marked NOT-FOR-RELEASE
+# (DECISIONS.md, ADR-0010). Each is installed and must start and draw its window
+# (scripts/starts-check.sh).
+#
+# Then the updater's end-to-end check (scripts/update-check.sh) runs with its own throwaway
+# signing certificate (Windows) or minisign key (Linux) and a feed on 127.0.0.1. It is
+# continue-on-error until it has passed on both platforms.
+#
+# Nothing here uses the release certificate or key, and output goes only to this run's
+# artifacts.
+
+# Started by hand only, on the commit a release is built from.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows setup
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/native
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+          rustup show active-toolchain
+
+      - name: Install Windows tools
+        run: |
+          # Inno Setup compiles the setup; the scripts call python3.
+          [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || choco install innosetup -y --no-progress
+          mkdir -p "$HOME/bin"
+          printf '#!/bin/sh\nexec python "$@"\n' > "$HOME/bin/python3"
+          chmod +x "$HOME/bin/python3"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Turn on Media Foundation
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $feature = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction SilentlyContinue
+          if ($feature -and -not $feature.Installed) {
+            Install-WindowsFeature -Name Server-Media-Foundation
+          }
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          key: packages
+          workspaces: apps/native/gpui -> target
+
+      - name: Build and package (unsigned)
+        run: |
+          sh scripts/release-windows.sh --unsigned "$RUNNER_TEMP/windows-release" || { cat "$RUNNER_TEMP/windows-release/release.log"; exit 1; }
+          cat "$RUNNER_TEMP/windows-release/native-windows.yml.NOT-FOR-RELEASE"
+
+      - name: Upload the setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-windows-setup
+          path: |
+            ${{ runner.temp }}/windows-release/*.NOT-FOR-RELEASE
+            ${{ runner.temp }}/windows-release/release.log
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Install and start the app
+        run: |
+          setup=$(ls "$RUNNER_TEMP"/windows-release/Northroom-*-x64.exe.NOT-FOR-RELEASE)
+          cp "$setup" "$RUNNER_TEMP/setup.exe"
+          installed="$RUNNER_TEMP/installed/Northroom"
+          # Per-user install, so no administrator rights.
+          MSYS2_ARG_CONV_EXCL='*' "$RUNNER_TEMP/setup.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$(cygpath -w "$installed")"
+          for file in Northroom.exe unins000.exe Resources/release.json Resources/SceneHost/vendor Resources/Licenses; do
+            [ -e "$installed/$file" ] || { echo "::error::the setup installed no $file"; exit 1; }
+          done
+          cat "$installed/Resources/release.json"
+          export TMPDIR="$RUNNER_TEMP"
+          sh scripts/starts-check.sh "$installed/Northroom.exe" "$RUNNER_TEMP/starts" || { echo "::error::the installed app drew no window"; exit 1; }
+          echo "The installed app started and drew its window." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the build for the update check
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-windows-build
+          path: |
+            apps/native/gpui/target/release/northroom-gpui.exe
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload what the install saw
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-windows-checks
+          path: ${{ runner.temp }}/smoke/board
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Runs on its own runner from the setup job's build, so a lost runner can't take the setup's
+  # result or log with it. continue-on-error until it has passed.
+  windows-updates:
+    name: Windows updates (report only)
+    needs: windows
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/native
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Windows tools
+        run: |
+          # Inno Setup compiles the setups; the scripts call python3.
+          [ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || choco install innosetup -y --no-progress
+          mkdir -p "$HOME/bin"
+          printf '#!/bin/sh\nexec python "$@"\n' > "$HOME/bin/python3"
+          chmod +x "$HOME/bin/python3"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Download the build
+        uses: actions/download-artifact@v4
+        with:
+          name: northroom-windows-build
+          path: apps/native/gpui/target/release
+
+      - name: Check updates end to end
+        timeout-minutes: 40
+        run: |
+          TMPDIR="$RUNNER_TEMP" sh scripts/update-check.sh "$RUNNER_TEMP/nr-update-check" | tee "$RUNNER_TEMP/update-check.txt"
+          {
+            echo "### Updates on Windows"
+            echo '```'
+            cat "$RUNNER_TEMP/update-check.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload what the check saw
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-windows-update-check
+          path: ${{ runner.temp }}/nr-update-check/cases/*/stderr.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+  linux:
+    name: Linux AppImage
+    # The oldest runner LTS. The AppImage needs its build glibc or newer, so building here makes
+    # it run on Ubuntu 22.04, Debian 12 and later.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/native
+    env:
+      # Build: GPUI's X11 and Vulkan, FreeType, OpenSSL, GStreamer and WebKitGTK headers.
+      # Running: Xvfb and Mesa's Vulkan in software for the window, GStreamer's plugins.
+      # Packaging: squashfs-tools. libunwind-dev replaces the image's libunwind-14-dev, which
+      # blocks libgstreamer1.0-dev on 22.04.
+      LINUX_PACKAGES: >-
+        libunwind-dev
+        pkg-config libssl-dev libfreetype-dev libfontconfig-dev libxkbcommon-dev libxkbcommon-x11-dev
+        libx11-xcb-dev libxcb1-dev libwayland-dev libegl1 xvfb xauth mesa-vulkan-drivers libvulkan1
+        libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base
+        gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+        libgtk-3-dev libwebkit2gtk-4.1-dev libsqlite3-dev squashfs-tools
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+          rustup show active-toolchain
+
+      - name: Install Linux packages
+        run: |
+          sudo apt-get update
+          # shellcheck disable=SC2086 # split the package list on purpose
+          sudo apt-get install -y --no-install-recommends $LINUX_PACKAGES
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          key: packages
+          workspaces: apps/native/gpui -> target
+
+      - name: Build and package (unsigned)
+        run: |
+          sh scripts/release-linux.sh --unsigned "$RUNNER_TEMP/linux-release" || { cat "$RUNNER_TEMP/linux-release/release.log"; exit 1; }
+          grep '^needs:' "$RUNNER_TEMP/linux-release/release.log" | tee -a "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/linux-release/native-linux.yml.NOT-FOR-RELEASE"
+
+      - name: Upload the AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-linux-appimage
+          path: |
+            ${{ runner.temp }}/linux-release/*.NOT-FOR-RELEASE
+            ${{ runner.temp }}/linux-release/release.log
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Start the AppImage
+        run: |
+          appimage=$(ls "$RUNNER_TEMP"/linux-release/Northroom-*-x86_64.AppImage.NOT-FOR-RELEASE)
+          mkdir -p "$RUNNER_TEMP/installed"
+          install -m 755 "$appimage" "$RUNNER_TEMP/installed/Northroom.AppImage"
+          # Check the contents separately from running it.
+          (cd "$RUNNER_TEMP/installed" && ./Northroom.AppImage --appimage-extract >/dev/null)
+          for file in AppRun northroom.desktop app/northroom app/Resources/release.json app/Resources/SceneHost/vendor app/Resources/Licenses; do
+            [ -e "$RUNNER_TEMP/installed/squashfs-root/$file" ] || { echo "::error::the AppImage holds no $file"; exit 1; }
+          done
+          cat "$RUNNER_TEMP/installed/squashfs-root/app/Resources/release.json"
+          # The runner has no FUSE, so the runtime extracts and runs it instead of mounting it.
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export TMPDIR="$RUNNER_TEMP"
+          GPUI_X11_SCALE_FACTOR=2 xvfb-run -a -s "-screen 0 2880x1800x24" \
+            sh scripts/starts-check.sh "$RUNNER_TEMP/installed/Northroom.AppImage" "$RUNNER_TEMP/starts" \
+            || { echo "::error::the AppImage drew no window"; exit 1; }
+          echo "The AppImage started and drew its window." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check updates end to end (report only)
+        continue-on-error: true
+        timeout-minutes: 40
+        run: |
+          # minisign signs the check's packages.
+          sudo apt-get install -y --no-install-recommends minisign
+          export APPIMAGE_EXTRACT_AND_RUN=1 GPUI_X11_SCALE_FACTOR=2 TMPDIR="$RUNNER_TEMP"
+          xvfb-run -a -s "-screen 0 2880x1800x24" sh scripts/update-check.sh "$RUNNER_TEMP/nr-update-check" | tee "$RUNNER_TEMP/update-check.txt"
+          {
+            echo "### Updates on Linux"
+            echo '```'
+            cat "$RUNNER_TEMP/update-check.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload what the checks saw
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: northroom-linux-checks
+          path: |
+            ${{ runner.temp }}/smoke/board
+            ${{ runner.temp }}/nr-update-check/cases/*/stderr.txt
+          retention-days: 7
+          if-no-files-found: ignore

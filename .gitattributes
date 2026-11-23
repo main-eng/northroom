@@ -1,0 +1,3 @@
+# Keep native sources, scripts and fixtures LF on Windows too. The core includes some of them
+# byte for byte.
+apps/native/** text=auto eol=lf

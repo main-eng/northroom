@@ -1,0 +1,48 @@
+# dependencies
+/node_modules
+**/node_modules
+
+# build output
+**/build
+**/dist/
+**/target/
+**/coverage
+*.tsbuildinfo
+
+# wrangler local state
+.wrangler/
+
+# local files
+.DS_Store
+*.pem
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/launch.json
+.claude/worktrees/
+.codex/
+.context/
+
+# skill reference docs, fetched locally
+.agents/skills/*/references/
+
+# env files
+.env
+.env.production
+.env*.local
+.dev.vars
+**/.dev.vars
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+# Commit the production provider lock so applies are reproducible.
+!infra/terraform/environments/production/.terraform.lock.hcl
+infra/terraform/**/*.tfvars
+!infra/terraform/**/*.tfvars.example
+
+# Per-person terminal files that open an agent in this folder from the Northroom drive.
+/*.nterm

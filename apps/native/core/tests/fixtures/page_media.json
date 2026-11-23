@@ -1,0 +1,560 @@
+{
+  "pages": [
+    {
+      "markdown": "![A shot](asset:abc-123)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": "A shot"
+        }
+      ],
+      "written": "![A shot](asset:abc-123)"
+    },
+    {
+      "markdown": "![](asset:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc",
+          "caption": ""
+        }
+      ],
+      "written": "![](asset:abc)"
+    },
+    {
+      "markdown": "![two words](asset:11111111-2222-3333-4444-555555555555)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "11111111-2222-3333-4444-555555555555",
+          "caption": "two words"
+        }
+      ],
+      "written": "![two words](asset:11111111-2222-3333-4444-555555555555)"
+    },
+    {
+      "markdown": "![cap](<asset: spaced >)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "spaced",
+          "caption": "cap"
+        }
+      ],
+      "written": "![cap](asset:spaced)"
+    },
+    {
+      "markdown": "![cap](asset:)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "![cap](asset:)"
+        }
+      ],
+      "written": "![cap](asset:)"
+    },
+    {
+      "markdown": "![cap](asset:abc) and words",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "![cap](asset:abc) and words"
+        }
+      ],
+      "written": "![cap](asset:abc) and words"
+    },
+    {
+      "markdown": "words ![cap](asset:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "words ![cap](asset:abc)"
+        }
+      ],
+      "written": "words ![cap](asset:abc)"
+    },
+    {
+      "markdown": "![cap](asset:abc \"a title\")",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc",
+          "caption": "cap"
+        }
+      ],
+      "written": "![cap](asset:abc)"
+    },
+    {
+      "markdown": "![cap](pic.png)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "![cap](pic.png)"
+        }
+      ],
+      "written": "![cap](pic.png)"
+    },
+    {
+      "markdown": "![cap](https://example.com/a.png)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "![cap](https://example.com/a.png)"
+        }
+      ],
+      "written": "![cap](https://example.com/a.png)"
+    },
+    {
+      "markdown": "before\n\n![a](asset:1)\n\n![b](asset:2)\n\nafter",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "before"
+        },
+        {
+          "id": "b2",
+          "type": "media",
+          "assetId": "1",
+          "caption": "a"
+        },
+        {
+          "id": "b3",
+          "type": "media",
+          "assetId": "2",
+          "caption": "b"
+        },
+        {
+          "id": "b4",
+          "type": "paragraph",
+          "text": "after"
+        }
+      ],
+      "written": "before\n\n![a](asset:1)\n\n![b](asset:2)\n\nafter"
+    },
+    {
+      "markdown": "![a](asset:1)\n![b](asset:2)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "![a](asset:1)\n![b](asset:2)"
+        }
+      ],
+      "written": "![a](asset:1)\n![b](asset:2)"
+    },
+    {
+      "markdown": "- ![a](asset:1)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "bullet",
+          "indent": 0,
+          "text": "![a](asset:1)"
+        }
+      ],
+      "written": "- ![a](asset:1)"
+    },
+    {
+      "markdown": "> ![a](asset:1)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "quote",
+          "text": "![a](asset:1)"
+        }
+      ],
+      "written": "> ![a](asset:1)"
+    },
+    {
+      "markdown": "# ![a](asset:1)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "heading",
+          "level": 1,
+          "text": "![a](asset:1)"
+        }
+      ],
+      "written": "# ![a](asset:1)"
+    },
+    {
+      "markdown": "![**bold** and *slanted*](asset:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc",
+          "caption": "**bold** and *slanted*"
+        }
+      ],
+      "written": "![**bold** and *slanted*](asset:abc)"
+    },
+    {
+      "markdown": "![a `code` b](asset:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc",
+          "caption": "a `code` b"
+        }
+      ],
+      "written": "![a `code` b](asset:abc)"
+    },
+    {
+      "markdown": "![a \\] b](asset:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc",
+          "caption": "a ] b"
+        }
+      ],
+      "written": "![a  b](asset:abc)"
+    },
+    {
+      "markdown": "![a &amp; b](asset:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc",
+          "caption": "a &amp; b"
+        }
+      ],
+      "written": "![a &amp; b](asset:abc)"
+    },
+    {
+      "markdown": "![emoji 😀](asset:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc",
+          "caption": "emoji 😀"
+        }
+      ],
+      "written": "![emoji 😀](asset:abc)"
+    },
+    {
+      "markdown": "![cap](ASSET:abc)",
+      "blocks": [
+        {
+          "id": "b1",
+          "type": "paragraph",
+          "text": "![cap](ASSET:abc)"
+        }
+      ],
+      "written": "![cap](ASSET:abc)"
+    }
+  ],
+  "spaced": [
+    {
+      "markdown": "  ![cap](asset:abc)  ",
+      "kinds": ["paragraph"]
+    },
+    {
+      "markdown": " ![cap](asset:abc)",
+      "kinds": ["paragraph"]
+    },
+    {
+      "markdown": "![cap](asset:abc)  ",
+      "kinds": ["paragraph"]
+    },
+    {
+      "markdown": "![cap](asset:abc)\t",
+      "kinds": ["paragraph"]
+    },
+    {
+      "markdown": "![cap](asset:abc)\n",
+      "kinds": ["media"]
+    },
+    {
+      "markdown": "\n\n![cap](asset:abc)\n\n",
+      "kinds": ["media"]
+    }
+  ],
+  "captions": [
+    {
+      "caption": "",
+      "written": "![](asset:abc-123)",
+      "read": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": ""
+        }
+      ]
+    },
+    {
+      "caption": "plain",
+      "written": "![plain](asset:abc-123)",
+      "read": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": "plain"
+        }
+      ]
+    },
+    {
+      "caption": "a [b] c",
+      "written": "![a b c](asset:abc-123)",
+      "read": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": "a b c"
+        }
+      ]
+    },
+    {
+      "caption": "]]][[[",
+      "written": "![](asset:abc-123)",
+      "read": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": ""
+        }
+      ]
+    },
+    {
+      "caption": "a ] b [ c",
+      "written": "![a  b  c](asset:abc-123)",
+      "read": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": "a  b  c"
+        }
+      ]
+    },
+    {
+      "caption": "with (round) ones",
+      "written": "![with (round) ones](asset:abc-123)",
+      "read": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": "with (round) ones"
+        }
+      ]
+    },
+    {
+      "caption": "emoji 😀 [x]",
+      "written": "![emoji 😀 x](asset:abc-123)",
+      "read": [
+        {
+          "id": "b1",
+          "type": "media",
+          "assetId": "abc-123",
+          "caption": "emoji 😀 x"
+        }
+      ]
+    }
+  ],
+  "lines": [
+    {
+      "text": "![alt text](pic.png) after",
+      "images": [["alt text", "pic.png"], null]
+    },
+    {
+      "text": "before ![shot](Chart%201.png) after",
+      "images": [null, ["shot", "Chart%201.png"], null]
+    },
+    {
+      "text": "![](./a.png)",
+      "images": [["", "./a.png"]]
+    },
+    {
+      "text": "![ spaced ]( b.png )",
+      "images": [[" spaced ", "b.png"]]
+    },
+    {
+      "text": "two ![a](a.png) and ![b](b.png)",
+      "images": [null, ["a", "a.png"], null, ["b", "b.png"]]
+    },
+    {
+      "text": "**bold ![in](x.png) bold**",
+      "images": [null, ["in", "x.png"], null]
+    },
+    {
+      "text": "[link ![in](x.png)](https://example.com)",
+      "images": [null, null]
+    },
+    {
+      "text": "![a](asset:1)",
+      "images": [["a", "asset:1"]]
+    },
+    {
+      "text": "\\![not](x.png)",
+      "images": [null, null]
+    },
+    {
+      "text": "![open](x.png",
+      "images": [null]
+    }
+  ],
+  "sources": [
+    {
+      "src": "pic.png",
+      "name": "pic.png"
+    },
+    {
+      "src": "./pic.png",
+      "name": "pic.png"
+    },
+    {
+      "src": "Chart%201.png",
+      "name": "Chart 1.png"
+    },
+    {
+      "src": "./Chart 1.png",
+      "name": "Chart 1.png"
+    },
+    {
+      "src": "",
+      "name": null
+    },
+    {
+      "src": "./",
+      "name": null
+    },
+    {
+      "src": "https://example.com/a.png",
+      "name": null
+    },
+    {
+      "src": "asset:abc",
+      "name": null
+    },
+    {
+      "src": "data:image/png;base64,AAAA",
+      "name": null
+    },
+    {
+      "src": "C:pic.png",
+      "name": null
+    },
+    {
+      "src": "a+b.c-d:x",
+      "name": null
+    },
+    {
+      "src": "1a:pic.png",
+      "name": "1a:pic.png"
+    },
+    {
+      "src": "sub/pic.png",
+      "name": null
+    },
+    {
+      "src": "..\\pic.png",
+      "name": null
+    },
+    {
+      "src": "../pic.png",
+      "name": null
+    },
+    {
+      "src": "./sub/pic.png",
+      "name": null
+    },
+    {
+      "src": "././pic.png",
+      "name": null
+    },
+    {
+      "src": "100%.png",
+      "name": "100%.png"
+    },
+    {
+      "src": "50%25.png",
+      "name": "50%.png"
+    },
+    {
+      "src": "%E0%A4%A.png",
+      "name": "%E0%A4%A.png"
+    },
+    {
+      "src": "%C3%A9t%C3%A9.png",
+      "name": "été.png"
+    },
+    {
+      "src": "%2Fpic.png",
+      "name": "/pic.png"
+    },
+    {
+      "src": "%zz.png",
+      "name": "%zz.png"
+    },
+    {
+      "src": "%FF.png",
+      "name": "%FF.png"
+    },
+    {
+      "src": "%F0%9F%98%80.png",
+      "name": "😀.png"
+    },
+    {
+      "src": "%ED%A0%80.png",
+      "name": "%ED%A0%80.png"
+    },
+    {
+      "src": "%C3.png",
+      "name": "%C3.png"
+    },
+    {
+      "src": "é%.png",
+      "name": "é%.png"
+    },
+    {
+      "src": "pic.PNG",
+      "name": "pic.PNG"
+    },
+    {
+      "src": " pic.png",
+      "name": " pic.png"
+    },
+    {
+      "src": "a%20b%20c.jpg",
+      "name": "a b c.jpg"
+    },
+    {
+      "src": "%41%42.png",
+      "name": "AB.png"
+    },
+    {
+      "src": "%",
+      "name": "%"
+    },
+    {
+      "src": "%4",
+      "name": "%4"
+    },
+    {
+      "src": "😀.png",
+      "name": "😀.png"
+    }
+  ]
+}

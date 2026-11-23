@@ -1,0 +1,20 @@
+{
+  "name": "northroom-workspace",
+  "private": true,
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "test": "bun run test:repo",
+    "test:repo": "bun test --timeout 30000 ./scripts",
+    "format": "bun scripts/check-quality.ts --all --write",
+    "format:check": "bun scripts/check-quality.ts --all",
+    "quality": "bun scripts/check-quality.ts",
+    "quality:all": "bun scripts/check-quality.ts --all",
+    "syntax": "sh apps/native/scripts/syntax/bundle.sh"
+  },
+  "devDependencies": {
+    "bun-types": "^1.4.0",
+    "prettier": "3.8.3",
+    "typescript": "6.0.2",
+    "shiki": "4.6.0"
+  }
+}

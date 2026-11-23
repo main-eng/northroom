@@ -1,0 +1,4 @@
+[install]
+# Install only versions that have been on the registry for 7 days, so a compromised or
+# yanked fresh publish can't land in a build.
+minimumReleaseAge = 604800

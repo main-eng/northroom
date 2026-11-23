@@ -1,0 +1,14 @@
+GSAP 3.15.0 (https://gsap.com), copied unchanged from the npm package gsap@3.15.0 (dist/*.min.js).
+
+What the package itself says of its licence, quoted whole (it carries no licence file, and the
+text of the licence is not in the package or anywhere else on this machine):
+
+  package.json:  "license": "Standard 'no charge' license: https://gsap.com/standard-license."
+  README.md:     GreenSock's standard "no charge" license can be viewed at
+                 https://gsap.com/standard-license.
+                 Copyright (c) 2008-2026, GreenSock. All rights reserved.
+  Each file:     @license Copyright 2026, GreenSock. All rights reserved.
+                 Subject to the terms at https://gsap.com/standard-license.
+
+The terms are those published at https://gsap.com/standard-license; fetch and keep that text
+here before distributing the app.

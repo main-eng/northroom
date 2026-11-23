@@ -1,0 +1,16 @@
+#!/bin/sh
+# Starts Northroom from its AppImage (scripts/package-linux.sh).
+#
+# The AppImage relies on the system's GTK 3, WebKitGTK 4.1, GStreamer and Vulkan. If any are
+# missing, name them and print how to install them instead of failing silently.
+here=$(dirname "$(readlink -f "$0")")
+missing=$(ldd "$here/app/northroom" 2>/dev/null | sed -n 's/^[[:space:]]*\([^[:space:]]*\) => not found$/\1/p' | tr '\n' ' ')
+if [ -n "$missing" ]; then
+  message="Northroom needs libraries this computer does not have: $missing
+On Debian or Ubuntu: sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav libvulkan1 mesa-vulkan-drivers
+On Fedora: sudo dnf install gtk3 webkit2gtk4.1 gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free vulkan-loader mesa-vulkan-drivers"
+  echo "$message" >&2
+  if command -v notify-send >/dev/null 2>&1; then notify-send "Northroom cannot start" "$message"; fi
+  exit 127
+fi
+exec "$here/app/northroom" "$@"

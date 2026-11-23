@@ -1,0 +1,43 @@
+[package]
+name = "shell"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Northroom's GPUI shell: the app's window, its screens and a check's script, drawn with kit"
+
+[[bin]]
+name = "northroom-gpui"
+path = "src/main.rs"
+
+[features]
+default = ["pictures"]
+# Window snapshots for checks (`NR_SNAPSHOT_DIR`). Reading a frame back from a texture needs
+# GPUI's test support.
+pictures = ["gpui/test-support", "gpui_platform/test-support"]
+
+[dependencies]
+gpui.workspace = true
+gpui_platform.workspace = true
+northroom-core.workspace = true
+# Core boundary, theme, strings, glyphs, platform services and the shared components.
+kit = { path = "../kit" }
+# Page host: live HTML pages, model stills, the syntax highlighter and films.
+webhost = { path = "../webhost" }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Crops menu snapshots out of the window snapshot (`script/events.rs`).
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Sends the core's HTTP requests as given (`transport.rs`), with no compression and no cookies.
+# native-tls uses the platform's TLS and trust store (Secure Transport on a Mac, SChannel on
+# Windows, OpenSSL on Linux) and compiles no C, so the Windows build still checks from a Mac.
+# rustls would pull in ring, which needs a Windows C toolchain.
+ureq = { version = "3.5", default-features = false, features = ["native-tls-no-default"] }
+
+# Embeds the Windows icon and version (`build.rs`). Already in GPUI's tree.
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# PDFKit's view (`screens/pdf.rs`) through plain `msg_send!`. Already in GPUI's tree.
+objc2 = "0.6"

@@ -1,0 +1,12 @@
+**/node_modules/**
+**/.git/**
+**/build/**/*
+**/dist/**
+**/coverage/**
+**/public/**
+**/generated/**
+**/.astro/**
+.agents/**
+.claude/**
+.codex/**
+bun.lock

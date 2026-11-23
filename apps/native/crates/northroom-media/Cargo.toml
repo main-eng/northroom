@@ -1,0 +1,34 @@
+[package]
+name = "northroom-media"
+version = "0.1.0"
+edition = "2021"
+description = "Northroom native media: what a stream's colour tags mean, pixel buffers, and frames shared with wgpu without a copy"
+
+[dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["wgsl"] }
+pollster = "0.4"
+
+# Zero-copy GPU frames are Mac-only (Core Video, IOSurface, Metal). On Windows and Linux, wrapping
+# a decoded frame returns an unsupported error (`gpu.rs`) so the GPUI shell still builds there.
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["metal"] }
+objc2-metal = { version = "0.3.2", features = ["objc2-io-surface"] }
+objc2-io-surface = "0.3.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["vulkan"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = 1
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"

@@ -1,0 +1,732 @@
+{
+  "controller": [
+    {
+      "name": "manual, up to date",
+      "supported": true,
+      "steps": ["request manual", "found false 0.2.55", "answer 0"],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request manual",
+        "status idle",
+        "show info|You're up to date|Northroom 0.2.55 is the latest version available for this device.|OK||",
+        "> found false 0.2.55",
+        "> answer 0"
+      ]
+    },
+    {
+      "name": "background, up to date",
+      "supported": true,
+      "steps": ["request background", "found false 0.2.55"],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status idle",
+        "> found false 0.2.55"
+      ]
+    },
+    {
+      "name": "background, download and restart",
+      "supported": true,
+      "steps": ["request background", "found true 0.2.56", "answer 0", "downloaded", "answer 0"],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "status downloading",
+        "download",
+        "> answer 0",
+        "status ready",
+        "show info|Update ready to install|Save your work before restarting. If you choose Later, the update will install when you quit Northroom.|Restart and Install/Later|1|1",
+        "> downloaded",
+        "install silent=false relaunch=true",
+        "> answer 0"
+      ]
+    },
+    {
+      "name": "background, later, offered once a session, manual offers again",
+      "supported": true,
+      "steps": [
+        "request background",
+        "found true 0.2.56",
+        "answer 1",
+        "request background",
+        "found true 0.2.56",
+        "request manual",
+        "found true 0.2.56",
+        "answer 1"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "> answer 1",
+        "fetch",
+        "> request background",
+        "status available",
+        "> found true 0.2.56",
+        "fetch",
+        "> request manual",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "> answer 1"
+      ]
+    },
+    {
+      "name": "downloaded, later, then checks",
+      "supported": true,
+      "steps": [
+        "request manual",
+        "found true 0.2.56",
+        "answer 0",
+        "downloaded",
+        "answer 1",
+        "request background",
+        "request manual",
+        "answer 0"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request manual",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "status downloading",
+        "download",
+        "> answer 0",
+        "status ready",
+        "show info|Update ready to install|Save your work before restarting. If you choose Later, the update will install when you quit Northroom.|Restart and Install/Later|1|1",
+        "> downloaded",
+        "> answer 1",
+        "> request background",
+        "show info|Update ready to install|Save your work before restarting. If you choose Later, the update will install when you quit Northroom.|Restart and Install/Later|1|1",
+        "> request manual",
+        "install silent=false relaunch=true",
+        "> answer 0"
+      ]
+    },
+    {
+      "name": "manual, check fails",
+      "supported": true,
+      "steps": [
+        "request manual",
+        "check-fails getaddrinfo ENOTFOUND api.northroom.com",
+        "answer 0"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request manual",
+        "status idle",
+        "error getaddrinfo ENOTFOUND api.northroom.com",
+        "show error|Could not complete the update|getaddrinfo ENOTFOUND api.northroom.com|OK||",
+        "> check-fails getaddrinfo ENOTFOUND api.northroom.com",
+        "> answer 0"
+      ]
+    },
+    {
+      "name": "background, check fails",
+      "supported": true,
+      "steps": ["request background", "check-fails getaddrinfo ENOTFOUND api.northroom.com"],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status idle",
+        "error getaddrinfo ENOTFOUND api.northroom.com",
+        "> check-fails getaddrinfo ENOTFOUND api.northroom.com"
+      ]
+    },
+    {
+      "name": "manual, download fails, offered again",
+      "supported": true,
+      "steps": [
+        "request manual",
+        "found true 0.2.56",
+        "answer 0",
+        "download-fails sha512 checksum mismatch, expected a, got b",
+        "answer 0",
+        "request manual",
+        "found true 0.2.56",
+        "answer 1"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request manual",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "status downloading",
+        "download",
+        "> answer 0",
+        "status available",
+        "error sha512 checksum mismatch, expected a, got b",
+        "show error|Could not complete the update|sha512 checksum mismatch, expected a, got b|OK||",
+        "> download-fails sha512 checksum mismatch, expected a, got b",
+        "> answer 0",
+        "fetch",
+        "> request manual",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "> answer 1"
+      ]
+    },
+    {
+      "name": "background, download fails quietly, offered again",
+      "supported": true,
+      "steps": [
+        "request background",
+        "found true 0.2.56",
+        "answer 0",
+        "download-fails Cannot download the update",
+        "request background",
+        "found true 0.2.56",
+        "answer 1"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "status downloading",
+        "download",
+        "> answer 0",
+        "status available",
+        "error Cannot download the update",
+        "> download-fails Cannot download the update",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "> answer 1"
+      ]
+    },
+    {
+      "name": "manual joins a background check",
+      "supported": true,
+      "steps": ["request background", "request manual", "found false 0.2.55", "answer 0"],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "> request manual",
+        "status idle",
+        "show info|You're up to date|Northroom 0.2.55 is the latest version available for this device.|OK||",
+        "> found false 0.2.55",
+        "> answer 0"
+      ]
+    },
+    {
+      "name": "unsupported, manual",
+      "supported": false,
+      "steps": ["request manual", "answer 0"],
+      "log": [
+        "error Updates require an installed Northroom release. On Linux, use the AppImage build.",
+        "show error|Could not complete the update|Updates require an installed Northroom release. On Linux, use the AppImage build.|OK||",
+        "> request manual",
+        "> answer 0"
+      ]
+    },
+    {
+      "name": "unsupported, background",
+      "supported": false,
+      "steps": ["request background"],
+      "log": [
+        "error Updates require an installed Northroom release. On Linux, use the AppImage build.",
+        "> request background"
+      ]
+    },
+    {
+      "name": "found update stays available through a failed re-check",
+      "supported": true,
+      "steps": [
+        "request background",
+        "found true 0.2.56",
+        "answer 1",
+        "request background",
+        "check-fails socket hang up"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "> answer 1",
+        "fetch",
+        "> request background",
+        "status available",
+        "error socket hang up",
+        "> check-fails socket hang up"
+      ]
+    },
+    {
+      "name": "a request while a box is open joins it",
+      "supported": true,
+      "steps": [
+        "request manual",
+        "found true 0.2.56",
+        "request background",
+        "request manual",
+        "answer 1"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request manual",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "> request background",
+        "> request manual",
+        "> answer 1"
+      ]
+    },
+    {
+      "name": "a newer version is offered after a later",
+      "supported": true,
+      "steps": [
+        "request background",
+        "found true 0.2.56",
+        "answer 1",
+        "request background",
+        "found true 0.2.57",
+        "answer 1"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "> answer 1",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.57 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.57",
+        "> answer 1"
+      ]
+    },
+    {
+      "name": "ready, background check then manual restart",
+      "supported": true,
+      "steps": [
+        "request background",
+        "found true 0.2.56",
+        "answer 0",
+        "downloaded",
+        "answer 1",
+        "request background",
+        "request background",
+        "request manual",
+        "answer 0"
+      ],
+      "log": [
+        "status checking",
+        "fetch",
+        "> request background",
+        "status available",
+        "show info|Northroom 0.2.56 is available|Download the update now? You can keep working and restart when you're ready.|Download Update/Later|0|1",
+        "> found true 0.2.56",
+        "status downloading",
+        "download",
+        "> answer 0",
+        "status ready",
+        "show info|Update ready to install|Save your work before restarting. If you choose Later, the update will install when you quit Northroom.|Restart and Install/Later|1|1",
+        "> downloaded",
+        "> answer 1",
+        "> request background",
+        "> request background",
+        "show info|Update ready to install|Save your work before restarting. If you choose Later, the update will install when you quit Northroom.|Restart and Install/Later|1|1",
+        "> request manual",
+        "install silent=false relaunch=true",
+        "> answer 0"
+      ]
+    }
+  ],
+  "feeds": [
+    {
+      "text": "version: 0.2.56\nfiles:\n  - url: Northroom-0.2.56-arm64.zip\n    sha512: H0D8ktokFpR1CXnubPWC8tXX0o4YM13gWrxU0FYOD1MChgxlK/CNVgJSql50IQVG82n7u86MEs/HlXsmUv6adQ==\n    size: 210334112\n    blockMapSize: 220011\n  - url: Northroom-0.2.56-x64.zip\n    sha512: Umd2iCLuYk1I/OFexcp5y9YCy39MIVelFlVpkfIu+Me173sY0f9BxZNw77CFhlHUSpNsEbexRMSP4E3zxqPo2g==\n    size: 215000000\n    blockMapSize: 221000\n  - url: Northroom-0.2.56-arm64.dmg\n    sha512: rMKNsr63tCuqHLAkPUAcy04/zkTXsCh5pSeZqt/1QVItiCJZiy+mZPnVFWwAySSAXXXDhovVbCrLgdN+mONa3A==\n    size: 212000000\n  - url: Northroom-0.2.56-x64.dmg\n    sha512: SPsQsV89RKCdyC0CsGWB4MDGlHjJ/Sz4+Qk2WQGaFoe67NuzjJ5ysSFp3EFIaQ+HRn+RVPWTHF32ZcZJbL/V9Q==\n    size: 216000000\npath: Northroom-0.2.56-arm64.zip\nsha512: H0D8ktokFpR1CXnubPWC8tXX0o4YM13gWrxU0FYOD1MChgxlK/CNVgJSql50IQVG82n7u86MEs/HlXsmUv6adQ==\nreleaseDate: '2026-11-13T10:00:00.000Z'\n",
+      "version": "0.2.56",
+      "files": [
+        {
+          "url": "Northroom-0.2.56-arm64.zip",
+          "sha512": "H0D8ktokFpR1CXnubPWC8tXX0o4YM13gWrxU0FYOD1MChgxlK/CNVgJSql50IQVG82n7u86MEs/HlXsmUv6adQ==",
+          "size": 210334112
+        },
+        {
+          "url": "Northroom-0.2.56-x64.zip",
+          "sha512": "Umd2iCLuYk1I/OFexcp5y9YCy39MIVelFlVpkfIu+Me173sY0f9BxZNw77CFhlHUSpNsEbexRMSP4E3zxqPo2g==",
+          "size": 215000000
+        },
+        {
+          "url": "Northroom-0.2.56-arm64.dmg",
+          "sha512": "rMKNsr63tCuqHLAkPUAcy04/zkTXsCh5pSeZqt/1QVItiCJZiy+mZPnVFWwAySSAXXXDhovVbCrLgdN+mONa3A==",
+          "size": 212000000
+        },
+        {
+          "url": "Northroom-0.2.56-x64.dmg",
+          "sha512": "SPsQsV89RKCdyC0CsGWB4MDGlHjJ/Sz4+Qk2WQGaFoe67NuzjJ5ysSFp3EFIaQ+HRn+RVPWTHF32ZcZJbL/V9Q==",
+          "size": 216000000
+        }
+      ],
+      "releaseNotes": null,
+      "stagingPercentage": null,
+      "minimumSystemVersion": null,
+      "zipArm64": {
+        "url": "https://api.northroom.com/api/download/update/Northroom-0.2.56-arm64.zip"
+      },
+      "zipX64": {
+        "url": "https://api.northroom.com/api/download/update/Northroom-0.2.56-x64.zip"
+      }
+    },
+    {
+      "text": "version: 1.0.0-beta.2\nfiles:\n  - url: Northroom-1.0.0-beta.2-universal.zip\n    sha512: WAB5Eb+fZnEe9l6AeybDlqLW+0ZPQ4FSDF1KV127gVEPedNeNJYEEop3Gs8qEXoq/e3AEtg7DrgiZoruDe9HRw==\n    size: 5\npath: Northroom-1.0.0-beta.2-universal.zip\nsha512: WAB5Eb+fZnEe9l6AeybDlqLW+0ZPQ4FSDF1KV127gVEPedNeNJYEEop3Gs8qEXoq/e3AEtg7DrgiZoruDe9HRw==\nreleaseNotes: |-\n  Fixes:\n  - the list's sort\n  - a crash: on 'quit'\n\n  Thanks!\nreleaseName: 'Beta: two'\nstagingPercentage: 40\nminimumSystemVersion: '14.0'\nreleaseDate: '2026-11-13T10:00:00.000Z'\n",
+      "version": "1.0.0-beta.2",
+      "files": [
+        {
+          "url": "Northroom-1.0.0-beta.2-universal.zip",
+          "sha512": "WAB5Eb+fZnEe9l6AeybDlqLW+0ZPQ4FSDF1KV127gVEPedNeNJYEEop3Gs8qEXoq/e3AEtg7DrgiZoruDe9HRw==",
+          "size": 5
+        }
+      ],
+      "releaseNotes": "Fixes:\n- the list's sort\n- a crash: on 'quit'\n\nThanks!",
+      "stagingPercentage": 40,
+      "minimumSystemVersion": "14.0",
+      "zipArm64": {
+        "url": "https://api.northroom.com/api/download/update/Northroom-1.0.0-beta.2-universal.zip"
+      },
+      "zipX64": {
+        "url": "https://api.northroom.com/api/download/update/Northroom-1.0.0-beta.2-universal.zip"
+      }
+    },
+    {
+      "text": "version: '2.0'\nfiles:\n  - url: https://downloads.example.test/Northroom 2.0 x64.zip\n    sha512: h8Vo4Del+lCxvJEejuGad8TdPCK86ZMvhv3Yohav4WgciXN/raaFnpEEfuznEewW2mLWzLn9DeLFHxMjRzUNjA==\n    size: 1\n  - url: Northroom-2.0-x64.dmg\n    sha512: cRwiRI5yHlSR2CRbSUJaqGHx/EoVKH8HNeIDeZtlz/7FC1q9D93ZHNZDrrO1MNSPBeJY5+IwqU7VAlwTh7tOGw==\n    size: 2\npath: Northroom 2.0 x64.zip\nsha512: h8Vo4Del+lCxvJEejuGad8TdPCK86ZMvhv3Yohav4WgciXN/raaFnpEEfuznEewW2mLWzLn9DeLFHxMjRzUNjA==\nreleaseNotes: |2\n    indented first line\n  second line\nreleaseDate: '2026-11-13T10:00:00.000Z'\n",
+      "version": "2.0",
+      "files": [
+        {
+          "url": "https://downloads.example.test/Northroom 2.0 x64.zip",
+          "sha512": "h8Vo4Del+lCxvJEejuGad8TdPCK86ZMvhv3Yohav4WgciXN/raaFnpEEfuznEewW2mLWzLn9DeLFHxMjRzUNjA==",
+          "size": 1
+        },
+        {
+          "url": "Northroom-2.0-x64.dmg",
+          "sha512": "cRwiRI5yHlSR2CRbSUJaqGHx/EoVKH8HNeIDeZtlz/7FC1q9D93ZHNZDrrO1MNSPBeJY5+IwqU7VAlwTh7tOGw==",
+          "size": 2
+        }
+      ],
+      "releaseNotes": "  indented first line\nsecond line\n",
+      "stagingPercentage": null,
+      "minimumSystemVersion": null,
+      "zipArm64": {
+        "url": "https://downloads.example.test/Northroom%202.0%20x64.zip"
+      },
+      "zipX64": {
+        "url": "https://downloads.example.test/Northroom%202.0%20x64.zip"
+      }
+    },
+    {
+      "text": "version: 0.3.0\nfiles:\n  - url: Northroom-0.3.0-x64.zip\n    sha512: GfFCsBjzB7/fHHAJ0VopQXyW2GeNKYLuvOSWGy5n7rEYqOux11twCHw+Zbx5NFDj/koQACvvotA45a7UeWk38g==\n    size: 3\npath: Northroom-0.3.0-x64.zip\nsha512: GfFCsBjzB7/fHHAJ0VopQXyW2GeNKYLuvOSWGy5n7rEYqOux11twCHw+Zbx5NFDj/koQACvvotA45a7UeWk38g==\nreleaseNotes: \"Ünïcødé \\\"quoted\\\" and a tab\\there, a #hash and a: colon\"\nreleaseDate: '2026-11-13T10:00:00.000Z'\n",
+      "version": "0.3.0",
+      "files": [
+        {
+          "url": "Northroom-0.3.0-x64.zip",
+          "sha512": "GfFCsBjzB7/fHHAJ0VopQXyW2GeNKYLuvOSWGy5n7rEYqOux11twCHw+Zbx5NFDj/koQACvvotA45a7UeWk38g==",
+          "size": 3
+        }
+      ],
+      "releaseNotes": "Ünïcødé \"quoted\" and a tab\there, a #hash and a: colon",
+      "stagingPercentage": null,
+      "minimumSystemVersion": null,
+      "zipArm64": {
+        "url": "https://api.northroom.com/api/download/update/Northroom-0.3.0-x64.zip"
+      },
+      "zipX64": {
+        "url": "https://api.northroom.com/api/download/update/Northroom-0.3.0-x64.zip"
+      }
+    },
+    {
+      "text": "version: 0.4.0\nfiles:\n  - url: Northroom-0.4.0-arm64.dmg\n    sha512: IkG8j8cHBbQu/q03H9SYLFummRfltLiVgQACZE8DhtqcMTF5NFjCv0dghIDWSgcngTPJmRLgui2vIwmPNSDrlw==\n    size: 4\npath: Northroom-0.4.0-arm64.dmg\nsha512: IkG8j8cHBbQu/q03H9SYLFummRfltLiVgQACZE8DhtqcMTF5NFjCv0dghIDWSgcngTPJmRLgui2vIwmPNSDrlw==\nreleaseDate: '2026-11-13T10:00:00.000Z'\n",
+      "version": "0.4.0",
+      "files": [
+        {
+          "url": "Northroom-0.4.0-arm64.dmg",
+          "sha512": "IkG8j8cHBbQu/q03H9SYLFummRfltLiVgQACZE8DhtqcMTF5NFjCv0dghIDWSgcngTPJmRLgui2vIwmPNSDrlw==",
+          "size": 4
+        }
+      ],
+      "releaseNotes": null,
+      "stagingPercentage": null,
+      "minimumSystemVersion": null,
+      "zipArm64": {
+        "error": "ZIP file not provided"
+      },
+      "zipX64": {
+        "error": "No files provided"
+      }
+    }
+  ],
+  "versions": [
+    {
+      "current": "0.2.55",
+      "latest": "0.2.56",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "0.2.56",
+      "latest": "0.2.55",
+      "valid": true,
+      "available": false
+    },
+    {
+      "current": "0.2.55",
+      "latest": "0.2.55",
+      "valid": true,
+      "available": false
+    },
+    {
+      "current": "0.2.9",
+      "latest": "0.2.10",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "1.0.0-beta.2",
+      "latest": "1.0.0",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "1.0.0",
+      "latest": "1.0.0-beta.2",
+      "valid": true,
+      "available": false
+    },
+    {
+      "current": "1.0.0-beta.2",
+      "latest": "1.0.0-beta.10",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "1.0.0-alpha",
+      "latest": "1.0.0-alpha.1",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "1.0.0-alpha.beta",
+      "latest": "1.0.0-beta",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "1.0.0-rc.1",
+      "latest": "1.0.0-rc.1+build.5",
+      "valid": true,
+      "available": false
+    },
+    {
+      "current": "1.0.0",
+      "latest": "1.0.0+build.1",
+      "valid": true,
+      "available": false
+    },
+    {
+      "current": "0.0.0",
+      "latest": "0.0.1",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "10.0.0",
+      "latest": "9.9.9",
+      "valid": true,
+      "available": false
+    },
+    {
+      "current": "1.2.3",
+      "latest": "v1.2.4",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "1.0.0-1",
+      "latest": "1.0.0-a",
+      "valid": true,
+      "available": true
+    },
+    {
+      "current": "1.0.0-a.1",
+      "latest": "1.0.0-a.b",
+      "valid": true,
+      "available": true
+    }
+  ],
+  "staging": [
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-0f6b1c2e9d10",
+      "percentage": 0,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-0f6b1c2e9d10",
+      "percentage": 1,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-0f6b1c2e9d10",
+      "percentage": 40,
+      "within": true
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-0f6b1c2e9d10",
+      "percentage": 50,
+      "within": true
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-0f6b1c2e9d10",
+      "percentage": 99,
+      "within": true
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-0f6b1c2e9d10",
+      "percentage": 100,
+      "within": true
+    },
+    {
+      "id": "00000000-0000-5000-8000-000000000000",
+      "percentage": 0,
+      "within": false
+    },
+    {
+      "id": "00000000-0000-5000-8000-000000000000",
+      "percentage": 1,
+      "within": true
+    },
+    {
+      "id": "00000000-0000-5000-8000-000000000000",
+      "percentage": 40,
+      "within": true
+    },
+    {
+      "id": "00000000-0000-5000-8000-000000000000",
+      "percentage": 50,
+      "within": true
+    },
+    {
+      "id": "00000000-0000-5000-8000-000000000000",
+      "percentage": 99,
+      "within": true
+    },
+    {
+      "id": "00000000-0000-5000-8000-000000000000",
+      "percentage": 100,
+      "within": true
+    },
+    {
+      "id": "ffffffff-ffff-5fff-bfff-ffffffffffff",
+      "percentage": 0,
+      "within": false
+    },
+    {
+      "id": "ffffffff-ffff-5fff-bfff-ffffffffffff",
+      "percentage": 1,
+      "within": false
+    },
+    {
+      "id": "ffffffff-ffff-5fff-bfff-ffffffffffff",
+      "percentage": 40,
+      "within": false
+    },
+    {
+      "id": "ffffffff-ffff-5fff-bfff-ffffffffffff",
+      "percentage": 50,
+      "within": false
+    },
+    {
+      "id": "ffffffff-ffff-5fff-bfff-ffffffffffff",
+      "percentage": 99,
+      "within": false
+    },
+    {
+      "id": "ffffffff-ffff-5fff-bfff-ffffffffffff",
+      "percentage": 100,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-7fffffff0000",
+      "percentage": 0,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-7fffffff0000",
+      "percentage": 1,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-7fffffff0000",
+      "percentage": 40,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-7fffffff0000",
+      "percentage": 50,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-7fffffff0000",
+      "percentage": 99,
+      "within": false
+    },
+    {
+      "id": "4ad4f0f6-6e0c-5a4b-8a3c-7fffffff0000",
+      "percentage": 100,
+      "within": true
+    }
+  ],
+  "digests": [
+    {
+      "expected": "a4abd4448c49562d828115d13a1fccea927f52b4d5459297f8b43e42da89238bc13626e43dcb38ddb082488927ec904fb42057443983e88585179d50551afe62",
+      "hex": true
+    },
+    {
+      "expected": "pKvURIxJVi2CgRXROh/M6pJ/UrTVRZKX+LQ+QtqJI4vBNibkPcs43bCCSIkn7JBPtCBXRDmD6IWFF51QVRr+Yg==",
+      "hex": false
+    },
+    {
+      "expected": "A4ABD4448C49562D828115D13A1FCCEA927F52B4D5459297F8B43E42DA89238BC13626E43DCB38DDB082488927EC904FB42057443983E88585179D50551AFE62",
+      "hex": true
+    },
+    {
+      "expected": "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+      "hex": false
+    },
+    {
+      "expected": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++",
+      "hex": false
+    },
+    {
+      "expected": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hex": false
+    }
+  ]
+}

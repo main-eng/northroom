@@ -1,0 +1,210 @@
+{
+  "timestamps": [
+    {
+      "seconds": 0,
+      "text": "0:00"
+    },
+    {
+      "seconds": 0.4,
+      "text": "0:00"
+    },
+    {
+      "seconds": 0.999,
+      "text": "0:00"
+    },
+    {
+      "seconds": 1,
+      "text": "0:01"
+    },
+    {
+      "seconds": 5,
+      "text": "0:05"
+    },
+    {
+      "seconds": 9.99,
+      "text": "0:09"
+    },
+    {
+      "seconds": 59,
+      "text": "0:59"
+    },
+    {
+      "seconds": 59.999,
+      "text": "0:59"
+    },
+    {
+      "seconds": 60,
+      "text": "1:00"
+    },
+    {
+      "seconds": 61,
+      "text": "1:01"
+    },
+    {
+      "seconds": 65.5,
+      "text": "1:05"
+    },
+    {
+      "seconds": 599,
+      "text": "9:59"
+    },
+    {
+      "seconds": 600,
+      "text": "10:00"
+    },
+    {
+      "seconds": 3599,
+      "text": "59:59"
+    },
+    {
+      "seconds": 3599.9,
+      "text": "59:59"
+    },
+    {
+      "seconds": 3600,
+      "text": "1:00:00"
+    },
+    {
+      "seconds": 3661,
+      "text": "1:01:01"
+    },
+    {
+      "seconds": 36000,
+      "text": "10:00:00"
+    },
+    {
+      "seconds": 86399,
+      "text": "23:59:59"
+    },
+    {
+      "seconds": 90061,
+      "text": "25:01:01"
+    },
+    {
+      "seconds": -3,
+      "text": "0:00"
+    },
+    {
+      "seconds": 123456.7,
+      "text": "34:17:36"
+    },
+    {
+      "seconds": null,
+      "text": "0:00"
+    }
+  ],
+  "durations": [
+    {
+      "seconds": 0,
+      "text": "0 s"
+    },
+    {
+      "seconds": 0.04,
+      "text": "0 s"
+    },
+    {
+      "seconds": 0.05,
+      "text": "0.1 s"
+    },
+    {
+      "seconds": 0.25,
+      "text": "0.3 s"
+    },
+    {
+      "seconds": 0.94,
+      "text": "0.9 s"
+    },
+    {
+      "seconds": 0.95,
+      "text": "1 s"
+    },
+    {
+      "seconds": 1,
+      "text": "1 s"
+    },
+    {
+      "seconds": 2.5,
+      "text": "2.5 s"
+    },
+    {
+      "seconds": 4.04,
+      "text": "4 s"
+    },
+    {
+      "seconds": 5.004,
+      "text": "5 s"
+    },
+    {
+      "seconds": 12,
+      "text": "12 s"
+    },
+    {
+      "seconds": 61.25,
+      "text": "61.3 s"
+    },
+    {
+      "seconds": 3600,
+      "text": "3600 s"
+    },
+    {
+      "seconds": 12.349,
+      "text": "12.3 s"
+    },
+    {
+      "seconds": 12.35,
+      "text": "12.4 s"
+    },
+    {
+      "seconds": 0.15,
+      "text": "0.2 s"
+    },
+    {
+      "seconds": 0.35,
+      "text": "0.4 s"
+    }
+  ],
+  "dimensions": "1920 × 1080",
+  "detailLabels": ["Kind", "Size", "Date Created", "Date Modified", "Dimensions", "Duration"],
+  "moments": [
+    {
+      "seconds": 0,
+      "text": "1970-01-01T00:00:00.000Z"
+    },
+    {
+      "seconds": 1,
+      "text": "1970-01-01T00:00:01.000Z"
+    },
+    {
+      "seconds": 86399,
+      "text": "1970-01-01T23:59:59.000Z"
+    },
+    {
+      "seconds": 86400,
+      "text": "1970-01-02T00:00:00.000Z"
+    },
+    {
+      "seconds": 951782400,
+      "text": "2000-02-29T00:00:00.000Z"
+    },
+    {
+      "seconds": 1582934400,
+      "text": "2020-02-29T00:00:00.000Z"
+    },
+    {
+      "seconds": 1709164799,
+      "text": "2024-02-28T23:59:59.000Z"
+    },
+    {
+      "seconds": 1794477600,
+      "text": "2026-11-12T10:00:00.000Z"
+    },
+    {
+      "seconds": 1798761599,
+      "text": "2026-12-31T23:59:59.000Z"
+    },
+    {
+      "seconds": 4102444800,
+      "text": "2100-01-01T00:00:00.000Z"
+    }
+  ]
+}

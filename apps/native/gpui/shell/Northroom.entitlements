@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The app's entitlements under the hardened runtime (scripts/bundle.sh signs with them; the
+     frame tool in Contents/Helpers has none). Only what a run without it showed was needed:
+
+     allow-jit   The source highlighter (gpui/webhost/src/syntax.rs: shiki and its Oniguruma
+                 WebAssembly) runs in the app's own JavaScriptCore. Without it JavaScriptCore
+                 interprets: the same tokens, twelve times slower (a 46,128-character Rust file
+                 in 0.58 s against 0.047 s).
+
+     Left out, each checked by running the hardened app without it: WKWebView (pages, model
+     stills) runs its JavaScript in the system's own web content processes; Metal, VideoToolbox
+     and AVFoundation need nothing; the terminal's shells are programs of their own; the
+     update's code-signature check needs nothing outside a sandbox. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>

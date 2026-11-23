@@ -1,0 +1,53 @@
+[package]
+name = "kit"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "The GPUI shell's foundation and components: the core's boundary, theme, words, glyphs and platform services; form controls, lists and overlays placed where the core lays them out"
+
+# Renders each component's states to PNGs (`kit-gallery <folder> [scene ...]`).
+[[bin]]
+name = "kit-gallery"
+path = "gallery/main.rs"
+
+[dependencies]
+# One GPUI build serves every member; `test-support` gives the gallery `render_to_image`.
+gpui = { workspace = true, features = ["test-support"] }
+gpui_platform = { workspace = true, features = ["test-support"] }
+northroom-core.workspace = true
+# Grapheme and word boundaries. Already in the build through GPUI.
+unicode-segmentation = "1"
+# Image decoding off macOS, with the decoders GPUI already builds (`platform/portable.rs`).
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
+# OS version (`platform/mac.rs`, `linux.rs`) and the user id for the trash (`linux.rs`).
+libc = "0.2"
+# SVG rendering (`svg_picture.rs`). Same renderer and features as GPUI, so nothing new is built.
+resvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
+
+# Platform crates (`platform/mac.rs`, `windows.rs`, `linux.rs`). Each is already in the app's
+# tree on that platform through GPUI or the page host, so none adds to what the app links.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+# Event handler that blocks user input in a check's window (`ignore_the_person`).
+block2 = "0.6"
+# The window's AppKit view, which hosted views sit under (`hosted.rs`).
+raw-window-handle = "0.6"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# UI languages, OS version (`RtlGetVersion`), tray icon and taskbar theme (`windows/tray.rs`),
+# Authenticode checks (`windows/signature.rs`), clipboard files, Explorer and default apps
+# (`windows/explorer.rs`), and the share sheet (`windows/share.rs`).
+windows = { version = "0.62", features = ["Win32_Security_WinTrust", "Win32_Security_Cryptography", "Win32_Security_Cryptography_Catalog", "Win32_Security_Cryptography_Sip", "Win32_Storage_FileSystem", "Win32_Foundation", "Wdk_System_SystemServices", "Win32_System_SystemInformation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Registry", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Com", "Win32_UI_Shell_Common", "Foundation", "ApplicationModel", "ApplicationModel_DataTransfer", "Storage", "Storage_Search", "Storage_Streams"] }
+# `IIterable` of storage items for the share sheet; the `windows` crate's WinRT calls use it.
+windows-collections = "0.3"
+# Captures a check's window at 2 px per pt (`platform/windows.rs`).
+raw-window-handle = "0.6"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# X11 (Xvfb on CI). GPUI's Linux platform builds no window system without a feature.
+gpui_platform = { workspace = true, features = ["test-support", "x11"] }
+# Reads window captures back from the X server (`platform/linux.rs`).
+x11rb = "0.13"
+raw-window-handle = "0.6"
+# Desktop trash (`platform/linux.rs`). Pinned to the GIO version WebKitGTK's gtk-rs crates use.
+gio = "0.18"
