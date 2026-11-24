@@ -1,6 +1,6 @@
 name: Native Linux release
 
-# Signs with the updater's minisign key, stored as `TAURI_SIGNING_PRIVATE_KEY`. A `public-key`
+# Signs with the updater's minisign key, stored as `LINUX_UPDATE_KEY`. A `public-key`
 # run prints only the public half. A `release` run signs the checked AppImage from a packages run
 # on the same commit.
 on:
@@ -40,15 +40,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends minisign squashfs-tools
       - name: Read the existing updater key
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LINUX_UPDATE_KEY: ${{ secrets.LINUX_UPDATE_KEY }}
+          LINUX_UPDATE_KEY_PASSWORD: ${{ secrets.LINUX_UPDATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
           export NR_MINISIGN_KEY="$RUNNER_TEMP/northroom-update.key"
           python3 -I - <<'PY'
           import base64, os, pathlib
-          key = os.environ["TAURI_SIGNING_PRIVATE_KEY"].strip().encode()
+          key = os.environ["LINUX_UPDATE_KEY"].strip().encode()
           if not key.startswith(b"untrusted comment:"):
               try:
                   key = base64.b64decode(key, validate=True)
@@ -58,7 +58,7 @@ jobs:
               raise SystemExit("The stored updater key is not a minisign secret key")
           pathlib.Path(os.environ["NR_MINISIGN_KEY"]).write_bytes(key)
           PY
-          printf '%s\n' "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" | \
+          printf '%s\n' "$LINUX_UPDATE_KEY_PASSWORD" | \
             minisign -R -s "$NR_MINISIGN_KEY" -p "$RUNNER_TEMP/northroom-update.pub"
       - name: Upload the public update key
         uses: actions/upload-artifact@v4
@@ -87,14 +87,14 @@ jobs:
       - name: Sign and verify the release
         if: inputs.operation == 'release'
         env:
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LINUX_UPDATE_KEY_PASSWORD: ${{ secrets.LINUX_UPDATE_KEY_PASSWORD }}
         working-directory: apps/native
         run: |
           set -euo pipefail
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)
           name="Northroom-$version-x86_64.AppImage"
           mv "$RUNNER_TEMP/package/$name.NOT-FOR-RELEASE" "$RUNNER_TEMP/package/$name"
-          printf '%s\n' "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" | \
+          printf '%s\n' "$LINUX_UPDATE_KEY_PASSWORD" | \
             NR_MINISIGN_KEY="$RUNNER_TEMP/northroom-update.key" scripts/release-linux.sh \
               --from "$RUNNER_TEMP/package/$name" "$RUNNER_TEMP/northroom-release"
       - name: Upload the signed release files
