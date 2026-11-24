@@ -1,5 +1,6 @@
-//! The title bar: back and forward, the open tabs, the new-tab button, the sessions button and
-//! the update button, laid out by the core (`nr_title_bar_lay_out`). In settings it shows the
+//! The title bar: back and forward, the open tabs, the new-tab button, the review button (while
+//! files wait for review), the sessions button and the update button, laid out by the core
+//! (`nr_title_bar_lay_out`). In settings it shows the
 //! settings title instead, which Back leaves.
 //!
 //! A press asks the core what is under it (`nr_title_bar_hit`); a press on the bar itself moves
@@ -8,8 +9,8 @@
 //! when the tabs overflow (`nr_title_bar_scroll`). Dragging a tab moves it along the row and
 //! reorders the tabs (`nr_title_bar_hold`, `nr_title_bar_carry`, `nr_title_bar_let_go`).
 //!
-//! Controls show tooltips (`nr_title_bar_tooltip`). Back, forward, "+" and the update button
-//! fade their background on hover (`nr_hover_level`). A hovered tab shows its close button over
+//! Controls show tooltips (`nr_title_bar_tooltip`). Back, forward, "+", the review button and the
+//! update button fade their background on hover (`nr_hover_level`). A hovered tab shows its close button over
 //! the end of its title, which fades out before it the way an overlong title fades at the tab's
 //! edge; the core says when and where (`nr_title_bar_tab`).
 
@@ -51,6 +52,8 @@ struct Bar {
     downloading: bool,
     /// The sessions button's content (`sessions_button`).
     sessions: SessionsButton,
+    /// Files wait for review, so the review button shows (`nr_changes_waiting`).
+    review: bool,
 }
 
 impl Bar {
@@ -76,6 +79,7 @@ impl Bar {
             update: text(&nr_update_button_label()),
             downloading: nr_update_button_downloading(),
             sessions: sessions_button(),
+            review: nr_changes_waiting() > 0,
         }
     }
 }
@@ -180,6 +184,7 @@ impl TitleBar {
                 self.sessions_menu(cx);
                 return;
             }
+            NrBarControl::Review => nr_changes_open_current(),
             // Anywhere else on the bar moves the window, and a double click does whatever the
             // system title-bar setting says.
             NrBarControl::Bar => {
@@ -471,6 +476,7 @@ fn paint(
             !read.update.is_empty(),
             f64::from(width(words, pill_face())),
             f64::from(grown),
+            read.review,
             pointed
                 .as_ref()
                 .map_or(std::ptr::null(), std::ptr::from_ref),
@@ -693,8 +699,8 @@ fn paint_tab_close(window: &mut Window, cx: &mut App, place: &Placed, close: Bou
     );
 }
 
-/// Paints the controls at the bar's right end: the sessions button, and the update button when
-/// shown.
+/// Paints the controls at the bar's right end: the review button and the update button when
+/// shown, and the sessions button.
 fn paint_controls(
     window: &mut Window,
     cx: &mut App,
@@ -703,8 +709,26 @@ fn paint_controls(
     place: &Placed,
     grown: f32,
 ) {
+    paint_review(window, cx, rect(&bar.review), place);
     paint_sessions(window, cx, read, bar, place, grown);
     paint_update(window, cx, read, rect(&bar.update), place);
+}
+
+/// Paints the review button, left of the sessions button while files wait for review: the
+/// Changes tab's diff glyph, as "+" is drawn.
+fn paint_review(window: &mut Window, cx: &mut App, button: Bounds<Pixels>, place: &Placed) {
+    if kit::core::is_empty(&button) {
+        return;
+    }
+    let level = fade(window, c"review", place.lit(button));
+    place.light(window, button, 0.08 * level);
+    icons::draw(
+        window,
+        cx,
+        Glyph::Diff,
+        place.at(kit::core::inset(button, 6.0, 6.0)),
+        color(Token::Foreground),
+    );
 }
 
 /// Paints the sessions button, left of the update button: a terminal glyph, muted while no

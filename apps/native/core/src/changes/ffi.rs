@@ -17,7 +17,9 @@
 //! - `nr_changes_open(folder: *const c_char)`: opens or selects the Changes tab of an absolute
 //!   folder path's root (its repository, else the drive; `git::root_for`).
 //! - `nr_changes_open_current()`: the same for the root with the latest turn, else the folder
-//!   on screen (the menu bar's Show Changes, the sessions menu's Review changes).
+//!   on screen (the menu bar's Show Changes, the title bar's review button).
+//! - `nr_changes_waiting() -> usize`: how many files wait for review; the title bar shows its
+//!   review button while any do.
 //! - `nr_changes_shown() -> bool`: whether the active tab is a Changes tab
 //!   (`NrShellView.changes`).
 //! - `nr_changes_revision() -> u64`: changes whenever anything below may read differently.
@@ -50,7 +52,7 @@
 //!
 //! Beside these: `NrShellView.changes` (`nr_shell_view`), the `changes` flag of
 //! `nr_window_layout`, tab kind 6 with the `diff` glyph, and the menus' Show Changes (View
-//! menu, a folder's menu, a folder's background menu) and Review changes (sessions menu).
+//! menu, a folder's menu, a folder's background menu) and the title bar's review button.
 
 use crate::changes::actions::{self, ActionError, Undone};
 use crate::changes::diff::{self, Cell, FileDiff, LineKind};
@@ -167,9 +169,40 @@ pub extern "C" fn nr_changes_open_current() {
     }
 }
 
-/// How many files the root Review changes opens lists, which its row says.
-pub(crate) fn waiting() -> usize {
+/// How many files the list Review changes opens holds: the New list of the root with the latest
+/// turn, else of the folder on screen.
+fn waiting() -> usize {
     current_folder().map_or(0, |folder| service().waiting(&root_of(&folder)))
+}
+
+/// How many files wait for review (`waiting`). The title bar shows its review button while any
+/// do.
+#[no_mangle]
+pub extern "C" fn nr_changes_waiting() -> usize {
+    waiting()
+}
+
+/// The review button's tooltip: "Review changes · 4 files", "… · 1 file", plain at none.
+pub(crate) fn review_title() -> String {
+    review_words(waiting(), interface_language())
+}
+
+fn review_words(waiting: usize, language: &str) -> String {
+    use crate::strings::{self, key};
+    let count = waiting.to_string();
+    match waiting {
+        0 => strings::text(language, key::MENU_REVIEW_CHANGES).to_owned(),
+        1 => strings::format(
+            language,
+            key::MENU_REVIEW_CHANGES_FILE,
+            &[("count", &count)],
+        ),
+        _ => strings::format(
+            language,
+            key::MENU_REVIEW_CHANGES_FILES,
+            &[("count", &count)],
+        ),
+    }
 }
 
 /// The folder the active tab's last column shows.
@@ -1906,6 +1939,13 @@ mod tests {
     use crate::changes::snapshot::{Content, Entry};
     use crate::changes::store::Hash;
     use crate::changes::view::FileChange;
+
+    #[test]
+    fn the_review_button_says_how_many_files_wait() {
+        assert_eq!(review_words(4, "en"), "Review changes · 4 files");
+        assert_eq!(review_words(1, "en"), "Review changes · 1 file");
+        assert_eq!(review_words(0, "en"), "Review changes");
+    }
 
     #[test]
     fn a_diff_s_name_and_extension_are_its_file_s() {

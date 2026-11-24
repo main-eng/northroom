@@ -71,6 +71,8 @@ pub struct Shown<'a> {
     /// The update button sits at the bar's right end.
     pub update: bool,
     pub sessions: SessionsShown,
+    /// Files wait in the Changes list, so the review button shows left of the sessions button.
+    pub review: bool,
     pub window_buttons: WindowButtons,
 }
 
@@ -101,6 +103,19 @@ pub struct SessionsShown {
     pub words: f64,
     /// How far the pill has grown, from 0 (glyph only) to 1 (full pill). The shell animates it.
     pub grown: f64,
+}
+
+/// What the bar's controls say in their tooltips, and whether Back and Forward can go.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Tips<'a> {
+    pub can_go_back: bool,
+    pub can_go_forward: bool,
+    /// The update button's label; empty while it is hidden.
+    pub update: &'a str,
+    /// The running-sessions summary (`sessions::summary`).
+    pub sessions: &'a str,
+    /// How many files wait for review (`changes::ffi::review_title`).
+    pub review: &'a str,
 }
 
 /// One tab as it is drawn.
@@ -151,6 +166,8 @@ pub struct Layout {
     pub sessions: Option<Frame>,
     pub sessions_glyph: Option<Frame>,
     pub sessions_words_x: f64,
+    /// The review button, left of the sessions button while files wait in the Changes list.
+    pub review: Option<Frame>,
     /// Where the settings title starts, while settings are open.
     pub settings_x: f64,
     /// How far the tabs are scrolled, and the row's length.
@@ -166,6 +183,8 @@ pub enum Control {
     Update,
     /// The sessions button, which opens the list of running sessions.
     Sessions,
+    /// The review button, which opens the Changes tab.
+    Review,
     /// The cross of the tab at this index.
     Close(usize),
     Plus,
@@ -264,6 +283,9 @@ impl TitleBar {
             shown.sessions.grown.clamp(0.0, 1.0),
             sessions_right,
         );
+        let review = shown
+            .review
+            .then(|| button(sessions.x - CONTROL_GAP - BUTTON));
         let back = shown.window_buttons.back_x();
         let origin = back + TABS_PAST_BACK;
         let mut layout = Layout {
@@ -273,6 +295,7 @@ impl TitleBar {
             sessions: Some(sessions),
             sessions_glyph: Some(sessions_glyph),
             sessions_words_x,
+            review,
             offset: self.layout.offset,
             ..Layout::default()
         };
@@ -288,8 +311,8 @@ impl TitleBar {
             .iter()
             .map(|title| title + TAB_CHROME)
             .collect();
-        // The row ends where "+" and its gap meet the sessions button.
-        let end = sessions.x - EDGE;
+        // The row ends where "+" and its gap meet the review button, else the sessions button.
+        let end = review.map_or(sessions.x, |review| review.x) - EDGE;
         let available = (end - BUTTON - TAB_GAP - origin).max(TAB_LEAST);
         let strip = strip(&wanted, available, TAB_GAP, TAB_LEAST, TAB_MOST);
         let view = strip.length.min(available);
@@ -459,6 +482,8 @@ impl TitleBar {
             Control::Update
         } else if contains(layout.sessions, x, y) {
             Control::Sessions
+        } else if contains(layout.review, x, y) {
+            Control::Review
         } else if let Some(index) = tab().filter(|&index| layout.tabs[index].closes_at(x, y)) {
             Control::Close(index)
         } else if contains(layout.plus, x, y) {
@@ -479,25 +504,17 @@ impl TitleBar {
         }
     }
 
-    /// The tooltip and frame for the control under (`x`, `y`). Disabled Back or Forward and tabs
-    /// have none. `update` is the update button's label (empty for none); `sessions` is the
-    /// running-sessions summary (`sessions::summary`).
-    pub fn tooltip(
-        &self,
-        x: f64,
-        y: f64,
-        can_go_back: bool,
-        can_go_forward: bool,
-        update: &str,
-        sessions: &str,
-    ) -> Option<(Frame, String)> {
+    /// The tooltip and frame for the control under (`x`, `y`), from what each control says
+    /// (`Tips`). Disabled Back or Forward and tabs have none.
+    pub fn tooltip(&self, x: f64, y: f64, tips: &Tips) -> Option<(Frame, String)> {
         let layout = &self.layout;
         let (frame, words) = match self.hit(x, y) {
             Control::Plus => (layout.plus, NEW_TAB),
-            Control::Update => (layout.update, update),
-            Control::Sessions => (layout.sessions, sessions),
-            Control::Back if can_go_back => (layout.back, BACK),
-            Control::Forward if can_go_forward => (layout.forward, FORWARD),
+            Control::Update => (layout.update, tips.update),
+            Control::Sessions => (layout.sessions, tips.sessions),
+            Control::Review => (layout.review, tips.review),
+            Control::Back if tips.can_go_back => (layout.back, BACK),
+            Control::Forward if tips.can_go_forward => (layout.forward, FORWARD),
             _ => return None,
         };
         (!words.is_empty()).then(|| {
@@ -710,8 +727,58 @@ mod tests {
             settings: false,
             update: false,
             sessions: SessionsShown::default(),
+            review: false,
             window_buttons: WindowButtons::Shown,
         }
+    }
+
+    fn tips<'a>(
+        can_go_back: bool,
+        can_go_forward: bool,
+        update: &'a str,
+        sessions: &'a str,
+        review: &'a str,
+    ) -> Tips<'a> {
+        Tips {
+            can_go_back,
+            can_go_forward,
+            update,
+            sessions,
+            review,
+        }
+    }
+
+    #[test]
+    fn the_review_button_shows_left_of_the_sessions_button_only_while_files_wait() {
+        let titles = [176.0; 12];
+        let closes = [false; 12];
+        let mut bar = TitleBar::default();
+        let none = bar.lay_out(&shown(&titles, &closes, 0)).clone();
+        assert_eq!(none.review, None);
+        let waiting = bar
+            .lay_out(&Shown {
+                review: true,
+                ..shown(&titles, &closes, 0)
+            })
+            .clone();
+        // The sessions button stays 8 pt inside the right end; the review button sits a
+        // control gap left of it, and the tabs give up its room.
+        let sessions = waiting.sessions.expect("sessions");
+        assert_eq!(sessions, button(WIDTH - 34.0));
+        let review = waiting.review.expect("review");
+        assert_eq!(review, button(sessions.x - CONTROL_GAP - BUTTON));
+        let room = |layout: &Layout| layout.tabs_view.expect("tabs").width;
+        assert!((room(&none) - room(&waiting) - (BUTTON + CONTROL_GAP)).abs() < 1e-9);
+        let (x, y) = (review.x + BUTTON / 2.0, review.y + BUTTON / 2.0);
+        assert_eq!(bar.hit(x, y), Control::Review);
+        assert_eq!(
+            bar.tooltip(
+                x,
+                y,
+                &tips(false, false, "", "", "Review changes · 2 files")
+            ),
+            Some((review, "Review changes · 2 files".to_owned()))
+        );
     }
 
     #[test]
@@ -733,7 +800,11 @@ mod tests {
         );
         assert_eq!(bar.hit(WIDTH - 20.0, 20.0), Control::Sessions);
         assert_eq!(
-            bar.tooltip(WIDTH - 20.0, 20.0, false, false, "", "No agents running"),
+            bar.tooltip(
+                WIDTH - 20.0,
+                20.0,
+                &tips(false, false, "", "No agents running", "")
+            ),
             Some((button(WIDTH - 34.0), "No agents running".to_owned()))
         );
         // Fully grown around 60 pt of text: 8 + 14 + 6 + 60 + 8 = 96, still ending 8 inside
@@ -1248,26 +1319,26 @@ mod tests {
         let mut bar = TitleBar::default();
         bar.lay_out(&shown(&[40.0], &[false], 0));
         assert_eq!(
-            bar.tooltip(345.0 - 120.0, 20.0, false, false, "", ""),
+            bar.tooltip(345.0 - 120.0, 20.0, &tips(false, false, "", "", "")),
             Some((button(142.0 + 76.0 + 2.0), NEW_TAB.to_owned()))
         );
         assert_eq!(
-            bar.tooltip(90.0, 20.0, false, true, "", ""),
+            bar.tooltip(90.0, 20.0, &tips(false, true, "", "", "")),
             None,
             "Back goes nowhere"
         );
         assert_eq!(
-            bar.tooltip(90.0, 20.0, true, false, "", "")
+            bar.tooltip(90.0, 20.0, &tips(true, false, "", "", ""))
                 .map(|(_, words)| words),
             Some(BACK.to_owned())
         );
         assert_eq!(
-            bar.tooltip(120.0, 20.0, true, true, "", "")
+            bar.tooltip(120.0, 20.0, &tips(true, true, "", "", ""))
                 .map(|(_, words)| words),
             Some(FORWARD.to_owned())
         );
         assert_eq!(
-            bar.tooltip(150.0, 20.0, true, true, "", ""),
+            bar.tooltip(150.0, 20.0, &tips(true, true, "", "", "")),
             None,
             "a tab says nothing"
         );
@@ -1359,7 +1430,10 @@ mod tests {
         // The title is not a control: pressing it moves the window, and Back leaves settings.
         assert_eq!(bar.hit(160.0, 20.0), Control::Bar);
         assert_eq!(bar.hit(90.0, 20.0), Control::Back);
-        assert_eq!(bar.tooltip(150.0, 20.0, true, true, "", ""), None);
+        assert_eq!(
+            bar.tooltip(150.0, 20.0, &tips(true, true, "", "", "")),
+            None
+        );
         assert!(!bar.scroll(-10.0, WHEEL_POINTS));
     }
 }

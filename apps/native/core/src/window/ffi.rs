@@ -388,6 +388,8 @@ pub struct NrTitleBar {
     pub sessions: NrRect,
     pub sessions_glyph: NrRect,
     pub sessions_words_x: f64,
+    /// The review button, while files wait in the Changes list.
+    pub review: NrRect,
     /// Where the settings title starts, while settings are open.
     pub settings_x: f64,
     /// How far the tabs are scrolled.
@@ -409,6 +411,7 @@ fn bar_of(layout: &crate::window::title_bar::Layout, carried: Option<usize>) -> 
         sessions: rect(layout.sessions),
         sessions_glyph: rect(layout.sessions_glyph),
         sessions_words_x: layout.sessions_words_x,
+        review: rect(layout.review),
         settings_x: layout.settings_x,
         offset: layout.offset,
         tab_count: layout.tabs.len(),
@@ -432,7 +435,8 @@ unsafe fn widths_of<'a>(widths: *const f64, count: usize) -> &'a [f64] {
 /// Lays out the title bar for a window `width` wide. `titles` holds `count` tab name widths in
 /// the tab font. `update` shows the update button. `sessions_words` is the width of the sessions
 /// button's text (`sessions::ffi::sessions_button`) in the pill font, 0 for none, and
-/// `sessions_grown` is how far the pill has grown, 0 to 1. `pointer` is the pointer position, or
+/// `sessions_grown` is how far the pill has grown, 0 to 1. `review` shows the review button, for
+/// files waiting in the Changes list (`nr_changes_waiting`). `pointer` is the pointer position, or
 /// null when off the bar. `window_buttons` says whether the window buttons sit at the bar's left
 /// end (they are hidden in full screen).
 ///
@@ -447,6 +451,7 @@ pub unsafe extern "C" fn nr_title_bar_lay_out(
     update: bool,
     sessions_words: f64,
     sessions_grown: f64,
+    review: bool,
     pointer: *const crate::board::ffi::NrPoint,
     window_buttons: crate::window::title_bar::WindowButtons,
 ) -> NrTitleBar {
@@ -479,6 +484,7 @@ pub unsafe extern "C" fn nr_title_bar_lay_out(
                 words: sessions_words,
                 grown: sessions_grown,
             },
+            review,
             window_buttons,
         });
         bar_of(bar.layout(), bar.carried())
@@ -566,6 +572,8 @@ pub enum NrBarControl {
     Update,
     /// The sessions button.
     Sessions,
+    /// The review button, which opens the Changes tab (`nr_changes_open_current`).
+    Review,
     /// A tab's cross.
     Close,
     /// "+".
@@ -672,6 +680,7 @@ pub extern "C" fn nr_title_bar_hit(x: f64, y: f64) -> NrTitleBarHit {
         Control::Forward => (NrBarControl::Forward, -1),
         Control::Update => (NrBarControl::Update, -1),
         Control::Sessions => (NrBarControl::Sessions, -1),
+        Control::Review => (NrBarControl::Review, -1),
         Control::Close(tab) => (NrBarControl::Close, tab as i64),
         Control::Plus => (NrBarControl::Plus, -1),
         Control::Tab(tab) => (NrBarControl::Tab, tab as i64),
@@ -698,7 +707,15 @@ pub unsafe extern "C" fn nr_title_bar_tooltip(
         crate::ffi::nr_history_can_go_forward(),
     );
     let sessions = crate::sessions::ffi::sessions_summary();
-    let said = with_title_bar(|bar| bar.tooltip(x, y, back, forward, &update, &sessions));
+    let review = crate::changes::ffi::review_title();
+    let tips = crate::window::title_bar::Tips {
+        can_go_back: back,
+        can_go_forward: forward,
+        update: &update,
+        sessions: &sessions,
+        review: &review,
+    };
+    let said = with_title_bar(|bar| bar.tooltip(x, y, &tips));
     let (place, words) = said.map_or((None, String::new()), |(place, words)| (Some(place), words));
     // SAFETY: the caller passes storage for one rect.
     unsafe { frame.write(rect(place)) };

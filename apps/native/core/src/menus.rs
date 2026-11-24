@@ -1154,10 +1154,9 @@ const SESSIONS_MENU_MAX_HEIGHT: f64 = 560.0;
 /// The menu of the title bar's sessions button: every running session under its group heading
 /// (`sessions::grouped`), each heading showing a count. Waiting sessions come first, so while
 /// one waits the first heading shows the next-session shortcut, which works while the menu is
-/// open. With no session running it says so. Review changes ends it, opening the Changes tab of
-/// the root with the latest turn as Show Changes does; it says how many files its list holds
-/// (`waiting`), and is off when it holds none. At least 300 pt wide.
-pub fn sessions_menu(running: &[crate::sessions::Running], waiting: usize, language: &str) -> Menu {
+/// open. With no session running it says so. At least 300 pt wide. Review changes is the title
+/// bar's own button beside it (`title_bar::Control::Review`), not a row here.
+pub fn sessions_menu(running: &[crate::sessions::Running], language: &str) -> Menu {
     use crate::sessions::{grouped, next};
     let mut entries = Vec::new();
     for (group, listed) in grouped(running) {
@@ -1177,12 +1176,6 @@ pub fn sessions_menu(running: &[crate::sessions::Running], waiting: usize, langu
     if entries.is_empty() {
         entries.push(Entry::label(strings::text(language, key::SESSIONS_NONE)));
     }
-    entries.push(Entry::separator());
-    entries.push(
-        Entry::item("changes", review_changes_title(waiting, language))
-            .icon(Glyph::Diff)
-            .enabled(waiting > 0),
-    );
     entries.push(
         Entry::item(
             "next-session",
@@ -1195,25 +1188,6 @@ pub fn sessions_menu(running: &[crate::sessions::Running], waiting: usize, langu
         max_height: SESSIONS_MENU_MAX_HEIGHT,
         quiet_labels: true,
         ..Menu::new("", entries).wide(300.0)
-    }
-}
-
-/// Review changes with how many files wait: "Review changes · 4 files", "… · 1 file", and
-/// plain when none do.
-fn review_changes_title(waiting: usize, language: &str) -> String {
-    let count = waiting.to_string();
-    match waiting {
-        0 => strings::text(language, key::MENU_REVIEW_CHANGES).to_owned(),
-        1 => strings::format(
-            language,
-            key::MENU_REVIEW_CHANGES_FILE,
-            &[("count", &count)],
-        ),
-        _ => strings::format(
-            language,
-            key::MENU_REVIEW_CHANGES_FILES,
-            &[("count", &count)],
-        ),
     }
 }
 
@@ -1515,7 +1489,7 @@ mod tests {
             session("o", "Sales / Q4 leads", "Outreach", "", Activity::NeedsYou),
             session("s", "Drive", "Shell", "", Activity::Idle),
         ];
-        let menu = sessions_menu(&running, 4, "en");
+        let menu = sessions_menu(&running, "en");
         assert_eq!(
             titles(&menu),
             [
@@ -1525,8 +1499,6 @@ mod tests {
                 "Reconciling October",
                 "Idle · 1",
                 "Shell · Drive",
-                "-",
-                "Review changes · 4 files"
             ]
         );
         assert_eq!((menu.min_width, menu.max_height), (300.0, 560.0));
@@ -1572,31 +1544,17 @@ mod tests {
             ("next-session", "⌘⇧U", true)
         );
         // With no session waiting, no heading shows the shortcut.
-        let at_work = sessions_menu(&running[..1], 1, "en");
+        let at_work = sessions_menu(&running[..1], "en");
         assert_eq!(titles(&at_work)[0], "Working · 1");
         assert_eq!(at_work.entries[0].shortcut, "");
         assert_eq!(
             bar_command("next-session"),
             Some(BarCommand::ShowNextSession)
         );
-        // With no session running the menu says so. Review changes runs as Show Changes does.
-        assert_eq!(titles(&sessions_menu(&[], 0, "en"))[0], "No agents running");
-        let review = menu.find("changes").expect("Review changes");
-        assert_eq!((review.kind, review.icon), (Kind::Item, Some(Glyph::Diff)));
-        assert!(review.enabled);
-        assert_eq!(bar_command(&review.id), Some(BarCommand::ShowChanges));
-        // It says how many files are listed, one in the singular, and is off at none.
-        let one = at_work.find("changes").expect("Review changes");
-        assert_eq!(
-            (one.title.as_str(), one.enabled),
-            ("Review changes · 1 file", true)
-        );
-        let none = sessions_menu(&running, 0, "en");
-        let none = none.find("changes").expect("Review changes");
-        assert_eq!(
-            (none.title.as_str(), none.enabled),
-            ("Review changes", false)
-        );
+        // With no session running the menu says so. Review changes is not in it: it is the
+        // title bar's own button.
+        assert_eq!(titles(&sessions_menu(&[], "en"))[0], "No agents running");
+        assert!(menu.find("changes").is_none());
         // The menu bar icon's menu lists the waiting sessions above its own rows.
         let tray = tray("Check for Updates…", true, &running, "en");
         assert_eq!(
@@ -2365,7 +2323,6 @@ mod tests {
                 agent: String::new(),
                 activity: crate::terminal::activity::Activity::Idle,
             }],
-            0,
             "en",
         )
         .entries[1];

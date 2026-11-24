@@ -318,14 +318,9 @@ fn run_bar(command: BarCommand) -> Effect {
 
 // MARK: The sessions' menu
 
-/// The title bar sessions button's menu for the current sessions and the files the Changes list
-/// holds (`menus::sessions_menu`).
+/// The title bar sessions button's menu for the current sessions (`menus::sessions_menu`).
 pub fn menu_sessions() -> menus::Menu {
-    menus::sessions_menu(
-        &crate::sessions::ffi::running_now(),
-        crate::changes::ffi::waiting(),
-        language(),
-    )
+    menus::sessions_menu(&crate::sessions::ffi::running_now(), language())
 }
 
 /// Shows terminal file `id`'s session in its own tab (`Columns::show_in_tab`), leaving Settings

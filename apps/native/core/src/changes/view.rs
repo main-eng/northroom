@@ -384,7 +384,7 @@ pub fn record(root: &Root, now_ms: u64) -> Record {
     record
 }
 
-/// How many files `root`'s New list holds, which the sessions menu's Review changes says.
+/// How many files `root`'s New list holds, which the title bar's review button says.
 /// Before this run's first snapshot of it, those an earlier run left.
 pub fn waiting(engine: &Engine, root: &Path) -> usize {
     let Some(watched) = engine.roots.get(root) else {
