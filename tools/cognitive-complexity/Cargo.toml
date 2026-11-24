@@ -8,7 +8,7 @@ description = "Scores every Rust function in the repository by cognitive complex
 [dependencies]
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
-syn = { version = "2", features = ["full", "visit", "parsing", "printing"] }
+syn = { version = "3", features = ["full", "visit", "parsing", "printing"] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
