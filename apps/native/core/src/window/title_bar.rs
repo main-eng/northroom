@@ -71,8 +71,6 @@ pub struct Shown<'a> {
     /// The update button sits at the bar's right end.
     pub update: bool,
     pub sessions: SessionsShown,
-    /// Files wait in the Changes list, so the review button shows left of the sessions button.
-    pub review: bool,
     pub window_buttons: WindowButtons,
 }
 
@@ -166,7 +164,7 @@ pub struct Layout {
     pub sessions: Option<Frame>,
     pub sessions_glyph: Option<Frame>,
     pub sessions_words_x: f64,
-    /// The review button, left of the sessions button while files wait in the Changes list.
+    /// The review button, always left of the sessions button.
     pub review: Option<Frame>,
     /// Where the settings title starts, while settings are open.
     pub settings_x: f64,
@@ -283,9 +281,7 @@ impl TitleBar {
             shown.sessions.grown.clamp(0.0, 1.0),
             sessions_right,
         );
-        let review = shown
-            .review
-            .then(|| button(sessions.x - CONTROL_GAP - BUTTON));
+        let review = Some(button(sessions.x - CONTROL_GAP - BUTTON));
         let back = shown.window_buttons.back_x();
         let origin = back + TABS_PAST_BACK;
         let mut layout = Layout {
@@ -311,7 +307,7 @@ impl TitleBar {
             .iter()
             .map(|title| title + TAB_CHROME)
             .collect();
-        // The row ends where "+" and its gap meet the review button, else the sessions button.
+        // The row ends where "+" and its gap meet the review button.
         let end = review.map_or(sessions.x, |review| review.x) - EDGE;
         let available = (end - BUTTON - TAB_GAP - origin).max(TAB_LEAST);
         let strip = strip(&wanted, available, TAB_GAP, TAB_LEAST, TAB_MOST);
@@ -727,7 +723,6 @@ mod tests {
             settings: false,
             update: false,
             sessions: SessionsShown::default(),
-            review: false,
             window_buttons: WindowButtons::Shown,
         }
     }
@@ -749,26 +744,19 @@ mod tests {
     }
 
     #[test]
-    fn the_review_button_shows_left_of_the_sessions_button_only_while_files_wait() {
+    fn the_review_button_sits_left_of_the_sessions_button() {
         let titles = [176.0; 12];
         let closes = [false; 12];
         let mut bar = TitleBar::default();
-        let none = bar.lay_out(&shown(&titles, &closes, 0)).clone();
-        assert_eq!(none.review, None);
-        let waiting = bar
-            .lay_out(&Shown {
-                review: true,
-                ..shown(&titles, &closes, 0)
-            })
-            .clone();
+        let laid = bar.lay_out(&shown(&titles, &closes, 0)).clone();
         // The sessions button stays 8 pt inside the right end; the review button sits a
-        // control gap left of it, and the tabs give up its room.
-        let sessions = waiting.sessions.expect("sessions");
+        // control gap left of it, and the tab row and "+" end before it.
+        let sessions = laid.sessions.expect("sessions");
         assert_eq!(sessions, button(WIDTH - 34.0));
-        let review = waiting.review.expect("review");
+        let review = laid.review.expect("review");
         assert_eq!(review, button(sessions.x - CONTROL_GAP - BUTTON));
-        let room = |layout: &Layout| layout.tabs_view.expect("tabs").width;
-        assert!((room(&none) - room(&waiting) - (BUTTON + CONTROL_GAP)).abs() < 1e-9);
+        let plus = laid.plus.expect("plus");
+        assert!(plus.x + plus.width <= review.x);
         let (x, y) = (review.x + BUTTON / 2.0, review.y + BUTTON / 2.0);
         assert_eq!(bar.hit(x, y), Control::Review);
         assert_eq!(
@@ -1103,7 +1091,7 @@ mod tests {
         let titles = [176.0; 20];
         let closes = [true; 20];
         let mut bar = TitleBar::default();
-        // Scrolled 250, the fourth tab runs from 90 to 154: at 139 it is under Forward's side
+        // Scrolled 280, the fifth tab runs from 126 to 190: at 139 it is under Forward's side
         // of the bar, out of the row's view.
         let layout = bar
             .lay_out(&Shown {
@@ -1111,7 +1099,7 @@ mod tests {
                 ..shown(&titles, &closes, 19)
             })
             .clone();
-        assert_eq!(layout.tabs[3].frame.x, 90.0);
+        assert_eq!(layout.tabs[4].frame.x, 126.0);
         assert!(layout
             .tabs
             .iter()
@@ -1177,10 +1165,11 @@ mod tests {
                 ..shown(&titles, &closes, 0)
             })
             .clone();
-        // 1280 less 8 + 26 for the sessions button and 8 + 26 + 2 + 142, then 30 more for the
-        // update button and its 4 pt gap; the tabs shrink to fit.
-        assert!((without - 1068.0).abs() < 1e-9, "{without}");
-        assert!((with.tabs_view.expect("tabs").width - 1038.0).abs() < 1e-9);
+        // 1280 less 8 + 26 for the sessions button, 26 + 4 for the review button and
+        // 8 + 26 + 2 + 142, then 30 more for the update button and its 4 pt gap; the tabs
+        // shrink to fit.
+        assert!((without - 1038.0).abs() < 1e-9, "{without}");
+        assert!((with.tabs_view.expect("tabs").width - 1008.0).abs() < 1e-9);
         assert_eq!(with.update, Some(button(WIDTH - 34.0)));
         assert_eq!(with.sessions, Some(button(WIDTH - 34.0 - 30.0)));
     }
@@ -1190,25 +1179,25 @@ mod tests {
         let titles = [176.0; 20];
         let closes = [false; 20];
         let mut bar = TitleBar::default();
-        // Twenty tabs at their least: 20 × 64 and 19 gaps, more than the 1068 the bar holds.
+        // Twenty tabs at their least: 20 × 64 and 19 gaps, more than the 1038 the bar holds.
         let first = bar.lay_out(&shown(&titles, &closes, 0)).clone();
         assert!(first.clipped);
         assert_eq!((first.length, first.offset), (1318.0, 0.0));
         let last = bar.lay_out(&shown(&titles, &closes, 19)).clone();
-        assert_eq!(last.offset, 1318.0 - 1068.0);
-        assert_eq!(last.tabs[19].frame.x + 64.0, 142.0 + 1068.0);
+        assert_eq!(last.offset, 1318.0 - 1038.0);
+        assert_eq!(last.tabs[19].frame.x + 64.0, 142.0 + 1038.0);
         // Redrawn with no change, it stays put; a scroll stops at either end.
-        assert_eq!(bar.lay_out(&shown(&titles, &closes, 19)).offset, 250.0);
+        assert_eq!(bar.lay_out(&shown(&titles, &closes, 19)).offset, 280.0);
         assert!(bar.scroll(-100.0, WHEEL_POINTS));
-        assert_eq!(bar.layout().offset, 150.0);
+        assert_eq!(bar.layout().offset, 180.0);
         assert!(bar.scroll(-400.0, WHEEL_POINTS));
         assert_eq!(bar.layout().offset, 0.0);
         assert!(!bar.scroll(-10.0, WHEEL_POINTS));
         assert!(bar.scroll(1000.0, WHEEL_POINTS));
-        assert_eq!(bar.layout().offset, 250.0);
+        assert_eq!(bar.layout().offset, 280.0);
         // A wheel's click with ⇧ held goes 40 points.
         assert!(bar.scroll(-1.0, WHEEL_CLICKS));
-        assert_eq!(bar.layout().offset, 210.0);
+        assert_eq!(bar.layout().offset, 240.0);
     }
 
     #[test]
@@ -1237,7 +1226,7 @@ mod tests {
                 ..shown(&titles[..18], &closes[..18], 17)
             })
             .clone();
-        assert_eq!(next.offset, next.length - 1068.0);
+        assert_eq!(next.offset, next.length - 1038.0);
     }
 
     #[test]
@@ -1245,13 +1234,13 @@ mod tests {
         let titles = [176.0; 20];
         let closes = [true; 20];
         let mut bar = TitleBar::default();
-        // The first tab is active; the row is wheeled to its end, 250 along.
+        // The first tab is active; the row is wheeled to its end, 280 along.
         bar.lay_out(&shown(&titles, &closes, 0));
         assert!(bar.scroll(1000.0, WHEEL_POINTS));
-        assert_eq!(bar.layout().offset, 250.0);
+        assert_eq!(bar.layout().offset, 280.0);
         // The last tab closes: the row is 66 shorter and scrolls back by that much.
         let closed = bar.lay_out(&shown(&titles[..19], &closes[..19], 0)).clone();
-        assert_eq!(closed.offset, 184.0);
+        assert_eq!(closed.offset, 214.0);
     }
 
     #[test]
@@ -1307,11 +1296,11 @@ mod tests {
         let closes = [false; 20];
         let mut bar = TitleBar::default();
         bar.lay_out(&shown(&titles, &closes, 19));
-        // Scrolled 250, the fourth tab runs from 90 to 154: only its part inside the row's
+        // Scrolled 280, the fifth tab runs from 126 to 190: only its part inside the row's
         // view, from 142, is a tab.
-        assert_eq!(bar.layout().tabs[3].frame.x, 90.0);
+        assert_eq!(bar.layout().tabs[4].frame.x, 126.0);
         assert_eq!(bar.hit(139.0, 20.0), Control::Bar);
-        assert_eq!(bar.hit(150.0, 20.0), Control::Tab(3));
+        assert_eq!(bar.hit(150.0, 20.0), Control::Tab(4));
     }
 
     #[test]

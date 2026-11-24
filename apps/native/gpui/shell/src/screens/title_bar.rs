@@ -1,6 +1,5 @@
-//! The title bar: back and forward, the open tabs, the new-tab button, the review button (while
-//! files wait for review), the sessions button and the update button, laid out by the core
-//! (`nr_title_bar_lay_out`). In settings it shows the
+//! The title bar: back and forward, the open tabs, the new-tab button, the review button, the
+//! sessions button and the update button, laid out by the core (`nr_title_bar_lay_out`). In settings it shows the
 //! settings title instead, which Back leaves.
 //!
 //! A press asks the core what is under it (`nr_title_bar_hit`); a press on the bar itself moves
@@ -52,7 +51,7 @@ struct Bar {
     downloading: bool,
     /// The sessions button's content (`sessions_button`).
     sessions: SessionsButton,
-    /// Files wait for review, so the review button shows (`nr_changes_waiting`).
+    /// Files wait for review, so the review button is not muted (`nr_changes_waiting`).
     review: bool,
 }
 
@@ -476,7 +475,6 @@ fn paint(
             !read.update.is_empty(),
             f64::from(width(words, pill_face())),
             f64::from(grown),
-            read.review,
             pointed
                 .as_ref()
                 .map_or(std::ptr::null(), std::ptr::from_ref),
@@ -699,8 +697,8 @@ fn paint_tab_close(window: &mut Window, cx: &mut App, place: &Placed, close: Bou
     );
 }
 
-/// Paints the controls at the bar's right end: the review button and the update button when
-/// shown, and the sessions button.
+/// Paints the controls at the bar's right end: the review button, the sessions button, and the
+/// update button when shown.
 fn paint_controls(
     window: &mut Window,
     cx: &mut App,
@@ -709,25 +707,36 @@ fn paint_controls(
     place: &Placed,
     grown: f32,
 ) {
-    paint_review(window, cx, rect(&bar.review), place);
+    paint_review(window, cx, read.review, rect(&bar.review), place);
     paint_sessions(window, cx, read, bar, place, grown);
     paint_update(window, cx, read, rect(&bar.update), place);
 }
 
-/// Paints the review button, left of the sessions button while files wait for review: the
-/// Changes tab's diff glyph, as "+" is drawn.
-fn paint_review(window: &mut Window, cx: &mut App, button: Bounds<Pixels>, place: &Placed) {
+/// Paints the review button, left of the sessions button: the Changes tab's diff glyph, muted
+/// while no files wait for review (`waiting`), as the sessions glyph is while none run.
+fn paint_review(
+    window: &mut Window,
+    cx: &mut App,
+    waiting: bool,
+    button: Bounds<Pixels>,
+    place: &Placed,
+) {
     if kit::core::is_empty(&button) {
         return;
     }
     let level = fade(window, c"review", place.lit(button));
     place.light(window, button, 0.08 * level);
+    let ink = if waiting {
+        Token::Foreground
+    } else {
+        Token::MutedForeground
+    };
     icons::draw(
         window,
         cx,
         Glyph::Diff,
         place.at(kit::core::inset(button, 6.0, 6.0)),
-        color(Token::Foreground),
+        color(ink),
     );
 }
 

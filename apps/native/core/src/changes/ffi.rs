@@ -18,8 +18,8 @@
 //!   folder path's root (its repository, else the drive; `git::root_for`).
 //! - `nr_changes_open_current()`: the same for the root with the latest turn, else the folder
 //!   on screen (the menu bar's Show Changes, the title bar's review button).
-//! - `nr_changes_waiting() -> usize`: how many files wait for review; the title bar shows its
-//!   review button while any do.
+//! - `nr_changes_waiting() -> usize`: how many files wait for review; the title bar's review
+//!   button is muted while none do.
 //! - `nr_changes_shown() -> bool`: whether the active tab is a Changes tab
 //!   (`NrShellView.changes`).
 //! - `nr_changes_revision() -> u64`: changes whenever anything below may read differently.
@@ -175,8 +175,8 @@ fn waiting() -> usize {
     current_folder().map_or(0, |folder| service().waiting(&root_of(&folder)))
 }
 
-/// How many files wait for review (`waiting`). The title bar shows its review button while any
-/// do.
+/// How many files wait for review (`waiting`). The title bar's review button is muted while
+/// none do.
 #[no_mangle]
 pub extern "C" fn nr_changes_waiting() -> usize {
     waiting()

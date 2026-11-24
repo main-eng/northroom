@@ -388,7 +388,7 @@ pub struct NrTitleBar {
     pub sessions: NrRect,
     pub sessions_glyph: NrRect,
     pub sessions_words_x: f64,
-    /// The review button, while files wait in the Changes list.
+    /// The review button, left of the sessions button.
     pub review: NrRect,
     /// Where the settings title starts, while settings are open.
     pub settings_x: f64,
@@ -435,8 +435,7 @@ unsafe fn widths_of<'a>(widths: *const f64, count: usize) -> &'a [f64] {
 /// Lays out the title bar for a window `width` wide. `titles` holds `count` tab name widths in
 /// the tab font. `update` shows the update button. `sessions_words` is the width of the sessions
 /// button's text (`sessions::ffi::sessions_button`) in the pill font, 0 for none, and
-/// `sessions_grown` is how far the pill has grown, 0 to 1. `review` shows the review button, for
-/// files waiting in the Changes list (`nr_changes_waiting`). `pointer` is the pointer position, or
+/// `sessions_grown` is how far the pill has grown, 0 to 1. `pointer` is the pointer position, or
 /// null when off the bar. `window_buttons` says whether the window buttons sit at the bar's left
 /// end (they are hidden in full screen).
 ///
@@ -451,7 +450,6 @@ pub unsafe extern "C" fn nr_title_bar_lay_out(
     update: bool,
     sessions_words: f64,
     sessions_grown: f64,
-    review: bool,
     pointer: *const crate::board::ffi::NrPoint,
     window_buttons: crate::window::title_bar::WindowButtons,
 ) -> NrTitleBar {
@@ -484,7 +482,6 @@ pub unsafe extern "C" fn nr_title_bar_lay_out(
                 words: sessions_words,
                 grown: sessions_grown,
             },
-            review,
             window_buttons,
         });
         bar_of(bar.layout(), bar.carried())
