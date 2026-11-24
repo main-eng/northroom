@@ -844,42 +844,8 @@ fn paint_mark(
             let corners = radii(frame, card_frame, radius);
             window.paint_quad(gpui::fill(frame, mark_color(mark)).corner_radii(corners));
         }
-        NrMarkKind::TodoBox => {
-            let (ascent, descent) = metrics(Face::of(&mark.line_font));
-            let baseline = browser_baseline(
-                mark.line_top as f32,
-                mark.line_height as f32,
-                ascent,
-                descent,
-                window.scale_factor(),
-            );
-            let boxed = kit::core::frame(
-                f32::from(frame.origin.x),
-                baseline - f32::from(frame.origin.y),
-                f32::from(frame.size.width),
-                f32::from(frame.size.height),
-            );
-            if mark.stroke > 0.0 {
-                stroke(
-                    window,
-                    inset(boxed, mark.inset as f32, mark.inset as f32),
-                    mark_color(mark),
-                    radius,
-                    mark.stroke as f32,
-                );
-            } else {
-                rounded(window, boxed, mark_color(mark), radius);
-            }
-        }
-        NrMarkKind::Fade => {
-            let ground = named(&text(&mark.color));
-            let background = linear_gradient(
-                180.0,
-                linear_color_stop(ground.alpha(0.0), 0.0),
-                linear_color_stop(ground, 1.0),
-            );
-            window.paint_quad(gpui::fill(frame, background));
-        }
+        NrMarkKind::TodoBox => paint_todo_box(window, mark, frame, radius),
+        NrMarkKind::Fade => paint_fade(window, mark, frame),
         NrMarkKind::Oval => oval(window, frame, mark_color(mark)),
         NrMarkKind::Sign => {
             kit::signs::paint(window, cx, &text(&mark.text), frame, mark_color(mark))
@@ -891,6 +857,68 @@ fn paint_mark(
             kit::theme::stated_named(&text(&mark.color)),
             now,
         ),
+        NrMarkKind::Picture | NrMarkKind::VideoMoment | NrMarkKind::PictureAt => {
+            paint_thumb(window, mark, id, frame, card_frame);
+        }
+        NrMarkKind::Outline => stroke(window, frame, mark_color(mark), radius, mark.stroke as f32),
+        NrMarkKind::PictureFile => paint_picture_file(window, mark, frame, card_frame, radius),
+        NrMarkKind::Logo => paint_logo(window, cx, mark, frame),
+        // Painted before the later marks, which it may cover (`paint_card_marks`).
+        NrMarkKind::SystemPicture => {}
+    }
+}
+
+/// A to-do item's box, set on its line's baseline as a browser sets a checkbox: outlined when
+/// the mark has a stroke, filled otherwise.
+fn paint_todo_box(window: &mut Window, mark: &NrCardMark, frame: Bounds<Pixels>, radius: f32) {
+    let (ascent, descent) = metrics(Face::of(&mark.line_font));
+    let baseline = browser_baseline(
+        mark.line_top as f32,
+        mark.line_height as f32,
+        ascent,
+        descent,
+        window.scale_factor(),
+    );
+    let boxed = kit::core::frame(
+        f32::from(frame.origin.x),
+        baseline - f32::from(frame.origin.y),
+        f32::from(frame.size.width),
+        f32::from(frame.size.height),
+    );
+    if mark.stroke > 0.0 {
+        stroke(
+            window,
+            inset(boxed, mark.inset as f32, mark.inset as f32),
+            mark_color(mark),
+            radius,
+            mark.stroke as f32,
+        );
+    } else {
+        rounded(window, boxed, mark_color(mark), radius);
+    }
+}
+
+/// A fade from clear at the top to the mark's colour at the bottom.
+fn paint_fade(window: &mut Window, mark: &NrCardMark, frame: Bounds<Pixels>) {
+    let ground = named(&text(&mark.color));
+    let background = linear_gradient(
+        180.0,
+        linear_color_stop(ground.alpha(0.0), 0.0),
+        linear_color_stop(ground, 1.0),
+    );
+    window.paint_quad(gpui::fill(frame, background));
+}
+
+/// The card's own picture, a moment of its video, or a picture file the mark names, once its
+/// thumbnail is ready.
+fn paint_thumb(
+    window: &mut Window,
+    mark: &NrCardMark,
+    id: &str,
+    frame: Bounds<Pixels>,
+    card_frame: Bounds<Pixels>,
+) {
+    match mark.kind {
         NrMarkKind::Picture => {
             if let Some(image) = thumbs::picture(id, mark.pixels, mark.video) {
                 place_picture(window, &image, mark, frame, card_frame);
@@ -901,29 +929,35 @@ fn paint_mark(
                 place_picture(window, &image, mark, frame, card_frame);
             }
         }
-        NrMarkKind::PictureAt => {
+        _ => {
             if let Some(image) = thumbs::picture_file(&text(&mark.text), mark.pixels) {
                 cover(window, &image, frame, radii(frame, card_frame, 0.0));
             }
         }
-        NrMarkKind::Outline => stroke(window, frame, mark_color(mark), radius, mark.stroke as f32),
-        NrMarkKind::PictureFile => {
-            let ground = named(&text(&mark.color));
-            let corners = radii(frame, card_frame, radius);
-            window.paint_quad(gpui::fill(frame, ground).corner_radii(corners));
-            if let Some(image) = thumbs::picture(&text(&mark.text), mark.pixels, false) {
-                cover(window, &image, frame, corners);
-            }
-        }
-        // A terminal's program logo in its own colours, on the tile the earlier marks drew.
-        NrMarkKind::Logo => {
-            let pixels = f32::from(frame.size.width) * window.scale_factor();
-            if let Some(logo) = thumbs::logo(&text(&mark.text), pixels, cx) {
-                let _ = window.paint_image(frame, frame, gpui::Corners::default(), logo, 0, false);
-            }
-        }
-        // Painted before the later marks, which it may cover (`paint_card_marks`).
-        NrMarkKind::SystemPicture => {}
+    }
+}
+
+/// A picture file on the mark's colour, which shows until the picture is ready.
+fn paint_picture_file(
+    window: &mut Window,
+    mark: &NrCardMark,
+    frame: Bounds<Pixels>,
+    card_frame: Bounds<Pixels>,
+    radius: f32,
+) {
+    let ground = named(&text(&mark.color));
+    let corners = radii(frame, card_frame, radius);
+    window.paint_quad(gpui::fill(frame, ground).corner_radii(corners));
+    if let Some(image) = thumbs::picture(&text(&mark.text), mark.pixels, false) {
+        cover(window, &image, frame, corners);
+    }
+}
+
+/// A terminal's program logo in its own colours, on the tile the earlier marks drew.
+fn paint_logo(window: &mut Window, cx: &mut App, mark: &NrCardMark, frame: Bounds<Pixels>) {
+    let pixels = f32::from(frame.size.width) * window.scale_factor();
+    if let Some(logo) = thumbs::logo(&text(&mark.text), pixels, cx) {
+        let _ = window.paint_image(frame, frame, gpui::Corners::default(), logo, 0, false);
     }
 }
 

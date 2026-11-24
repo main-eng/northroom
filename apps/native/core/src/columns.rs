@@ -2368,39 +2368,12 @@ impl Columns {
     /// own folder and clears the selection. Returns the rows the menu is about: the selected
     /// files (in the list, only those in the clicked file's folder); none for empty space.
     pub fn context_rows(&mut self, table: Table, row: Option<usize>) -> DriveResult<Vec<usize>> {
-        let file = |columns: &Self, row: usize| match table {
-            Table::List => columns
-                .list_shown
-                .get(row)
-                .is_some_and(|shown| !shown.placeholder),
-            Table::Column(column) => columns
-                .columns()
-                .get(column)
-                .is_some_and(|shown| row < shown.rows.len()),
-        };
-        let Some(row) = row.filter(|&row| file(self, row)) else {
-            match table {
-                Table::List => self.list_scope = None,
-                Table::Column(column) => {
-                    if !self.table_selection(table).rows.is_empty() {
-                        self.settle(column);
-                    }
-                }
-            }
+        let Some(row) = row.filter(|&row| self.is_file_row(table, row)) else {
+            self.right_click_empty(table);
             return Ok(Vec::new());
         };
         if !self.table_selection(table).rows.contains(&row) {
-            let (keys, chosen) = self.table_chosen(table);
-            let ids = vec![keys[row].clone()];
-            match table {
-                Table::List => self.choose(table, Chosen { ids, ..chosen })?,
-                Table::Column(column) => {
-                    let revision = self.revision;
-                    let shown = &mut self.tab_mut().columns[column];
-                    shown.chosen.ids = ids;
-                    shown.group_at = revision;
-                }
-            }
+            self.select_alone(table, row)?;
         }
         let selected = self.table_selection(table).rows;
         if table != Table::List {
@@ -2409,6 +2382,50 @@ impl Columns {
         let (scope, group) = list_menu(&self.list_shown, &selected, row);
         self.list_scope = scope;
         Ok(group)
+    }
+
+    /// Whether `row` of `table` is a file, not a placeholder or past the rows.
+    fn is_file_row(&self, table: Table, row: usize) -> bool {
+        match table {
+            Table::List => self
+                .list_shown
+                .get(row)
+                .is_some_and(|shown| !shown.placeholder),
+            Table::Column(column) => self
+                .columns()
+                .get(column)
+                .is_some_and(|shown| row < shown.rows.len()),
+        }
+    }
+
+    /// A right click on `table`'s empty space: the list's commands act in the folder shown
+    /// again, and a column's selection clears.
+    fn right_click_empty(&mut self, table: Table) {
+        match table {
+            Table::List => self.list_scope = None,
+            Table::Column(column) => {
+                if !self.table_selection(table).rows.is_empty() {
+                    self.settle(column);
+                }
+            }
+        }
+    }
+
+    /// Selects `row` of `table` alone, for its menu. A column only marks it chosen, opening
+    /// nothing (`context_rows`).
+    fn select_alone(&mut self, table: Table, row: usize) -> DriveResult<()> {
+        let (keys, chosen) = self.table_chosen(table);
+        let ids = vec![keys[row].clone()];
+        match table {
+            Table::List => self.choose(table, Chosen { ids, ..chosen })?,
+            Table::Column(column) => {
+                let revision = self.revision;
+                let shown = &mut self.tab_mut().columns[column];
+                shown.chosen.ids = ids;
+                shown.group_at = revision;
+            }
+        }
+        Ok(())
     }
 
     /// The single selected file to rename on Return or F2. None when zero or several are

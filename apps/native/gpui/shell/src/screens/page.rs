@@ -304,13 +304,7 @@ impl Page {
             f32::from(self.frame.size.height),
         );
         let typed = self.field.as_ref().map(|field| field.text.as_str());
-        if width <= 0.0
-            || (!self.stale
-                && self
-                    .laid
-                    .as_ref()
-                    .is_some_and(|laid| laid.width == width && laid.typed.as_deref() == typed))
-        {
+        if width <= 0.0 || self.current(width, typed) {
             return;
         }
         let typed = typed.map(str::to_owned);
@@ -334,24 +328,7 @@ impl Page {
         );
         PLACING.with(|placing| *placing.borrow_mut() = None);
         self.players.update(cx, |players, cx| players.end(cx));
-        let slots = if layout.slot_count == 0 {
-            Vec::new()
-        } else {
-            // SAFETY: the core lends `slot_count` slots until the view's next layout.
-            unsafe { std::slice::from_raw_parts(layout.slots, layout.slot_count) }
-                .iter()
-                .map(Slot::of)
-                .collect()
-        };
-        let blocks = if layout.block_count == 0 {
-            Vec::new()
-        } else {
-            // SAFETY: as for the slots.
-            unsafe { std::slice::from_raw_parts(layout.blocks, layout.block_count) }
-                .iter()
-                .map(|block| rect(&block.frame))
-                .collect()
-        };
+        let (slots, blocks) = (slots_of(&layout), blocks_of(&layout));
         let (side, height) = (layout.side as f32, layout.height as f32);
         self.scroller.set_extent(viewport, height.max(viewport));
         self.laid = Some(Laid {
@@ -363,7 +340,21 @@ impl Page {
             width,
             typed,
         });
-        // An open field moves with its slot to the new layout.
+        self.field_follows();
+    }
+
+    /// Whether the last layout still holds: none was requested, and the width and the open
+    /// field's text are the same.
+    fn current(&self, width: f32, typed: Option<&str>) -> bool {
+        !self.stale
+            && self
+                .laid
+                .as_ref()
+                .is_some_and(|laid| laid.width == width && laid.typed.as_deref() == typed)
+    }
+
+    /// An open field moves with its slot to the new layout.
+    fn field_follows(&mut self) {
         if let (Some(field), Some(laid)) = (&mut self.field, &self.laid)
             && let Some(slot) = laid.slots.iter().find(|slot| {
                 slot.block == field.slot.block
@@ -1976,4 +1967,28 @@ fn media(step: &Step, _: &mut Pointer, window: &mut Window, cx: &mut App) -> Don
         });
     }
     Done::Done
+}
+
+/// The slots `layout` lends, copied out.
+fn slots_of(layout: &NrPageLayout) -> Vec<Slot> {
+    if layout.slot_count == 0 {
+        return Vec::new();
+    }
+    // SAFETY: the core lends `slot_count` slots until the view's next layout.
+    unsafe { std::slice::from_raw_parts(layout.slots, layout.slot_count) }
+        .iter()
+        .map(Slot::of)
+        .collect()
+}
+
+/// The block frames `layout` lends, copied out.
+fn blocks_of(layout: &NrPageLayout) -> Vec<Bounds<Pixels>> {
+    if layout.block_count == 0 {
+        return Vec::new();
+    }
+    // SAFETY: as for the slots.
+    unsafe { std::slice::from_raw_parts(layout.blocks, layout.block_count) }
+        .iter()
+        .map(|block| rect(&block.frame))
+        .collect()
 }

@@ -391,23 +391,7 @@ impl Column {
             self.drop_target = None;
             if let Some(row) = over.then(|| self.row_at(event.position)).flatten() {
                 chip::end();
-                let place = self.drop_place(&drag.ids, row);
-                if place != NrDropPlace::Nowhere {
-                    let ids = c(&drag.ids.join("\n"));
-                    let said = if place == NrDropPlace::Terminal {
-                        let terminal = c(&self.items[row as usize].id);
-                        // SAFETY: NUL-terminated strings.
-                        Said::of(&unsafe {
-                            nr_folder_drop(self.index, ids.as_ptr(), terminal.as_ptr())
-                        })
-                    } else {
-                        // SAFETY: a NUL-terminated list.
-                        Said::refused(&unsafe { nr_column_drop(ids.as_ptr(), self.index, row) })
-                    };
-                    self.reload();
-                    cx.emit(Event::Said(said));
-                    self.changed(cx);
-                }
+                self.drop_on(&drag.ids, row, cx);
             }
             cx.notify();
             return;
@@ -418,6 +402,27 @@ impl Column {
                 None => self.changed(cx),
             }
         }
+    }
+
+    /// Drops the dragged items `ids` on `row`: into a terminal row's session, else into the
+    /// column, wherever `drop_place` allows. Nothing happens where it allows none.
+    fn drop_on(&mut self, ids: &[String], row: i64, cx: &mut Context<Self>) {
+        let place = self.drop_place(ids, row);
+        if place == NrDropPlace::Nowhere {
+            return;
+        }
+        let ids = c(&ids.join("\n"));
+        let said = if place == NrDropPlace::Terminal {
+            let terminal = c(&self.items[row as usize].id);
+            // SAFETY: NUL-terminated strings.
+            Said::of(&unsafe { nr_folder_drop(self.index, ids.as_ptr(), terminal.as_ptr()) })
+        } else {
+            // SAFETY: a NUL-terminated list.
+            Said::refused(&unsafe { nr_column_drop(ids.as_ptr(), self.index, row) })
+        };
+        self.reload();
+        cx.emit(Event::Said(said));
+        self.changed(cx);
     }
 
     fn scroll(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {

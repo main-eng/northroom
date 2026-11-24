@@ -806,25 +806,43 @@ pub mod video_controls {
     ) -> Press {
         let laid = layout(width, height, true);
         if menu_open {
-            Press::Menu
-        } else if scrubs_at(&laid, x, y, has_audio && volume_open) {
-            Press::Scrub(laid.track)
-        } else if laid.overflow.contains(x, y) {
-            Press::ToggleMenu
+            return Press::Menu;
+        }
+        if scrubs_at(&laid, x, y, has_audio && volume_open) {
+            return Press::Scrub(laid.track);
+        }
+        button_press(&laid, x, y)
+            .or_else(|| {
+                has_audio
+                    .then(|| sound_press(&laid, x, y, volume_open))
+                    .flatten()
+            })
+            .unwrap_or(Press::Picture)
+    }
+
+    /// The overflow, full screen or play button under (`x`, `y`), checked in that order.
+    fn button_press(laid: &Layout, x: f64, y: f64) -> Option<Press> {
+        if laid.overflow.contains(x, y) {
+            Some(Press::ToggleMenu)
         } else if laid.fullscreen.contains(x, y) {
-            Press::Fullscreen
+            Some(Press::Fullscreen)
         } else if laid.play.contains(x, y) {
-            Press::Play
-        } else if has_audio
-            && volume_open
-            && laid.volume_ground.contains(x, y)
-            && !laid.mute.contains(x, y)
-        {
-            Press::Volume(laid.volume_bar)
-        } else if has_audio && laid.mute.contains(x, y) {
-            Press::Mute
+            Some(Press::Play)
         } else {
-            Press::Picture
+            None
+        }
+    }
+
+    /// The sound control under (`x`, `y`): the open volume slider off the speaker, else the
+    /// speaker.
+    fn sound_press(laid: &Layout, x: f64, y: f64, volume_open: bool) -> Option<Press> {
+        let on_mute = laid.mute.contains(x, y);
+        if volume_open && laid.volume_ground.contains(x, y) && !on_mute {
+            Some(Press::Volume(laid.volume_bar))
+        } else if on_mute {
+            Some(Press::Mute)
+        } else {
+            None
         }
     }
 
