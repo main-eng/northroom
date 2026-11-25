@@ -20,7 +20,8 @@ fn opened_path() -> Option<(PathBuf, Kind)> {
     let (path, kind) = with_columns(|columns| {
         let opened = columns.opened()?.clone();
         let kind = Kind::of_name(&opened.title).filter(|_| opened.kind == EntryKind::File)?;
-        Some((columns.workspace().path_of(&opened.id).ok()?, kind))
+        let path = columns.workspace().path_of(&opened.id).ok()?;
+        kind.claims(&path).then_some((path, kind))
     })
     .flatten()?;
     let stat = std::fs::metadata(&path).ok()?;

@@ -1,11 +1,12 @@
-//! Checks the PowerPoint reader (`deck::pptx`) against files other programs wrote:
-//! `fixtures/deck/python-pptx.pptx`, made by python-pptx from its default template
-//! (`fixtures/deck/make.py`), and `fixtures/deck/Pitch deck.pptx`, the sample deck the
-//! sample-files script writes.
+//! Checks the readers of decks drawn page by page (`deck`) against files other programs wrote.
+//! Each fixture is in `fixtures/deck`, with the script that made it where a script did:
+//! `python-pptx.pptx` (`make.py`), `odfpy.odp` (`make_odp.py`), the stand-in raw photo
+//! (`make_raw.py`) and Apple documents (`make_iwork.py`). `Pitch deck.pptx` and
+//! `Label artwork.psd` are sample files the sample-files script writes.
 
 use northroom_core::deck::{
-    flow, odp, picture, pptx, Align, Anchor, Colour, Deck, Fit, Form, Item, ReadError, Shape,
-    Slide, Source,
+    flow, iwork, odp, picture, pptx, Align, Anchor, Colour, Deck, Fit, Form, Item, ReadError,
+    Shape, Slide, Source,
 };
 use northroom_core::geometry::Rect;
 use std::path::PathBuf;
@@ -310,4 +311,20 @@ fn a_raw_photo_draws_its_largest_preview() {
         ("jpeg", Some((1200, 675)))
     );
     assert!(bytes.ends_with(&[0xff, 0xd9]));
+}
+
+#[test]
+fn an_apple_document_draws_the_preview_it_carries() {
+    let deck = iwork::read(&fixture("Stand-in.key")).expect("read");
+    assert_eq!(
+        (deck.width, deck.height, deck.fit),
+        (1200.0, 675.0, Fit::Picture)
+    );
+    assert_eq!(deck.pictures, [Source::Entry("preview.jpg".to_owned())]);
+    let older = iwork::read(&fixture("Stand-in 2012.pages")).expect("read");
+    assert_eq!(
+        older.pictures,
+        [Source::Entry("QuickLook/Thumbnail.jpg".to_owned())]
+    );
+    assert!(iwork::read(&fixture("Pitch deck.pptx")).is_err());
 }

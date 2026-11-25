@@ -11,6 +11,7 @@
 pub mod docx;
 pub mod ffi;
 pub mod flow;
+pub mod iwork;
 pub mod layout;
 mod odf;
 pub mod odp;
@@ -79,6 +80,8 @@ pub enum Kind {
     Photoshop,
     /// A camera's raw photo.
     RawPhoto,
+    /// Keynote, Pages or Numbers, shown as the preview it carries.
+    AppleDocument,
 }
 
 /// The largest document drawn; a larger one shows its details. A file is read whole when it
@@ -88,10 +91,25 @@ const DOCUMENT_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const PICTURE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 impl Kind {
+    /// Whether the file at `path`, whose name says this kind, is laid out as one. Only names
+    /// that other files share are checked: a `.key` may be a private key, not a Keynote.
+    pub fn claims(self, path: &Path) -> bool {
+        match self {
+            Kind::AppleDocument => iwork::is_document(path),
+            Kind::Presentation
+            | Kind::WordDocument
+            | Kind::OpenDocumentText
+            | Kind::OpenDocumentPresentation
+            | Kind::RichText
+            | Kind::Photoshop
+            | Kind::RawPhoto => true,
+        }
+    }
+
     /// The largest file of this kind drawn.
     pub fn max_bytes(self) -> u64 {
         match self {
-            Kind::Photoshop | Kind::RawPhoto => PICTURE_MAX_BYTES,
+            Kind::Photoshop | Kind::RawPhoto | Kind::AppleDocument => PICTURE_MAX_BYTES,
             Kind::Presentation
             | Kind::WordDocument
             | Kind::OpenDocumentText
@@ -113,6 +131,7 @@ impl Kind {
             "odp" | "otp" => Kind::OpenDocumentPresentation,
             "rtf" | "rtfd" => Kind::RichText,
             "psd" | "psb" => Kind::Photoshop,
+            "key" | "pages" | "numbers" => Kind::AppleDocument,
             "dng" | "cr2" | "cr3" | "nef" | "nrw" | "arw" | "raf" | "orf" | "rw2" | "pef"
             | "srw" => Kind::RawPhoto,
             _ => return None,
@@ -131,6 +150,7 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
         Kind::RichText => Ok(flow::paginate(rtf::read(path)?, measure)),
         Kind::Photoshop => picture::read_photoshop_file(path),
         Kind::RawPhoto => picture::read_raw_file(path),
+        Kind::AppleDocument => iwork::read(path),
     }
 }
 

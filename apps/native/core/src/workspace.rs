@@ -617,12 +617,12 @@ pub fn is_system_preview_file(path: &Path) -> bool {
 // One kind of file per line, under its comment.
 #[rustfmt::skip]
 const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
-    // Presentations the deck cannot read: legacy PowerPoint, Keynote and OpenDocument.
-    "ppt", "pps", "pot", "key",
-    // Documents the page view cannot read: legacy Word, rich text, Pages and OpenDocument.
-    "doc", "pages",
-    // Spreadsheets the table cannot read: legacy Excel and Numbers.
-    "xls", "numbers",
+    // Presentations the deck cannot read: legacy PowerPoint.
+    "ppt", "pps", "pot",
+    // Documents the page view cannot read: legacy Word.
+    "doc",
+    // Spreadsheets the table cannot read: legacy Excel.
+    "xls",
     // Fonts.
     "ttf", "otf", "ttc", "otc", "dfont",
     // 3D scenes Model I/O reads.
@@ -715,9 +715,9 @@ fn read_folder_as_file(path: &Path, stat: &fs::Metadata) -> FileRead {
     let package = stat.is_dir()
         && DOCUMENT_PACKAGE_EXTENSIONS.contains(&extension.as_str())
         && is_package(path, &extension);
-    let drawn = path
-        .file_name()
-        .is_some_and(|name| crate::deck::Kind::of_name(&name.to_string_lossy()).is_some());
+    let drawn = path.file_name().is_some_and(|name| {
+        crate::deck::Kind::of_name(&name.to_string_lossy()).is_some_and(|kind| kind.claims(path))
+    });
     match (package, drawn) {
         (true, true) => FileRead::Deck,
         (true, false) => FileRead::SystemPreview,
@@ -750,7 +750,8 @@ fn read_by_name(path: &Path, length_bytes: u64) -> Option<FileRead> {
 /// show, else as a file with only its details. `None` for any other name.
 fn read_document(path: &Path, length_bytes: u64) -> Option<FileRead> {
     let name = path.file_name()?.to_string_lossy();
-    let (shown, max_bytes) = if let Some(kind) = crate::deck::Kind::of_name(&name) {
+    let drawn = crate::deck::Kind::of_name(&name).filter(|kind| kind.claims(path));
+    let (shown, max_bytes) = if let Some(kind) = drawn {
         (FileRead::Deck, kind.max_bytes())
     } else if crate::sheets::workbook::is_workbook_name(&name) {
         (FileRead::Workbook, crate::sheets::workbook::FILE_MAX_BYTES)
@@ -2674,7 +2675,6 @@ mod tests {
         };
         for name in [
             "Pitch.ppt",
-            "Pitch.key",
             "Letter.doc",
             "Brand.otf",
             "Cup.usdz",
@@ -2683,6 +2683,15 @@ mod tests {
             assert_eq!(read_file(&write(name, b"text")), previewed, "{name}");
         }
         assert_eq!(read_text_file(&root.path().join("Bag.obj")), None);
+        // A Keynote file is a zip; a private key with the same extension is text.
+        assert_eq!(
+            read_file(&write("Pitch.key", b"PK\x03\x04")),
+            FileRead::Deck
+        );
+        assert_eq!(
+            read_file(&write("deploy.key", b"-----BEGIN KEY-----")),
+            FileRead::Text("-----BEGIN KEY-----".to_owned())
+        );
         assert_eq!(
             read_file(&write("Card.html", b"<h1>A</h1>")),
             FileRead::Html("<h1>A</h1>".to_owned())

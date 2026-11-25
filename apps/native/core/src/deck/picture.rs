@@ -23,7 +23,7 @@ const PIXELS_MAX: u64 = 200_000_000;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// A page that shows only `picture`, its size in pixels taken as points.
-fn deck_of(picture: Source, width: u32, height: u32) -> Deck {
+pub(crate) fn deck_of(picture: Source, width: u32, height: u32) -> Deck {
     let (width, height) = (f64::from(width.max(1)), f64::from(height.max(1)));
     Deck {
         width,
