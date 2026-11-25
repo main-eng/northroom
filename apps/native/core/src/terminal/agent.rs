@@ -446,9 +446,19 @@ mod tests {
             .arg("30")
             .spawn()
             .expect("start");
-        let arguments = i32::try_from(child.id()).ok().and_then(arguments_of);
+        let process = i32::try_from(child.id()).expect("a process id");
+        let wanted = Some(words(&["/bin/sleep", "30"]));
+        // On Linux the arguments appear once the new program has replaced the forked copy,
+        // which can be a moment after the start returns; until then they are the parent's or
+        // none. The app reads a running agent's again and again, so only the test waits.
+        let started = std::time::Instant::now();
+        let mut arguments = arguments_of(process);
+        while arguments != wanted && started.elapsed() < std::time::Duration::from_secs(2) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            arguments = arguments_of(process);
+        }
         child.kill().expect("stop");
         child.wait().expect("wait");
-        assert_eq!(arguments, Some(words(&["/bin/sleep", "30"])));
+        assert_eq!(arguments, wanted);
     }
 }

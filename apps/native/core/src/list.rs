@@ -103,7 +103,10 @@ pub fn clock_of(hour: u32, minute: u32) -> String {
         0 => 12,
         other => other,
     };
-    format!("{twelve}:{minute:02} {}", if hour < 12 { "AM" } else { "PM" })
+    format!(
+        "{twelve}:{minute:02} {}",
+        if hour < 12 { "AM" } else { "PM" }
+    )
 }
 
 /// A day and time as Finder says it: "Oct 10, 2026 at 3:58 PM". `month` counts from 0.

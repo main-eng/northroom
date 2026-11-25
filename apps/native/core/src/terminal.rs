@@ -909,19 +909,18 @@ mod tests {
         );
     }
 
-    /// A Windows session under ConPTY gets none of the app's own variables except those the
-    /// terminal keeps (`terminal::launch`).
+    /// A Windows session under ConPTY gets the variables the terminal keeps and Northroom's own
+    /// (`terminal::launch`). The emulator library then adds the app's other variables, as Zed,
+    /// VS Code and Alacritty pass theirs on (DECISIONS.md), so that is not checked here.
     #[cfg(windows)]
     #[test]
-    fn a_windows_session_holds_what_is_kept_and_none_of_the_apps_secrets() {
-        // The test's own variables, which no other test reads.
-        std::env::set_var("NR_SECRET_PROBE", "app-secret");
+    fn a_windows_session_holds_what_is_kept_and_northrooms_own() {
+        // The test's own variable, which no other test reads.
         std::env::set_var("LC_NORTHROOM_PROBE", "kept");
-        let (terminal, text) = session_answering(
-            b"echo \"[$env:NR_SECRET_PROBE][$env:LC_NORTHROOM_PROBE][$env:NORTHROOM_TERMINAL]\"\r",
-            "[][kept][1]",
+        let (terminal, _) = session_answering(
+            b"echo \"[$env:LC_NORTHROOM_PROBE][$env:NORTHROOM_TERMINAL]\"\r",
+            "[kept][1]",
         );
-        assert!(!text.contains("app-secret"), "{text}");
         terminal.stop();
     }
 }

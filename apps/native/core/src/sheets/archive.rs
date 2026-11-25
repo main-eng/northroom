@@ -43,7 +43,10 @@ pub fn read(path: &std::path::Path) -> Result<Workbook> {
         .map(|entry| {
             vec![
                 cell(entry.name, Alignment::Start),
-                cell(crate::list::format_size(Some(entry.size as u64)), Alignment::End),
+                cell(
+                    crate::list::format_size(Some(entry.size as u64)),
+                    Alignment::End,
+                ),
                 cell(modified_words(entry.modified), Alignment::Start),
             ]
         })
@@ -64,7 +67,14 @@ mod tests {
         sheet
             .rows
             .iter()
-            .map(|row| row.iter().map(|cell| cell.as_ref().map_or(String::new(), |cell| cell.text.clone())).collect())
+            .map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        cell.as_ref()
+                            .map_or(String::new(), |cell| cell.text.clone())
+                    })
+                    .collect()
+            })
             .collect()
     }
 
@@ -75,15 +85,24 @@ mod tests {
         std::fs::create_dir(&kit).expect("made");
         std::fs::write(kit.join("Logo.svg"), [b'x'; 2400]).expect("written");
         std::fs::write(kit.join("About.txt"), b"Harbor Coffee").expect("written");
-        let zip = crate::archive::Compress::of(vec![kit], "en").expect("planned").run().expect("compressed");
+        let zip = crate::archive::Compress::of(vec![kit], "en")
+            .expect("planned")
+            .run()
+            .expect("compressed");
         let workbook = read(&zip).expect("listed");
         let sheet = &workbook.sheets[0];
         assert_eq!(sheet.column_names, ["Name", "Size", "Date Modified"]);
         let mut rows = texts(sheet);
         rows.sort();
         assert_eq!(rows.len(), 2, "folders are left out: {rows:?}");
-        assert_eq!(rows[0][..2], ["Press kit/About.txt".to_owned(), "13 bytes".to_owned()]);
-        assert_eq!(rows[1][..2], ["Press kit/Logo.svg".to_owned(), "2 KB".to_owned()]);
+        assert_eq!(
+            rows[0][..2],
+            ["Press kit/About.txt".to_owned(), "13 bytes".to_owned()]
+        );
+        assert_eq!(
+            rows[1][..2],
+            ["Press kit/Logo.svg".to_owned(), "2 KB".to_owned()]
+        );
         assert!(rows[0][2].contains(" at "), "{}", rows[0][2]);
     }
 }

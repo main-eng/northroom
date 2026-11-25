@@ -191,11 +191,13 @@ pub fn list(bytes: &[u8]) -> Result<Vec<Listed>> {
 /// any size lists at once.
 pub fn list_file(path: &std::path::Path) -> Result<Vec<Listed>> {
     use std::io::{Read, Seek, SeekFrom};
-    let failed = |error: std::io::Error| PackageError(format!("The archive could not be read ({error})."));
+    let failed =
+        |error: std::io::Error| PackageError(format!("The archive could not be read ({error})."));
     let mut file = std::fs::File::open(path).map_err(failed)?;
     let length = file.metadata().map_err(failed)?.len();
     let tail_length = length.min((END_RECORD_BYTES + END_RECORD_MAX_COMMENT_BYTES) as u64);
-    file.seek(SeekFrom::Start(length - tail_length)).map_err(failed)?;
+    file.seek(SeekFrom::Start(length - tail_length))
+        .map_err(failed)?;
     let mut tail = vec![0; tail_length as usize];
     file.read_exact(&mut tail).map_err(failed)?;
     let (_, _) = ZipArchive::directory(&tail)?;
