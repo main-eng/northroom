@@ -6,6 +6,7 @@
 //! Left out: the even-odd rule (filled as nonzero), dashes (drawn solid), and line caps and
 //! joins beyond round joints.
 
+use super::stroke::Pen;
 use crate::deck::Command;
 
 /// How far a flattened curve may stray from the true curve, in pixels.
@@ -242,69 +243,6 @@ fn bounds(polygons: &Polygons, width: usize, height: usize) -> Option<(i64, i64,
         .then(|| (left, top, (right - left) as usize, (bottom - top) as usize))
 }
 
-/// Polygons that stroke `polygons` `width` wide: a rectangle a segment and a disc a joint, all
-/// wound the same way so their overlaps fill once.
-fn stroke_polygons(polygons: &Polygons, width: f64) -> Polygons {
-    let half = width / 2.0;
-    let mut out = Vec::new();
-    for points in polygons {
-        out.extend(
-            points
-                .windows(2)
-                .filter_map(|pair| segment(pair[0], pair[1], half)),
-        );
-        if half > 0.75 {
-            out.extend(joints(points).map(|point| disc(point, half)));
-        }
-    }
-    out
-}
-
-/// The rectangle that strokes the segment `from` to `to`, `half` either side.
-fn segment(from: (f64, f64), to: (f64, f64), half: f64) -> Option<Vec<(f64, f64)>> {
-    let length = (to.0 - from.0).hypot(to.1 - from.1);
-    if length < 1e-9 {
-        return None;
-    }
-    let normal = (
-        -(to.1 - from.1) / length * half,
-        (to.0 - from.0) / length * half,
-    );
-    Some(vec![
-        (from.0 + normal.0, from.1 + normal.1),
-        (to.0 + normal.0, to.1 + normal.1),
-        (to.0 - normal.0, to.1 - normal.1),
-        (from.0 - normal.0, from.1 - normal.1),
-    ])
-}
-
-/// Where an outline's segments meet: between each two, and where a closed outline began.
-fn joints(points: &[(f64, f64)]) -> impl Iterator<Item = (f64, f64)> + '_ {
-    let closed = points.len() > 2
-        && points
-            .first()
-            .zip(points.last())
-            .is_some_and(|(first, last)| (first.0 - last.0).hypot(first.1 - last.1) < 1e-6);
-    let inner = points
-        .iter()
-        .skip(1)
-        .take(points.len().saturating_sub(2))
-        .copied();
-    inner.chain(closed.then(|| points[0]))
-}
-
-/// A disc `half` in radius about `center`, turning the opposite way to the angle's growth, as
-/// the segments' rectangles turn.
-fn disc(center: (f64, f64), half: f64) -> Vec<(f64, f64)> {
-    let sides = if half > 3.0 { 16 } else { 8 };
-    (0..sides)
-        .map(|step| {
-            let angle = -(step as f64) / sides as f64 * std::f64::consts::TAU;
-            (center.0 + half * angle.cos(), center.1 + half * angle.sin())
-        })
-        .collect()
-}
-
 impl Canvas {
     pub fn new(width: usize, height: usize) -> Self {
         Self {
@@ -354,10 +292,16 @@ impl Canvas {
     }
 
     /// Strokes a path given in pixels, `width` pixels wide.
-    pub fn stroke(&mut self, path: &[Command], width: f64, colour: Rgba, clip: Option<&Mask>) {
-        let faint = (width / HAIRLINE).clamp(0.0, 1.0) as f32;
+    /// Strokes a path given in pixels with `pen`, its lengths in pixels. A line thinner than a
+    /// pixel is drawn a pixel wide and fainter.
+    pub fn stroke(&mut self, path: &[Command], pen: &Pen, colour: Rgba, clip: Option<&Mask>) {
+        let faint = (pen.width / HAIRLINE).clamp(0.0, 1.0) as f32;
         let colour = [colour[0], colour[1], colour[2], colour[3] * faint.max(0.35)];
-        let polygons = stroke_polygons(&flatten(path), width.max(HAIRLINE));
+        let pen = Pen {
+            width: pen.width.max(HAIRLINE),
+            ..pen.clone()
+        };
+        let polygons = super::stroke::outline(&flatten(path), &pen);
         self.paint(&polygons, colour, clip);
     }
 
@@ -519,7 +463,7 @@ mod tests {
             Command::Line(10.0, 30.0),
             Command::Close,
         ];
-        canvas.stroke(&square, 6.0, [0.0, 0.0, 0.0, 1.0], None);
+        canvas.stroke(&square, &Pen::solid(6.0), [0.0, 0.0, 0.0, 1.0], None);
         for (x, y) in [(10, 10), (30, 10), (30, 30), (10, 30), (31, 9), (9, 31)] {
             assert_eq!(canvas.pixels[(y * 40 + x) * 4 + 3], 255, "({x}, {y})");
         }
@@ -535,7 +479,7 @@ mod tests {
         let mut lines = Canvas::new(10, 10);
         lines.stroke(
             &[Command::Move(0.0, 5.0), Command::Line(10.0, 5.0)],
-            2.0,
+            &Pen::solid(2.0),
             [0.0, 0.0, 0.0, 1.0],
             None,
         );

@@ -11,6 +11,7 @@ use super::font::Font;
 use super::image::{self, Picture};
 use super::object::{Dict, Document, Object, Parser, Ref, Stream, Token};
 use super::raster::{Canvas, Mask, Rgba};
+use super::stroke::Pen;
 use crate::deck::Command;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -142,7 +143,7 @@ pub trait Sink {
     /// where marks are.
     fn wants_detail(&self) -> bool;
     fn fill(&mut self, path: &[Command], colour: Rgba, clip: &Clip);
-    fn stroke(&mut self, path: &[Command], width: f64, colour: Rgba, clip: &Clip);
+    fn stroke(&mut self, path: &[Command], pen: &Pen, colour: Rgba, clip: &Clip);
     fn gradient(&mut self, gradient: &Gradient, clip: &Clip);
     fn picture(&mut self, picture: Option<Picture>, matrix: Matrix, alpha: f32, clip: &Clip);
     /// An encoded picture the system decodes and draws on its own: a JPEG or JPEG 2000 shown
@@ -173,7 +174,8 @@ struct State {
     fill_pattern: Option<String>,
     stroke_space: Space,
     stroke: Vec<f32>,
-    line_width: f64,
+    /// The pen in user space.
+    pen: Pen,
     fill_alpha: f32,
     stroke_alpha: f32,
     clip: Clip,
@@ -262,7 +264,7 @@ impl State {
             fill_pattern: None,
             stroke_space: Space::Gray,
             stroke: vec![0.0],
-            line_width: 1.0,
+            pen: Pen::solid(1.0),
             fill_alpha: 1.0,
             stroke_alpha: 1.0,
             clip: None,
@@ -288,12 +290,25 @@ impl State {
         self.stroke_space.rgba(&self.stroke, self.stroke_alpha)
     }
 
-    fn device_width(&self) -> f64 {
+    /// The pen in pixels: its lengths scaled by the current matrix's average scale.
+    fn device_pen(&self) -> Pen {
         let scale = (self.ctm[0] * self.ctm[3] - self.ctm[1] * self.ctm[2])
             .abs()
             .sqrt();
-        self.line_width * scale
+        self.pen.scaled(scale)
     }
+}
+
+/// Sets a pen's dashes from a `d` operator's or `D` entry's array and phase. A pattern of
+/// all zeros, or with a negative length, is solid.
+fn set_dash(pen: &mut Pen, pattern: Option<&Object>, phase: Option<&Object>) {
+    let lengths: Vec<f64> = pattern
+        .and_then(Object::as_array)
+        .map(numbers_of)
+        .unwrap_or_default();
+    let usable = lengths.iter().all(|length| *length >= 0.0) && lengths.iter().sum::<f64>() > 0.0;
+    pen.dash = if usable { lengths } else { Vec::new() };
+    pen.phase = phase.map_or(0.0, number);
 }
 
 /// Fonts loaded once for a document, by their object.
@@ -441,9 +456,9 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             self.fill_path(&path);
         }
         if stroke {
-            let width = self.state.device_width();
+            let pen = self.state.device_pen();
             self.sink
-                .stroke(&path, width, self.state.stroke_colour(), &self.state.clip);
+                .stroke(&path, &pen, self.state.stroke_colour(), &self.state.clip);
         }
         if self.pending_clip {
             self.pending_clip = false;
@@ -692,9 +707,9 @@ impl<'a, S: Sink> Interpreter<'a, S> {
                 .fill(&path, self.state.fill_colour(), &self.state.clip);
         }
         if stroke {
-            let width = self.state.device_width();
+            let pen = self.state.device_pen();
             self.sink
-                .stroke(&path, width, self.state.stroke_colour(), &self.state.clip);
+                .stroke(&path, &pen, self.state.stroke_colour(), &self.state.clip);
         }
     }
 
@@ -928,9 +943,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             return;
         };
         let entry = |key: &str| self.document.entry(dict, key);
-        if let Some(width) = entry("LW").as_f64() {
-            self.state.line_width = width;
-        }
+        self.pen_state(dict);
         if let Some(alpha) = entry("ca").as_f64() {
             self.state.fill_alpha = alpha.clamp(0.0, 1.0) as f32;
         }
@@ -967,13 +980,46 @@ impl<'a, S: Sink> Interpreter<'a, S> {
                     self.state.ctm = multiply(matrix, self.state.ctm);
                 }
             }
-            b"w" => self.state.line_width = operands.first().map_or(1.0, number),
+            b"w" | b"J" | b"j" | b"M" | b"d" => self.pen_operator(operator, operands),
             b"gs" => {
                 if let Some(name) = operands.first().and_then(Object::as_name) {
                     self.graphics_state(name, resources);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// `w`, `J`, `j`, `M` and `d`: the pen's width, ends, corners, miter limit and dashes.
+    fn pen_operator(&mut self, operator: &[u8], operands: &[Object]) {
+        let first = operands.first().map_or(0.0, number);
+        let pen = &mut self.state.pen;
+        match operator {
+            b"w" => pen.width = first.max(0.0),
+            b"J" => pen.cap = Pen::cap_of(first as i64),
+            b"j" => pen.join = Pen::join_of(first as i64),
+            b"M" => pen.miter_limit = first.max(1.0),
+            _ => set_dash(pen, operands.first(), operands.get(1)),
+        }
+    }
+
+    /// A graphics state's pen entries: `LW`, `LC`, `LJ`, `ML` and `D`.
+    fn pen_state(&mut self, dict: &Dict) {
+        let entry = |key: &str| self.document.entry(dict, key);
+        let (width, cap, join, limit) = (
+            entry("LW").as_f64(),
+            entry("LC").as_i64(),
+            entry("LJ").as_i64(),
+            entry("ML").as_f64(),
+        );
+        let dash = entry("D");
+        let pen = &mut self.state.pen;
+        pen.width = width.map_or(pen.width, |width| width.max(0.0));
+        pen.cap = cap.map_or(pen.cap, Pen::cap_of);
+        pen.join = join.map_or(pen.join, Pen::join_of);
+        pen.miter_limit = limit.map_or(pen.miter_limit, |limit| limit.max(1.0));
+        if let Some(items) = dash.as_array() {
+            set_dash(pen, items.first(), items.get(1));
         }
     }
 
@@ -1003,7 +1049,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             }
             b"f" | b"F" | b"f*" | b"S" | b"s" | b"B" | b"B*" | b"b" | b"b*" | b"n" | b"W"
             | b"W*" => self.paint_operator(operator),
-            b"q" | b"Q" | b"cm" | b"w" | b"gs" => {
+            b"q" | b"Q" | b"cm" | b"w" | b"J" | b"j" | b"M" | b"d" | b"gs" => {
                 self.state_operator(operator, operands, resources)
             }
             b"g" | b"G" | b"rg" | b"RG" | b"k" | b"K" | b"cs" | b"CS" | b"sc" | b"scn" | b"SC"
@@ -1223,7 +1269,7 @@ impl Sink for Planner {
     fn fill(&mut self, _: &[Command], _: Rgba, _: &Clip) {
         self.marked = true;
     }
-    fn stroke(&mut self, _: &[Command], _: f64, _: Rgba, _: &Clip) {
+    fn stroke(&mut self, _: &[Command], _: &Pen, _: Rgba, _: &Clip) {
         self.marked = true;
     }
     fn gradient(&mut self, _: &Gradient, _: &Clip) {
@@ -1281,9 +1327,9 @@ impl Sink for Renderer {
             self.canvas.fill(path, colour, clip.as_deref());
         }
     }
-    fn stroke(&mut self, path: &[Command], width: f64, colour: Rgba, clip: &Clip) {
+    fn stroke(&mut self, path: &[Command], pen: &Pen, colour: Rgba, clip: &Clip) {
         if self.mark() {
-            self.canvas.stroke(path, width, colour, clip.as_deref());
+            self.canvas.stroke(path, pen, colour, clip.as_deref());
         }
     }
     fn gradient(&mut self, gradient: &Gradient, clip: &Clip) {
@@ -1341,7 +1387,7 @@ impl Sink for Extractor {
         false
     }
     fn fill(&mut self, _: &[Command], _: Rgba, _: &Clip) {}
-    fn stroke(&mut self, _: &[Command], _: f64, _: Rgba, _: &Clip) {}
+    fn stroke(&mut self, _: &[Command], _: &Pen, _: Rgba, _: &Clip) {}
     fn gradient(&mut self, _: &Gradient, _: &Clip) {}
     fn picture(&mut self, _: Option<Picture>, _: Matrix, _: f32, _: &Clip) {}
     fn encoded(&mut self, stream: &Stream, _: [f64; 4], _: [f64; 4]) {

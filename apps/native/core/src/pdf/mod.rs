@@ -20,6 +20,7 @@ pub mod image;
 pub mod object;
 pub mod raster;
 pub mod render;
+pub mod stroke;
 pub mod type1;
 
 use crate::deck::{Colour, Deck, Fit, Item, Placed, Slide, Source};
@@ -583,6 +584,26 @@ mod tests {
         let masked = drawn(3);
         assert_eq!(masked.pixel(25, 50)[3], 0);
         assert!(is_blue(masked.pixel(75, 50)));
+    }
+
+    #[test]
+    fn a_dashed_line_draws_its_dashes_and_skips_its_gaps() {
+        let bytes = pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 40 20] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>".into(),
+            stream("[4 4] 0 d 2 w 1 J 0 10 m 40 10 l S"),
+        ]);
+        let document = Document::open(bytes).expect("open");
+        let pages = pages_of(&document);
+        let mut renderer = render::Renderer::new(40, 20, 0);
+        run_page(&document, &pages[0], &mut renderer, 1.0);
+        let canvas = renderer.canvas;
+        // Dashes at 0–4, 8–12…; round caps reach a unit past each end.
+        assert_eq!(canvas.pixel(2, 10)[3], 255);
+        assert_eq!(canvas.pixel(10, 10)[3], 255);
+        assert_eq!(canvas.pixel(6, 10)[3], 0);
+        assert_eq!(canvas.pixel(14, 10)[3], 0);
     }
 
     #[test]
