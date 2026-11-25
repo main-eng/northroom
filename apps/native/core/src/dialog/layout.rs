@@ -136,6 +136,60 @@ const BUTTON_GAP: f64 = 8.0;
 /// Field text: inset 12 pt at the sides, on a 20 px line 8 pt from the top.
 const FIELD_INSET: f64 = 12.0;
 
+/// A QR code: its light ground, quiet zone included, and each run of dark squares on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodePlace {
+    pub ground: Rect,
+    pub squares: Vec<Rect>,
+}
+
+/// The side a QR code is drawn at, as near as whole points a square allow.
+const CODE_SIDE: f64 = 264.0;
+/// The light squares the standard asks for around a code.
+const CODE_QUIET: usize = 4;
+
+/// One row's dark squares from `left`, `top`, as one rectangle a run.
+fn dark_runs(row: &[bool], left: f64, top: f64, square: f64) -> Vec<Rect> {
+    let mut runs = Vec::new();
+    let mut from = None;
+    for (column, dark) in row.iter().copied().chain([false]).enumerate() {
+        match (dark, from) {
+            (true, None) => from = Some(column),
+            (false, Some(start)) => {
+                let width = (column - start) as f64 * square;
+                runs.push(Rect::new(left + start as f64 * square, top, width, square));
+                from = None;
+            }
+            _ => {}
+        }
+    }
+    runs
+}
+
+/// Places `code` centred across `inner` points from `left`, its top at `top`.
+fn code_place(code: &[Vec<bool>], left: f64, top: f64, inner: f64) -> CodePlace {
+    let across = code.len() + 2 * CODE_QUIET;
+    let square = (CODE_SIDE / across as f64).floor().max(2.0);
+    let side = square * across as f64;
+    let ground = Rect::new((left + (inner - side) / 2.0).round(), top, side, side);
+    let quiet = CODE_QUIET as f64 * square;
+    let squares = code
+        .iter()
+        .enumerate()
+        .flat_map(|(line, row)| {
+            let top = ground.y + quiet + line as f64 * square;
+            dark_runs(row, ground.x + quiet, top, square)
+        })
+        .collect();
+    CodePlace { ground, squares }
+}
+
+/// How tall `code` is drawn (`code_place`).
+fn code_side(code: &[Vec<bool>]) -> f64 {
+    let across = code.len() + 2 * CODE_QUIET;
+    (CODE_SIDE / across as f64).floor().max(2.0) * across as f64
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PromptLayout {
     pub panel: Rect,
@@ -143,6 +197,8 @@ pub struct PromptLayout {
     pub close: Option<Rect>,
     pub title: Line,
     pub message: Vec<Line>,
+    /// A pairing dialog's QR code, under the message.
+    pub code: Option<CodePlace>,
     pub field: Option<FieldPlace>,
     pub cancel: Button,
     pub action: Button,
@@ -174,6 +230,9 @@ pub fn prompt(
     }
     if prompt.value.is_some() {
         panel_height += SPACE + CONTROL;
+    }
+    if let Some(code) = &prompt.code {
+        panel_height += SPACE + code_side(code);
     }
     panel_height += SPACE + button::HEIGHT + EDGE;
     let panel = centred(width, height, panel_width, panel_height);
@@ -208,6 +267,12 @@ pub fn prompt(
                 )
             })
             .collect()
+    });
+    let code = prompt.code.as_ref().map(|code| {
+        y += SPACE;
+        let placed = code_place(code, left, y, inner);
+        y += placed.ground.height;
+        placed
     });
     let field = prompt.value.as_ref().map(|_| {
         y += SPACE;
@@ -256,6 +321,7 @@ pub fn prompt(
         close: (!prompt.destructive).then(|| close_mark(panel)),
         title,
         message,
+        code,
         field,
         cancel: button(cancel, prompt.cancel, Token::Foreground),
         action: button(action, prompt.action, action_color),
@@ -477,7 +543,42 @@ mod tests {
             cancel: "Cancel",
             destructive: false,
             secret: false,
+            code: None,
         }
+    }
+
+    #[test]
+    fn a_pairing_dialog_draws_its_code_centred_between_the_sentence_and_the_buttons() {
+        // A code of 25 squares a side: dark along its top line, and two runs on its second.
+        let mut code = vec![vec![false; 25]; 25];
+        code[0] = vec![true; 25];
+        code[1][0] = true;
+        code[1][3] = true;
+        code[1][4] = true;
+        let pairing = crate::menus::pair_prompt(code, "en");
+        let placed = prompt(
+            &pairing,
+            1280.0,
+            800.0,
+            Token::PrimaryForeground,
+            &mut sevens,
+        );
+        let code = placed.code.expect("a pairing dialog has a code");
+        // 33 squares across with the quiet edge, 8 pt each: 264 wide, centred in the panel.
+        assert_eq!((code.ground.width, code.ground.height), (264.0, 264.0));
+        assert_eq!(code.ground.x, 384.0 + (512.0 - 264.0) / 2.0);
+        assert!(code.ground.y >= placed.message.last().expect("a sentence").frame.max_y());
+        assert!(code.ground.max_y() <= placed.action.frame.y);
+        let (left, top) = (code.ground.x + 32.0, code.ground.y + 32.0);
+        assert_eq!(
+            code.squares,
+            [
+                Rect::new(left, top, 200.0, 8.0),
+                Rect::new(left, top + 8.0, 8.0, 8.0),
+                Rect::new(left + 24.0, top + 8.0, 16.0, 8.0),
+            ]
+        );
+        assert_eq!(placed.field, None);
     }
 
     #[test]
@@ -541,6 +642,7 @@ mod tests {
             cancel: "Cancel",
             destructive: true,
             secret: false,
+            code: None,
         };
         // A narrow window leaves 16 either side.
         let placed = prompt(&warning, 400.0, 600.0, Token::Ink, &mut sevens);

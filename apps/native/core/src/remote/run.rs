@@ -18,6 +18,10 @@ use std::time::{Duration, Instant};
 
 /// How often connected devices are sent what changed.
 const CHANGES_EVERY: Duration = Duration::from_millis(150);
+/// The longest a pairing link waits for a host that just started to reach its relay, and how
+/// often it looks.
+const RELAY_WAIT: Duration = Duration::from_secs(2);
+const RELAY_ASKED_EVERY: Duration = Duration::from_millis(25);
 /// What Control-C sends.
 const INTERRUPT: &[u8] = &[3];
 
@@ -57,6 +61,20 @@ impl Desk for AppDesk {
     }
 }
 
+/// The relays the person's `settings` choose (`settings::file::PHONE_RELAY`): the one at the
+/// address written there, none for "none", and the public ones when nothing is written.
+pub fn relays_of(settings: &serde_json::Map<String, serde_json::Value>) -> Relays {
+    let written = settings
+        .get(crate::settings::file::PHONE_RELAY)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim);
+    match written {
+        None | Some("") => Relays::Public,
+        Some("none") => Relays::None,
+        Some(address) => Relays::At(address.to_owned()),
+    }
+}
+
 /// A running phone link. Dropping it ends every device's link: the serving thread sees it is
 /// the host's last holder and lets the host go.
 pub struct Link {
@@ -64,6 +82,8 @@ pub struct Link {
     service: Arc<Mutex<Service>>,
     /// This computer's name, as a pairing link gives it.
     name: String,
+    /// Whether the host listens at a relay, which a pairing link then waits for.
+    relayed: bool,
 }
 
 impl Link {
@@ -78,6 +98,7 @@ impl Link {
         let devices = Devices::open(&folder.join(FILE), || Secret::generate().to_bytes());
         let secret = Secret::from_bytes(&devices.secret());
         let (events, happened) = std::sync::mpsc::channel();
+        let relayed = relays != Relays::None;
         let host = Arc::new(Host::start(secret, relays, events)?);
         let service = Arc::new(Mutex::new(Service::new(name.clone(), devices)));
         let (serving, served) = (Arc::clone(&host), Arc::clone(&service));
@@ -90,21 +111,28 @@ impl Link {
             host,
             service,
             name,
+            relayed,
         })
     }
 
     /// The app's own link: its devices are kept in the app's folder and its terminals are the
     /// running sessions.
-    pub fn start_for_app(relays: Relays) -> Result<Self, northroom_link::Error> {
-        let folder = crate::paths::get().support;
-        Self::start(&folder, relays, computer_name(), AppDesk)
+    pub fn start_for_app() -> Result<Self, northroom_link::Error> {
+        let paths = crate::paths::get();
+        let settings = crate::settings::file::read(&paths.settings_file).unwrap_or_default();
+        Self::start(
+            &paths.support,
+            relays_of(&settings),
+            computer_name(),
+            AppDesk,
+        )
     }
 
     /// A pairing link to show as a QR code, good for `pairing::OFFER_LASTS`. It replaces any
     /// shown before.
     pub fn invite(&self) -> String {
         let code = self.service.relock().offer(Instant::now());
-        let address = self.host.address();
+        let address = self.address_with_relay();
         Invite {
             key: address.key,
             code,
@@ -113,6 +141,20 @@ impl Link {
             direct: address.direct,
         }
         .link()
+    }
+
+    /// Where the host is, waiting up to `RELAY_WAIT` for it to reach its relay just after it
+    /// started: a link without the relay only works on this computer's own network.
+    fn address_with_relay(&self) -> northroom_link::Address {
+        let asked = Instant::now();
+        loop {
+            let address = self.host.address();
+            let ready = !self.relayed || address.relay.is_some();
+            if ready || asked.elapsed() >= RELAY_WAIT {
+                return address;
+            }
+            std::thread::sleep(RELAY_ASKED_EVERY);
+        }
     }
 
     /// Takes the pairing link off screen; it no longer works.

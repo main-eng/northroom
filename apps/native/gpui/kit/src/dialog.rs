@@ -413,12 +413,23 @@ impl DialogPainter<'_> {
         for sentence in &placed.message {
             self.line(window, cx, sentence, None);
         }
+        if let Some(code) = &placed.code {
+            self.draw_code(window, code);
+        }
         if let Some(field) = placed.field {
             self.draw_field(window, field.frame.bounds());
         }
         self.draw_cancel(window, cx);
         self.draw_focus_ring(window);
         self.draw_action(window, cx);
+    }
+
+    /// Draws a QR code dark on light whatever the theme, as a camera reads it.
+    fn draw_code(&self, window: &mut Window, code: &northroom_core::dialog::layout::CodePlace) {
+        self.rounded(window, code.ground.bounds(), gpui::white(), 6.0);
+        for square in &code.squares {
+            self.rounded(window, square.bounds(), gpui::black(), 0.0);
+        }
     }
 
     /// Draws a layout line in its own colour, or in `ink` if given.

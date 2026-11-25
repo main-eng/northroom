@@ -149,3 +149,26 @@ fn the_computer_has_a_name() {
     assert!(!computer_name().is_empty());
     assert!(!computer_name().contains('.'));
 }
+
+#[test]
+fn the_settings_file_chooses_the_relay() {
+    let settings = |text: &str| match serde_json::from_str(text).expect("JSON") {
+        serde_json::Value::Object(settings) => settings,
+        _ => panic!("settings are an object"),
+    };
+    assert_eq!(relays_of(&settings("{}")), Relays::Public);
+    assert_eq!(
+        relays_of(&settings(r#"{"phone_relay": 5}"#)),
+        Relays::Public
+    );
+    assert_eq!(
+        relays_of(&settings(r#"{"phone_relay": "none"}"#)),
+        Relays::None
+    );
+    assert_eq!(
+        relays_of(&settings(
+            r#"{"phone_relay": " https://relay.example.com "}"#
+        )),
+        Relays::At("https://relay.example.com".to_owned())
+    );
+}

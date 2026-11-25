@@ -625,6 +625,15 @@ fn save_menus_when_drawn(runner: &mut Runner, prefix: &str) {
     }
 }
 
+/// Opens Connect Phone's dialog, for the shell to show when the link started.
+fn pairing_dialog() -> Shell {
+    if crate::menus::ffi::prompt_pairing() {
+        Shell::Dialog
+    } else {
+        Shell::Nothing
+    }
+}
+
 /// Runs the core's part of `step` and returns the shell's part.
 fn run_step(runner: &mut Runner, step: Step) -> Shell {
     use crate::ffi::*;
@@ -692,6 +701,7 @@ fn run_step(runner: &mut Runner, step: Step) -> Shell {
                 }
             }
         }
+        Step::Phone => return pairing_dialog(),
         Step::View(view) => set_folder_view(view),
         Step::Sort(key) => list_toggle_sort(key),
         Step::ListColumns(keys, width) => {

@@ -203,6 +203,6 @@ reason it was rejected.
 
 ## Open
 
-- **Phone link (ADR-0016), not yet in the app.** Built and checked: the connection, pairing, the messages and the rules, with a test phone over a real connection. Still to build: starting the link from the app and showing the pairing QR code, the list of paired devices with Forget, the relay setting, and the phone app. To decide: which relays ship as the default. iroh's public relays are not meant for production, and a relay of our own is a server (ADR-0006).
+- **Phone link (ADR-0016), without its phone app.** In the app: Connect Phone… shows the pairing QR code, a paired phone's link starts at launch, and `phone_relay` in the settings file chooses the relay. Checked with a test device over a real connection. Still to build: the phone app (it needs Xcode), and a list of paired devices with Forget; until then, deleting `phone-link.json` in the app's folder unpairs every phone. To decide: which relays ship as the default. iroh's public relays are not meant for production, and a relay of our own is a server (ADR-0006).
 - **Cloud cleanup.** Done on 2026-11-21 except the download Worker (`northroom-server`), its container and its one secret, which go once GitHub releases serve downloads. Then apply `northroom-infra`; its first apply turns on the www redirect, firewall and rate limit.
 - **Decide what makes Northroom 10x better** before the next release.

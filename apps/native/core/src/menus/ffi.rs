@@ -274,6 +274,7 @@ fn run_bar(command: BarCommand) -> Effect {
             Effect::Changed
         }
         BarCommand::ChooseDrive => Effect::ChooseDrive,
+        BarCommand::ConnectPhone => connect_phone(),
         BarCommand::ShowView(view) => {
             set_folder_view(view);
             Effect::Changed
@@ -735,6 +736,8 @@ enum Ask {
     EndSession(String),
     /// Quit once confirmed.
     Quit,
+    /// A phone's pairing code is on screen; either answer takes it off.
+    Pair,
 }
 
 static PROMPT: Mutex<Option<(Ask, Prompt)>> = Mutex::new(None);
@@ -899,6 +902,7 @@ pub fn prompt_layout(width: f64, height: f64) -> crate::dialog::layout::PromptLa
             cancel: "",
             destructive: false,
             secret: false,
+            code: None,
         });
     let color = crate::dialog::keys::action_text_color(
         prompt.destructive,
@@ -971,6 +975,9 @@ pub unsafe extern "C" fn nr_prompt_answer(taken: bool, typed: *const c_char) -> 
     let Some((ask, shown)) = prompt.clone() else {
         return hand_over(Effect::Nothing);
     };
+    if matches!(ask, Ask::Pair) {
+        crate::remote::app::withdraw_invite();
+    }
     if !taken {
         *prompt = None;
         return hand_over(Effect::Nothing);
@@ -1004,7 +1011,7 @@ pub unsafe extern "C" fn nr_prompt_answer(taken: bool, typed: *const c_char) -> 
             crate::ffi::end_session(&id);
             changed(None)
         }
-        Ask::Quit | Ask::Unlock(_) => changed(None),
+        Ask::Quit | Ask::Unlock(_) | Ask::Pair => changed(None),
     })
 }
 
@@ -1032,6 +1039,22 @@ pub extern "C" fn nr_prompt_unlock() -> NrMenuEffect {
         Ask::Unlock(path),
         menus::unlock_prompt(&name, wrong, language()),
     ))
+}
+
+/// Shows a phone the pairing link as a QR code (`menus::pair_prompt`), or says why the link
+/// could not start.
+fn connect_phone() -> Effect {
+    let code = crate::remote::app::invite()
+        .and_then(|link| crate::remote::code::modules(&link).ok_or_else(String::new));
+    match code {
+        Ok(code) => ask(Ask::Pair, menus::pair_prompt(code, language())),
+        Err(why) => Effect::Toast(menus::pair_failed(language()), why),
+    }
+}
+
+/// Opens the pairing dialog for a check's `phone` step. Whether it is ready to show.
+pub(crate) fn prompt_pairing() -> bool {
+    matches!(connect_phone(), Effect::Prompt)
 }
 
 /// Quits, or confirms first while sessions are working or waiting (`menus::quit_prompt`).

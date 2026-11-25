@@ -7,6 +7,8 @@
 //! what a watched terminal looks like (`screen`) and what to answer (`service`). `northroom-link`
 //! only carries the bytes.
 
+pub mod app;
+pub mod code;
 pub mod devices;
 pub mod pairing;
 pub mod protocol;

@@ -13,6 +13,10 @@ northroom-media = { path = "../crates/northroom-media" }
 # The link to a paired phone (`remote`): the networking library stays behind this crate, as the
 # emulator stays behind `terminal::engine`.
 northroom-link = { path = "../crates/northroom-link" }
+# The pairing link as a QR code (`remote::code`): the standard's reference encoder by its
+# author (MIT, no dependencies). The format's masks and error correction are a specification's
+# worth of tables to copy by hand.
+qrcodegen = "1.8"
 wgpu = { version = "30.0.1", default-features = false, features = ["wgsl"] }
 libc = "0.2"
 alacritty_terminal = "0.26"

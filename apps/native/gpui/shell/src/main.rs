@@ -207,6 +207,8 @@ fn start(attendance: Attendance, cx: &mut App) {
     menu_bar::install(handle, cx);
     sessions::install(handle, cx);
     updates::start(cx);
+    // A paired phone can reconnect from now on (ADR-0016).
+    northroom_core::remote::app::nr_phone_link_start();
     cx.on_app_quit(|_| {
         updates::install_on_quit();
         // Keep the open tabs for the next launch, then end every session, keeping its output,

@@ -5,7 +5,8 @@
 //! ```json
 //! {
 //!   "drive": "/Users/ada/Northroom",
-//!   "appearance": { "theme": "system", "light": { … }, "dark": { … } }
+//!   "appearance": { "theme": "system", "light": { … }, "dark": { … } },
+//!   "phone_relay": "https://relay.example.com"
 //! }
 //! ```
 //!
@@ -22,6 +23,9 @@ pub const NAME: &str = "settings.json";
 /// The file's keys, in the order the app writes them.
 pub const DRIVE: &str = "drive";
 pub const APPEARANCE: &str = "appearance";
+/// The relay a paired phone's link goes through when the two can't connect directly
+/// (`remote::run::relays_of`): an address, or "none" for no relay. Absent for the public ones.
+pub const PHONE_RELAY: &str = "phone_relay";
 
 /// The settings in the file at `path`, empty if it is missing. Errors with a message for
 /// whoever edits it when the file is not a JSON object.

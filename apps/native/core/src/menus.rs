@@ -363,6 +363,8 @@ pub enum BarCommand {
     ShowChanges,
     /// Opens the system folder picker to choose another drive.
     ChooseDrive,
+    /// Show the QR code a phone pairs with (ADR-0016).
+    ConnectPhone,
     ShowView(View),
     Reload,
     ToggleHiddenFiles,
@@ -446,6 +448,7 @@ pub fn menu_bar(state: BarState) -> Vec<Menu> {
                 Entry::item("settings", say(key::MENU_SETTINGS)).keys(Shortcut::command(',')),
                 Entry::item("change-drive", say(key::MENU_CHANGE_DRIVE_FOLDER))
                     .enabled(state.drive_changeable),
+                Entry::item("connect-phone", say(key::MENU_CONNECT_PHONE)),
                 Entry::separator(),
                 Entry {
                     submenu: Some(Menu::new(say(key::MENU_SERVICES), Vec::new())),
@@ -564,6 +567,7 @@ pub fn bar_command(id: &str) -> Option<BarCommand> {
         "settings" => BarCommand::ShowSettings,
         "changes" => BarCommand::ShowChanges,
         "change-drive" => BarCommand::ChooseDrive,
+        "connect-phone" => BarCommand::ConnectPhone,
         "board" => BarCommand::ShowView(View::Board),
         "list" => BarCommand::ShowView(View::List),
         "columns" => BarCommand::ShowView(View::Columns),
@@ -946,6 +950,27 @@ pub struct Prompt {
     pub destructive: bool,
     /// The field holds a password: shown as bullets, never trimmed.
     pub secret: bool,
+    /// A QR code shown under the message (`remote::code::modules`).
+    pub code: Option<Vec<Vec<bool>>>,
+}
+
+/// The notice's title when the phone link could not start, in `language`.
+pub fn pair_failed(language: &str) -> &'static str {
+    strings::text(language, key::DIALOG_PAIR_FAILED)
+}
+
+/// The dialog that shows a phone the pairing link as the QR code `code`.
+pub fn pair_prompt(code: Vec<Vec<bool>>, language: &str) -> Prompt {
+    Prompt {
+        title: strings::text(language, key::DIALOG_PAIR_TITLE).to_owned(),
+        message: Some(strings::text(language, key::DIALOG_PAIR_MESSAGE).to_owned()),
+        value: None,
+        action: strings::text(language, key::DIALOG_PAIR_DONE),
+        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        destructive: false,
+        secret: false,
+        code: Some(code),
+    }
 }
 
 /// The open panel's button that copies files into the folder, in `language`.
@@ -962,6 +987,7 @@ fn naming(title: &str, value: &str, language: &str) -> Prompt {
         cancel: strings::text(language, key::ACCOUNT_CANCEL),
         destructive: false,
         secret: false,
+        code: None,
     }
 }
 
@@ -981,6 +1007,7 @@ pub fn unlock_prompt(name: &str, wrong: bool, language: &str) -> Prompt {
         cancel: strings::text(language, key::ACCOUNT_CANCEL),
         destructive: false,
         secret: true,
+        code: None,
     }
 }
 
@@ -1281,6 +1308,7 @@ pub fn quit_prompt(count: usize, language: &str) -> Option<Prompt> {
         cancel: strings::text(language, key::ACCOUNT_CANCEL),
         destructive: true,
         secret: false,
+        code: None,
     })
 }
 
@@ -1306,6 +1334,7 @@ pub fn end_session_prompt(
         cancel: strings::text(language, key::ACCOUNT_CANCEL),
         destructive: true,
         secret: false,
+        code: None,
     })
 }
 
@@ -1495,7 +1524,7 @@ mod tests {
         assert_eq!(
             shown,
             [
-                "Northroom: About Northroom | Check for Updates… | - | Settings… | Change Drive Folder… | - | Services | - | Hide Northroom | Hide Others | Show All | - | Quit Northroom",
+                "Northroom: About Northroom | Check for Updates… | - | Settings… | Change Drive Folder… | Connect Phone… | - | Services | - | Hide Northroom | Hide Others | Show All | - | Quit Northroom",
                 "Edit: Undo | Redo | - | Cut | Copy | Paste | Paste and Match Style | Delete | Select All | - | Speech",
                 "View: as Board | as List | as Columns | - | Show Changes | Reload | Toggle Full Screen",
                 "Window: Minimize | Zoom | - | Bring All to Front",
@@ -1506,7 +1535,7 @@ mod tests {
             (bar[3].role, bar[4].role),
             (MenuRole::Window, MenuRole::Help)
         );
-        assert_eq!(bar[0].entries[6].role, Role::Services);
+        assert_eq!(bar[0].entries[7].role, Role::Services);
     }
 
     #[test]
