@@ -5,12 +5,14 @@
 [workspace]
 resolver = "3"
 members = ["shell", "kit", "webhost", "mac-tools"]
+# The one patched GPUI crate, built only through the `[patch]` table below.
+exclude = ["patches"]
 
 [workspace.dependencies]
 # Pinned to a Zed main commit. GPUI and every Zed crate it pulls in (gpui_*, collections,
 # sum_tree, refineable, scheduler, http_client, ztracing) are Apache-2.0; no GPL editor crate is
-# used. GPUI is used as published at this commit, with no changes of ours (ADR-0001). Move the
-# pin deliberately, never with a bare `cargo update`.
+# used. GPUI is used as published at this commit but for one bug fix (`patches/gpui_wgpu`,
+# ADR-0001). Move the pin deliberately, never with a bare `cargo update`.
 gpui = { git = "https://github.com/zed-industries/zed", rev = "125ca8672e928b19a62c2e4b761fb29fe2a34ae3" }
 # `font-kit` is the Mac text system (Core Text). `runtime_shaders` compiles shaders at launch,
 # so the build needs no Xcode Metal compiler.
@@ -27,6 +29,12 @@ calloop = { git = "https://github.com/zed-industries/calloop", rev = "3759371fee
 khronos-egl = { git = "https://github.com/zed-industries/khronos-egl", rev = "42214b36347b108fd9630ca6254b96dde59e04fe" }
 # Windows screen capture (GPUI through zed-scap).
 windows-capture = { git = "https://github.com/zed-industries/windows-capture.git", rev = "f0d6c1b6691db75461b732f6d5ff56eed002eeb9" }
+
+# `gpui_wgpu` (Linux renderer and text) copied from the pinned rev with a two-line fix: glyphs
+# drawn at the subpixel offset GPUI asks for at 2x (`patches/gpui_wgpu/UPSTREAM.md`). Moving the
+# pin means checking whether Zed has fixed it, and copying the crate again if not.
+[patch."https://github.com/zed-industries/zed"]
+gpui_wgpu = { path = "patches/gpui_wgpu" }
 
 [profile.release]
 opt-level = 3

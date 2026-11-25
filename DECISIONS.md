@@ -17,7 +17,7 @@ reason it was rejected.
   - Electron: the largest start-up and memory cost.
   - A native shell per OS: every view built three times.
   - GPUI `surface` for video: a second GPU device, a per-frame UI wait, no HDR.
-  - A GPUI fork or patched copies of its crates: every move to a newer GPUI meant re-applying them across three renderers. GPUI and the emulator library are used as published; a bug in them is reported upstream, and the interface changes to fit what they draw (a menu or dialog appears without a fade).
+  - A GPUI fork or patched copies of its crates: every move to a newer GPUI meant re-applying them across three renderers. GPUI and the emulator library are used as published, and the interface changes to fit what they draw (a menu or dialog appears without a fade). The one exception is a proven bug with a fix of a few lines, kept as a copy of that one crate and not sent upstream: `gpui_wgpu`'s glyph offset at 2x on Linux.
   - A terminal renderer of its own behind a hole in GPUI's frame: the two fell out of step while resizing or moving, so text flickered.
 
 ## ADR-0002: Work is ordinary files in one local folder
