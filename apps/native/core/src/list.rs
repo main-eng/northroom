@@ -89,23 +89,26 @@ pub fn format_date(seconds: Option<i64>, now_seconds: i64) -> String {
     let (Some(time), Some(now)) = (seconds.and_then(local), local(now_seconds)) else {
         return "--".to_owned();
     };
-    let hour = match time.hour % 12 {
-        0 => 12,
-        other => other,
-    };
-    let clock = format!(
-        "{hour}:{:02} {}",
-        time.minute,
-        if time.hour < 12 { "AM" } else { "PM" }
-    );
+    let clock = clock_of(time.hour as u32, time.minute as u32);
     match now.day_number - time.day_number {
         0 => format!("Today at {clock}"),
         1 => format!("Yesterday at {clock}"),
-        _ => format!(
-            "{} {}, {} at {clock}",
-            MONTHS[time.month], time.day, time.year
-        ),
+        _ => dated(time.month, time.day as u32, time.year as i64, &clock),
     }
+}
+
+/// A time of day as Finder says it: "3:58 PM".
+pub fn clock_of(hour: u32, minute: u32) -> String {
+    let twelve = match hour % 12 {
+        0 => 12,
+        other => other,
+    };
+    format!("{twelve}:{minute:02} {}", if hour < 12 { "AM" } else { "PM" })
+}
+
+/// A day and time as Finder says it: "Oct 10, 2026 at 3:58 PM". `month` counts from 0.
+pub fn dated(month: usize, day: u32, year: i64, clock: &str) -> String {
+    format!("{} {day}, {year} at {clock}", MONTHS[month.min(11)])
 }
 
 /// The Kind column text, as Finder would word it.

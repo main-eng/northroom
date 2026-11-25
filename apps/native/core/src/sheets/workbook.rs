@@ -43,7 +43,7 @@ impl From<PackageError> for WorkbookError {
 pub const FILE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 /// A file name's extension in lower case, if it has one.
-fn extension_of(path: &std::path::Path) -> Option<String> {
+pub(crate) fn extension_of(path: &std::path::Path) -> Option<String> {
     path.extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
@@ -55,6 +55,7 @@ pub fn is_workbook_name(name: &str) -> bool {
     let extension = extension_of(std::path::Path::new(name)).unwrap_or_default();
     matches!(extension.as_str(), "xlsx" | "xlsm" | "xls" | "ods")
         || crate::sheets::directory::is_directory_name(&extension)
+        || crate::sheets::archive::is_archive_name(&extension)
 }
 
 // --- What JavaScript does with numbers and strings -------------------------------------------
@@ -1397,6 +1398,10 @@ pub fn parse(bytes: &[u8]) -> Result<Workbook> {
 
 /// Reads the workbook at `path` for display.
 pub fn read(path: &std::path::Path) -> Result<Workbook> {
+    // An archive lists from its index, however large it is.
+    if crate::sheets::archive::is_archive_name(&extension_of(path).unwrap_or_default()) {
+        return crate::sheets::archive::read(path);
+    }
     let bytes = std::fs::read(path)
         .map_err(|error| WorkbookError(format!("The workbook could not be read ({error})")))?;
     let extension = extension_of(path).unwrap_or_default();

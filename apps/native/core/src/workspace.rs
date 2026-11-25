@@ -700,7 +700,11 @@ fn read_document(path: &Path, length_bytes: u64) -> Option<FileRead> {
     let (shown, max_bytes) = if let Some(kind) = drawn {
         (FileRead::Deck, kind.max_bytes())
     } else if crate::sheets::workbook::is_workbook_name(&name) {
-        (FileRead::Workbook, crate::sheets::workbook::FILE_MAX_BYTES)
+        // An archive lists from its index, so any size shows.
+        let extension = crate::sheets::workbook::extension_of(path).unwrap_or_default();
+        let archive = crate::sheets::archive::is_archive_name(&extension);
+        let max = if archive { u64::MAX } else { crate::sheets::workbook::FILE_MAX_BYTES };
+        (FileRead::Workbook, max)
     } else {
         return None;
     };

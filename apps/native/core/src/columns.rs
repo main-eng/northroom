@@ -3036,7 +3036,7 @@ mod tests {
     #[test]
     fn a_file_with_no_viewer_opens_in_its_application() {
         let (root, _metadata, mut columns) = columns();
-        fs::write(root.path().join("archive.zip"), b"PK\x03\x04\x00\x00binary").expect("zip");
+        fs::write(root.path().join("installer.dmg"), b"koly\x00\x00binary").expect("disk image");
         fs::write(root.path().join("notes.log"), b"words").expect("text");
         columns.refresh().expect("refresh");
         let id = |columns: &Columns, name: &str| {
@@ -3048,15 +3048,15 @@ mod tests {
                 .id
                 .clone()
         };
-        let zip = id(&columns, "archive.zip");
-        columns.open_in_folder(&zip).expect("open");
+        let image = id(&columns, "installer.dmg");
+        columns.open_in_folder(&image).expect("open");
         assert!(columns.opened().is_none(), "nothing opens in the window");
         let path = columns
             .take_opened_elsewhere()
             .expect("handed to its application");
         assert_eq!(
             path.file_name().and_then(|name| name.to_str()),
-            Some("archive.zip")
+            Some("installer.dmg")
         );
         assert!(columns.take_opened_elsewhere().is_none(), "once");
         // As columns, it stays selected beside its column.
@@ -3064,7 +3064,7 @@ mod tests {
         let row = columns.columns()[0]
             .rows
             .iter()
-            .position(|entry| entry.id == zip)
+            .position(|entry| entry.id == image)
             .expect("row");
         columns.open_row(0, row).expect("open");
         assert!(!columns.opened_fills_tab());

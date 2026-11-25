@@ -115,14 +115,37 @@ pub(crate) fn decode_utf8(bytes: &[u8]) -> String {
     text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned()
 }
 
+/// An archive entry as listed: its path, its size unpacked, and when it last changed (year,
+/// month, day, hour, minute) as the zip's DOS clock says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listed {
+    pub name: String,
+    pub size: usize,
+    pub modified: Option<(u16, u8, u8, u8, u8)>,
+}
+
+/// A DOS date and time (`date`, `time`) as year, month, day, hour and minute.
+fn dos_time(date: usize, time: usize) -> Option<(u16, u8, u8, u8, u8)> {
+    let (month, day) = ((date >> 5) & 0x0f, date & 0x1f);
+    (month >= 1 && day >= 1).then(|| {
+        (
+            1980 + (date >> 9) as u16,
+            month as u8,
+            day as u8,
+            (time >> 11) as u8,
+            ((time >> 5) & 0x3f) as u8,
+        )
+    })
+}
+
 impl<'a> ZipArchive<'a> {
-    /// Reads the archive's index.
-    pub fn open(bytes: &'a [u8]) -> Result<Self> {
+    /// The end-of-archive record's entry count and central directory offset.
+    fn directory(bytes: &[u8]) -> Result<(usize, usize)> {
+        let earliest = bytes
+            .len()
+            .saturating_sub(END_RECORD_BYTES + END_RECORD_MAX_COMMENT_BYTES);
         let end = (bytes.len() >= END_RECORD_BYTES)
             .then(|| {
-                let earliest = bytes
-                    .len()
-                    .saturating_sub(END_RECORD_BYTES + END_RECORD_MAX_COMMENT_BYTES);
                 (earliest..=bytes.len() - END_RECORD_BYTES)
                     .rev()
                     .find(|&at| u32_at(bytes, at) == END_SIGNATURE as usize)
@@ -131,11 +154,73 @@ impl<'a> ZipArchive<'a> {
         let Some(end) = end else {
             return fail("Not a zip archive: it has no end-of-archive record.");
         };
-        let entry_count = u16_at(bytes, end + 10);
-        let directory = u32_at(bytes, end + 16);
-        if entry_count == 0xffff || directory == 0xffff_ffff {
+        let (count, directory) = (u16_at(bytes, end + 10), u32_at(bytes, end + 16));
+        if count == 0xffff || directory == 0xffff_ffff {
             return fail("Zip64 archives are not read.");
         }
+        Ok((count, directory))
+    }
+}
+
+/// Lists a zip's entries from its central directory, encrypted ones too.
+pub fn list(bytes: &[u8]) -> Result<Vec<Listed>> {
+    let (count, mut at) = ZipArchive::directory(bytes)?;
+    let mut listed = Vec::with_capacity(count.min(65_535));
+    for _ in 0..count {
+        if at + CENTRAL_HEADER_BYTES > bytes.len()
+            || u32_at(bytes, at) != CENTRAL_HEADER_SIGNATURE as usize
+        {
+            break;
+        }
+        let name_length = u16_at(bytes, at + 28);
+        let name_start = at + CENTRAL_HEADER_BYTES;
+        let name = decode_utf8(
+            &bytes[name_start.min(bytes.len())..(name_start + name_length).min(bytes.len())],
+        );
+        listed.push(Listed {
+            name,
+            size: u32_at(bytes, at + 24),
+            modified: dos_time(u16_at(bytes, at + 14), u16_at(bytes, at + 12)),
+        });
+        at += CENTRAL_HEADER_BYTES + name_length + u16_at(bytes, at + 30) + u16_at(bytes, at + 32);
+    }
+    Ok(listed)
+}
+
+/// Lists the zip at `path`, reading only its end and its central directory, so an archive of
+/// any size lists at once.
+pub fn list_file(path: &std::path::Path) -> Result<Vec<Listed>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let failed = |error: std::io::Error| PackageError(format!("The archive could not be read ({error})."));
+    let mut file = std::fs::File::open(path).map_err(failed)?;
+    let length = file.metadata().map_err(failed)?.len();
+    let tail_length = length.min((END_RECORD_BYTES + END_RECORD_MAX_COMMENT_BYTES) as u64);
+    file.seek(SeekFrom::Start(length - tail_length)).map_err(failed)?;
+    let mut tail = vec![0; tail_length as usize];
+    file.read_exact(&mut tail).map_err(failed)?;
+    let (_, _) = ZipArchive::directory(&tail)?;
+    let end = (0..=tail.len() - END_RECORD_BYTES)
+        .rev()
+        .find(|&at| u32_at(&tail, at) == END_SIGNATURE as usize)
+        .unwrap_or(0);
+    let (size, offset) = (u32_at(&tail, end + 12), u32_at(&tail, end + 16));
+    if offset as u64 + size as u64 > length {
+        return fail("The zip index runs past the end of the file.");
+    }
+    file.seek(SeekFrom::Start(offset as u64)).map_err(failed)?;
+    // The directory followed by the end record pointing at it, as a small zip of its own.
+    let mut index = vec![0; size];
+    file.read_exact(&mut index).map_err(failed)?;
+    let mut record = tail[end..end + END_RECORD_BYTES].to_vec();
+    record[16..20].copy_from_slice(&0u32.to_le_bytes());
+    index.extend(record);
+    list(&index)
+}
+
+impl<'a> ZipArchive<'a> {
+    /// Reads the archive's index.
+    pub fn open(bytes: &'a [u8]) -> Result<Self> {
+        let (entry_count, directory) = Self::directory(bytes)?;
         let mut entries: Vec<(String, ZipEntry)> = Vec::new();
         let mut at = directory;
         for index in 0..entry_count {
