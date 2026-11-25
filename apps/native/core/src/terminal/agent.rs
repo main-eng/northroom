@@ -74,16 +74,31 @@ impl Agent {
     /// The agent a process with `arguments` is, by its program name, or by its script name when the
     /// program is an interpreter (`node /opt/bin/codex`).
     pub fn running(arguments: &[String]) -> Option<Self> {
-        let mut names = arguments.iter().map(|argument| program_name(argument));
-        let first = names.next()?;
-        let name = if INTERPRETERS.contains(&first) {
-            names.find(|name| !name.starts_with('-'))?
-        } else {
-            first
-        };
+        let name = started_name(arguments)?;
         Self::ALL
             .into_iter()
             .find(|agent| agent.programs().contains(&name))
+    }
+
+    /// The program name the agent was started under with `arguments`, of the names it answers
+    /// to (`cursor-agent` or `agent`); its first name when they name none of them.
+    pub fn started_as(self, arguments: &[String]) -> &'static str {
+        let programs = self.programs();
+        started_name(arguments)
+            .and_then(|name| programs.iter().copied().find(|&program| program == name))
+            .unwrap_or(programs[0])
+    }
+}
+
+/// The program `arguments` start, by its name, or by its script's name when the program is an
+/// interpreter (`node /opt/bin/codex`).
+fn started_name(arguments: &[String]) -> Option<&str> {
+    let mut names = arguments.iter().map(|argument| program_name(argument));
+    let first = names.next()?;
+    if INTERPRETERS.contains(&first) {
+        names.find(|name| !name.starts_with('-'))
+    } else {
+        Some(first)
     }
 }
 
@@ -178,6 +193,48 @@ pub fn foreground_group(terminal: std::os::fd::RawFd) -> Option<i32> {
     // SAFETY: queries a descriptor the caller holds open and writes nothing.
     let group = unsafe { libc::tcgetpgrp(terminal) };
     (group > 0).then_some(group)
+}
+
+/// The folder a running process works in; `None` when it has exited, belongs to another user,
+/// or its path is not text.
+#[cfg(target_os = "macos")]
+pub fn folder_of(process: i32) -> Option<String> {
+    // SAFETY: an all-zero `proc_vnodepathinfo` is a valid value for the call to overwrite.
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = libc::c_int::try_from(std::mem::size_of_val(&info)).ok()?;
+    // SAFETY: the system writes at most `size` bytes into `info`, which holds that many.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            process,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            std::ptr::from_mut(&mut info).cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    let path: Vec<u8> = info
+        .pvi_cdir
+        .vip_path
+        .iter()
+        .flatten()
+        .map(|&byte| byte as u8)
+        .take_while(|&byte| byte != 0)
+        .collect();
+    String::from_utf8(path).ok().filter(|path| !path.is_empty())
+}
+
+/// The folder a running process works in; `None` when it has exited, belongs to another user,
+/// or its path is not text.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn folder_of(process: i32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{process}/cwd"))
+        .ok()?
+        .into_os_string()
+        .into_string()
+        .ok()
 }
 
 /// A running process's arguments as it was started; `None` when it has exited or belongs to
@@ -305,6 +362,19 @@ mod tests {
                 ("Gemini", None),
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_process_s_working_folder_is_read() {
+        let here = std::env::current_dir().expect("the test's folder");
+        let pid = i32::try_from(std::process::id()).expect("a pid");
+        let read = folder_of(pid).expect("its folder");
+        assert_eq!(
+            std::fs::canonicalize(read).expect("read"),
+            std::fs::canonicalize(here).expect("here")
+        );
+        assert_eq!(folder_of(i32::MAX), None, "no such process");
     }
 
     #[test]

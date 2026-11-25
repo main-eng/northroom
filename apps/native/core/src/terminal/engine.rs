@@ -479,14 +479,19 @@ impl TappedPty {
     /// foreground program, so this does nothing on Windows.
     #[cfg(unix)]
     fn follow_agent(&mut self) {
-        use crate::terminal::agent::{arguments_of, foreground_group};
+        use crate::terminal::agent::{arguments_of, folder_of, foreground_group};
         use std::os::fd::AsRawFd;
         let Some(group) = foreground_group(self.inner.file().as_raw_fd()) else {
             return;
         };
         let busy = !self.agent.is_shell(group);
         let agent = self.agent.look(group, Instant::now(), arguments_of);
-        self.shared.foreground(agent, busy, self.agent.arguments());
+        // The folder a newly found agent works in, which its latest conversation is kept for.
+        let launched = crate::terminal::activity::Launched {
+            arguments: self.agent.arguments().to_vec(),
+            folder: agent.flatten().and_then(|_| folder_of(group)),
+        };
+        self.shared.foreground(agent, busy, launched);
     }
 }
 
@@ -644,7 +649,7 @@ fn look_at_foreground(shared: &Shared, terminal: std::os::fd::RawFd, shell: i32)
     let alive = unsafe { libc::kill(shell, 0) } == 0;
     let foreground = crate::terminal::agent::foreground_group(terminal);
     let busy = alive && foreground.is_some_and(|group| group != shell);
-    shared.foreground(None, busy, &[]);
+    shared.foreground(None, busy, crate::terminal::activity::Launched::default());
     // A shell reading a line at its prompt turns the terminal's echo off to draw it itself.
     let at_prompt = alive && foreground == Some(shell) && !echoes(terminal);
     shared.send_typed_ahead(at_prompt);

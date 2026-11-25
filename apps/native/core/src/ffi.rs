@@ -4786,10 +4786,22 @@ pub extern "C" fn nr_terminals_quit() {
     app.shown_terminals.relock().clear();
     let sessions: Vec<(String, Terminal)> = app.sessions.relock().drain().collect();
     let ended: Vec<String> = sessions.iter().map(|(id, _)| id.clone()).collect();
+    // Two of an agent in one folder can't each resume its latest conversation (`unclaimed`).
+    let resumes = crate::terminal::resume::unclaimed(
+        sessions
+            .iter()
+            .filter_map(|(id, session)| Some((id.clone(), session.resume_command()?)))
+            .collect(),
+    );
     for (id, session) in sessions {
         if let Some(metadata) = &metadata {
             keep_transcript(metadata, &id, &session.transcript());
-            keep_resume(metadata, &id, session.resume_command().as_deref());
+            let resume = resumes.iter().find(|(each, _)| *each == id);
+            keep_resume(
+                metadata,
+                &id,
+                resume.map(|(_, resume)| resume.command.as_str()),
+            );
         }
         session.stop();
     }

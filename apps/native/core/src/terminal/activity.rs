@@ -361,6 +361,14 @@ fn read_hook(text: &str, changes: &mut Changes) {
     }
 }
 
+/// How the foreground agent was started: its arguments, and the folder it works in when it
+/// could be read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Launched {
+    pub arguments: Vec<String>,
+    pub folder: Option<String>,
+}
+
 /// One session's changing activity.
 pub struct Session {
     pub activity: Activity,
@@ -376,11 +384,11 @@ pub struct Session {
     title_working: bool,
     /// The program has ended. The session keeps waiting for the person until they have seen it.
     ended: bool,
-    /// The agent's conversation and the folder it runs in, as its hook reported them, and the
-    /// arguments it was started with: what resumes it after a relaunch (`resume_command`).
+    /// The agent's conversation and the folder it runs in, as its hook reported them, and how
+    /// it was started: what resumes it after a relaunch (`resume_command`).
     conversation: Option<String>,
     conversation_folder: Option<String>,
-    launched: Vec<String>,
+    launched: Launched,
 }
 
 impl Default for Session {
@@ -395,7 +403,7 @@ impl Default for Session {
             ended: false,
             conversation: None,
             conversation_folder: None,
-            launched: Vec::new(),
+            launched: Launched::default(),
         }
     }
 }
@@ -475,7 +483,7 @@ impl Session {
         if self.agent.is_some() {
             self.conversation = None;
             self.conversation_folder = None;
-            self.launched.clear();
+            self.launched = Launched::default();
         }
         self.agent = agent;
         self.hooked = false;
@@ -490,19 +498,24 @@ impl Session {
         true
     }
 
-    /// Records the arguments the foreground agent was started with (`resume_command`).
-    pub fn launched(&mut self, arguments: Vec<String>) {
-        self.launched = arguments;
+    /// Records how the foreground agent was started (`resume_command`).
+    pub fn launched(&mut self, launched: Launched) {
+        self.launched = launched;
     }
 
-    /// The command that opens the agent's conversation again after a relaunch
-    /// (`resume::command`): `None` with no agent in the foreground, or none it can resume.
-    pub fn resume_command(&self) -> Option<String> {
+    /// What opens the agent's conversation again after a relaunch (`resume::command`): the one
+    /// its hook reported, else its folder's latest. The folder the hook reported wins over the
+    /// one it was started in. `None` with no agent in the foreground.
+    pub fn resume_command(&self) -> Option<crate::terminal::resume::Resume> {
+        let folder = self
+            .conversation_folder
+            .as_deref()
+            .or(self.launched.folder.as_deref());
         crate::terminal::resume::command(
             self.agent?,
-            self.conversation.as_deref()?,
-            self.conversation_folder.as_deref(),
-            &self.launched,
+            self.conversation.as_deref(),
+            folder,
+            &self.launched.arguments,
         )
     }
 
@@ -561,28 +574,32 @@ mod tests {
             "\u{1b}]6973;northroom;session=3f2a-c91\u{7}\u{1b}]6973;northroom;session-dir=/p/My Work\u{7}",
         );
         session.observe(&heard, true);
-        assert_eq!(
-            session.resume_command(),
-            None,
-            "no agent in the foreground yet"
-        );
+        let command = |session: &Session| session.resume_command().map(|resume| resume.command);
+        assert_eq!(command(&session), None, "no agent in the foreground yet");
         session.runs(Some(Agent::Claude), true);
-        session.launched(vec![
-            "claude".to_owned(),
-            "--dangerously-skip-permissions".to_owned(),
-        ]);
+        session.launched(Launched {
+            arguments: vec![
+                "claude".to_owned(),
+                "--dangerously-skip-permissions".to_owned(),
+            ],
+            folder: Some("/p".to_owned()),
+        });
         assert_eq!(
-            session.resume_command().as_deref(),
+            command(&session).as_deref(),
             Some("cd '/p/My Work' && claude --resume 3f2a-c91 --dangerously-skip-permissions")
         );
         // Back at the shell (/exit), there is nothing to resume.
         session.runs(None, true);
-        assert_eq!(session.resume_command(), None);
-        session.runs(Some(Agent::Claude), true);
+        assert_eq!(command(&session), None);
+        // An agent without a hook resumes its folder's latest, from the folder it started in.
+        session.runs(Some(Agent::Codex), true);
+        session.launched(Launched {
+            arguments: vec!["codex".to_owned()],
+            folder: Some("/p/Codex Work".to_owned()),
+        });
         assert_eq!(
-            session.resume_command(),
-            None,
-            "a new run waits for its own report"
+            command(&session).as_deref(),
+            Some("cd '/p/Codex Work' && codex resume --last")
         );
     }
 

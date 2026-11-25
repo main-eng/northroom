@@ -290,21 +290,21 @@ impl Shared {
     }
 
     /// Records what holds the terminal's foreground: `agent` when the agent changed (`Some(None)`
-    /// for none now), started with `arguments`, and whether something the person started holds
-    /// it (`busy`). Windows exposes no foreground program.
+    /// for none now), how it was `launched`, and whether something the person started holds it
+    /// (`busy`). Windows exposes no foreground program.
     #[cfg(unix)]
     fn foreground(
         &self,
         agent: Option<Option<crate::terminal::agent::Agent>>,
         busy: bool,
-        arguments: &[String],
+        launched: crate::terminal::activity::Launched,
     ) {
         let changed = {
             let mut state = self.state.relock();
             let watched = state.is_watched();
             let ran = agent.is_some_and(|agent| state.session.runs(agent, watched));
             if ran {
-                state.session.launched(arguments.to_vec());
+                state.session.launched(launched);
             }
             let held = state.session.holds(busy);
             ran || held
@@ -682,7 +682,7 @@ impl Terminal {
 
     /// The command that opens this terminal's agent conversation again after a relaunch
     /// (`activity::Session::resume_command`).
-    pub fn resume_command(&self) -> Option<String> {
+    pub fn resume_command(&self) -> Option<crate::terminal::resume::Resume> {
         self.shared.state.relock().session.resume_command()
     }
 
