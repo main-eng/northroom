@@ -6,6 +6,7 @@
 //! tiling patterns (not painted), shading types other than axial and radial (painted in their
 //! middle colour), text rendering's clip modes (drawn as fills), and optional content.
 
+use super::blend::Blend;
 use super::colour::{Function, Space};
 use super::font::Font;
 use super::image::{self, Picture};
@@ -153,6 +154,20 @@ pub trait Sink {
     fn encoded(&mut self, stream: &Stream, frame: [f64; 4], crop: [f64; 4]);
     /// The clip `clip` narrowed to `path`.
     fn clip(&mut self, clip: &Clip, path: &[Command]) -> Clip;
+    /// Paints from here on mix with what is under them in `blend`.
+    fn set_blend(&mut self, _blend: Blend) {}
+    /// Where both clips cover.
+    fn combine(&mut self, a: &Clip, _b: &Clip) -> Clip {
+        a.clone()
+    }
+    /// Starts drawing on a canvas of its own: a transparency group, or a soft mask when `mask`.
+    fn begin_group(&mut self, _mask: bool) {}
+    /// Paints the group begun last onto what is under it, at `alpha` within `clip`, in `blend`.
+    fn end_group(&mut self, _alpha: f32, _blend: Blend, _clip: &Clip) {}
+    /// Ends the soft mask begun last: its luminosity over `backdrop`, or its alpha.
+    fn end_mask(&mut self, _backdrop: Option<[f32; 3]>) -> Clip {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -182,6 +197,13 @@ struct State {
     clip: Clip,
     /// The clip's shape, which decides whether a JPEG can be left to the system.
     clip_area: ClipArea,
+    blend: Blend,
+    /// The graphics state's soft mask, drawn (`None` while planning).
+    soft_mask: Clip,
+    /// Whether a soft mask is set, drawn or not, so planning and drawing agree.
+    masked: bool,
+    /// What paints within: the clip and soft mask together.
+    paint_clip: Clip,
     text: TextState,
 }
 
@@ -270,6 +292,10 @@ impl State {
             stroke_alpha: 1.0,
             clip: None,
             clip_area: ClipArea::Whole,
+            blend: Blend::Normal,
+            soft_mask: None,
+            masked: false,
+            paint_clip: None,
             text: TextState {
                 font: None,
                 size: 0.0,
@@ -337,6 +363,8 @@ pub struct Interpreter<'a, S: Sink> {
     depth: usize,
     /// The document's hidden layers.
     layers: Layers,
+    /// How many groups and soft masks are being drawn on canvases of their own.
+    grouped: usize,
     /// Open marked content, each whether it hides what it marks (`BMC`, `BDC`, `EMC`).
     marked: Vec<bool>,
 }
@@ -373,6 +401,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             current_resources: None,
             depth: 0,
             layers: Layers::of(document),
+            grouped: 0,
             marked: Vec::new(),
         }
     }
@@ -508,22 +537,39 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         }
         if stroke && shown {
             let pen = self.state.device_pen();
+            let clip = self.ready();
             self.sink
-                .stroke(&path, &pen, self.state.stroke_colour(), &self.state.clip);
+                .stroke(&path, &pen, self.state.stroke_colour(), &clip);
         }
         if self.pending_clip {
             self.pending_clip = false;
             self.state.clip = self.sink.clip(&self.state.clip, &path);
             self.state.clip_area = self.state.clip_area.narrowed(&path);
+            self.refresh_paint_clip();
         }
+    }
+
+    /// Readies the sink to paint in the current blend mode, and gives the area it paints in.
+    fn ready(&mut self) -> Clip {
+        self.sink.set_blend(self.state.blend);
+        self.state.paint_clip.clone()
+    }
+
+    /// Recomputes where painting reaches after the clip or soft mask changes.
+    fn refresh_paint_clip(&mut self) {
+        self.state.paint_clip = match &self.state.soft_mask {
+            Some(_) => self.sink.combine(&self.state.clip, &self.state.soft_mask),
+            None => self.state.clip.clone(),
+        };
     }
 
     fn fill_path(&mut self, path: &[Command]) {
         match self.state.fill_pattern.clone() {
             Some(name) => self.fill_with_pattern(path, &name),
-            None => self
-                .sink
-                .fill(path, self.state.fill_colour(), &self.state.clip),
+            None => {
+                let clip = self.ready();
+                self.sink.fill(path, self.state.fill_colour(), &clip);
+            }
         }
     }
 
@@ -663,7 +709,8 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         }
         let shading = self.resource(resources, "Shading", name);
         if let Some(gradient) = self.read_gradient(&shading, self.state.ctm) {
-            self.sink.gradient(&gradient, &self.state.clip);
+            let clip = self.ready();
+            self.sink.gradient(&gradient, &clip);
         }
     }
 
@@ -685,7 +732,8 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         let Some(gradient) = self.read_gradient(&shading, multiply(matrix, self.base)) else {
             return;
         };
-        let clip = self.sink.clip(&self.state.clip, path);
+        let paint_clip = self.ready();
+        let clip = self.sink.clip(&paint_clip, path);
         self.sink.gradient(&gradient, &clip);
     }
 }
@@ -757,13 +805,14 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             .collect();
         let stroke = matches!(mode, 1 | 2 | 5 | 6);
         if matches!(mode, 0 | 2 | 4 | 6) {
-            self.sink
-                .fill(&path, self.state.fill_colour(), &self.state.clip);
+            let clip = self.ready();
+            self.sink.fill(&path, self.state.fill_colour(), &clip);
         }
         if stroke {
             let pen = self.state.device_pen();
+            let clip = self.ready();
             self.sink
-                .stroke(&path, &pen, self.state.stroke_colour(), &self.state.clip);
+                .stroke(&path, &pen, self.state.stroke_colour(), &clip);
         }
     }
 
@@ -904,7 +953,10 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         let plain = upright
             && self.state.fill_alpha >= 1.0
             && !masked
-            && self.state.clip_area != ClipArea::Shaped;
+            && self.state.clip_area != ClipArea::Shaped
+            && self.state.blend == Blend::Normal
+            && !self.state.masked
+            && self.grouped == 0;
         match codec {
             Some("jpeg") if plain => system_placement(matrix, self.state.clip_area),
             _ => Placement::Drawn,
@@ -934,11 +986,99 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         } else {
             None
         };
+        let clip = self.ready();
         self.sink
-            .picture(picture, matrix, self.state.fill_alpha, &self.state.clip);
+            .picture(picture, matrix, self.state.fill_alpha, &clip);
     }
 
+    /// Draws a form: as a transparency group on a canvas of its own when its group's alpha,
+    /// blend mode or soft mask must apply to it as a whole, else straight onto the page.
     fn draw_form(&mut self, stream: &Stream) {
+        let group = self.document.entry(&stream.dict, "Group");
+        let is_group = group
+            .as_dict()
+            .is_some_and(|group| self.document.entry(group, "S").as_name() == Some("Transparency"));
+        let state = &self.state;
+        let composited = state.fill_alpha < 1.0 || state.blend != Blend::Normal || state.masked;
+        if !(is_group && composited) {
+            self.draw_form_content(stream);
+            return;
+        }
+        let (alpha, blend, clip) = (state.fill_alpha, state.blend, state.paint_clip.clone());
+        self.sink.begin_group(false);
+        self.draw_fresh(stream);
+        self.sink.end_group(alpha, blend, &clip);
+    }
+
+    /// Draws a form as a group or soft mask draws its content: opaque, unblended, unmasked and
+    /// unclipped, the group's own alpha, blend and clip applied when it is painted.
+    fn draw_fresh(&mut self, stream: &Stream) {
+        let outer = self.state.clone();
+        let state = &mut self.state;
+        (state.fill_alpha, state.stroke_alpha, state.blend) = (1.0, 1.0, Blend::Normal);
+        (state.soft_mask, state.masked, state.clip, state.clip_area) =
+            (None, false, None, ClipArea::Whole);
+        self.refresh_paint_clip();
+        self.grouped += 1;
+        self.draw_form_content(stream);
+        self.grouped -= 1;
+        self.state = outer;
+    }
+
+    /// A graphics state's soft mask (`SMask`): its group drawn, then its luminosity over its
+    /// backdrop colour, or its alpha, as coverage. `None` while planning, which needs only
+    /// to know there is one.
+    fn read_soft_mask(&mut self, object: &Object) -> Clip {
+        let dict = self.document.resolve(object);
+        let dict = dict.as_dict()?;
+        let Object::Stream(group) = self.document.entry(dict, "G") else {
+            return None;
+        };
+        if !self.sink.wants_detail() {
+            return None;
+        }
+        let backdrop = match self.document.entry(dict, "S").as_name() {
+            Some("Alpha") => None,
+            _ => Some(self.mask_backdrop(dict, &group)),
+        };
+        self.sink.begin_group(true);
+        self.draw_fresh(&group);
+        self.sink.end_mask(backdrop)
+    }
+
+    /// A luminosity mask's backdrop (`BC`), in its group's colour space; black by default.
+    fn mask_backdrop(&self, dict: &Dict, group: &Stream) -> [f32; 3] {
+        let values: Vec<f32> = self
+            .document
+            .entry(dict, "BC")
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Object::as_f64)
+                    .map(|value| value as f32)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if values.is_empty() {
+            return [0.0; 3];
+        }
+        let group_dict = self.document.entry(&group.dict, "Group");
+        let space = group_dict
+            .as_dict()
+            .and_then(|group| group.get("CS"))
+            .and_then(|space| {
+                image::named_space(self.document, space, self.current_resources.as_ref())
+            })
+            .unwrap_or(match values.len() {
+                1 => Space::Gray,
+                4 => Space::Cmyk,
+                _ => Space::Rgb,
+            });
+        space.rgb(&values)
+    }
+
+    fn draw_form_content(&mut self, stream: &Stream) {
         let matrix = self
             .document
             .entry(&stream.dict, "Matrix")
@@ -976,6 +1116,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         path.push(Command::Close);
         self.state.clip = self.sink.clip(&self.state.clip, &path);
         self.state.clip_area = self.state.clip_area.narrowed(&path);
+        self.refresh_paint_clip();
     }
 
     fn draw_object(&mut self, name: &str, resources: Option<&Dict>) {
@@ -1030,6 +1171,33 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         self.line_matrix = saved.4;
     }
 
+    /// A graphics state's blend mode (`BM`, a name or a list to choose from) and soft mask
+    /// (`SMask`, a mask or `None`).
+    fn transparency_state(&mut self, dict: &Dict) {
+        match self.document.entry(dict, "BM") {
+            Object::Name(name) => self.state.blend = Blend::named(&name),
+            Object::Array(names) => {
+                let known = names
+                    .iter()
+                    .filter_map(Object::as_name)
+                    .map(Blend::named)
+                    .find(|blend| *blend != Blend::Normal);
+                self.state.blend = known.unwrap_or(Blend::Normal);
+            }
+            _ => {}
+        }
+        let Some(mask) = dict.get("SMask").cloned() else {
+            return;
+        };
+        if self.document.resolve(&mask).as_name() == Some("None") {
+            (self.state.soft_mask, self.state.masked) = (None, false);
+        } else {
+            self.state.masked = true;
+            self.state.soft_mask = self.read_soft_mask(&mask);
+        }
+        self.refresh_paint_clip();
+    }
+
     fn graphics_state(&mut self, name: &str, resources: Option<&Dict>) {
         let state = self.resource(resources, "ExtGState", name);
         let Some(dict) = state.as_dict() else {
@@ -1037,6 +1205,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         };
         let entry = |key: &str| self.document.entry(dict, key);
         self.pen_state(dict);
+        self.transparency_state(dict);
         if let Some(alpha) = entry("ca").as_f64() {
             self.state.fill_alpha = alpha.clamp(0.0, 1.0) as f32;
         }
@@ -1395,6 +1564,11 @@ pub struct Renderer {
     target: usize,
     layer: usize,
     marked: bool,
+    /// Groups and soft masks being drawn on canvases of their own, innermost last; `None`
+    /// for one begun outside the layer being drawn.
+    groups: Vec<Option<Canvas>>,
+    /// How many soft masks are being drawn: their marks are not the page's.
+    masking: usize,
 }
 
 impl Renderer {
@@ -1404,12 +1578,25 @@ impl Renderer {
             target,
             layer: 0,
             marked: false,
+            groups: Vec::new(),
+            masking: 0,
         }
     }
 
+    /// Notes a mark, and whether it is drawn: only in the layer being drawn.
     fn mark(&mut self) -> bool {
-        self.marked = true;
+        if self.masking == 0 {
+            self.marked = true;
+        }
         self.layer == self.target
+    }
+
+    /// The canvas marks go on: the innermost group's, or the page's.
+    fn top(&mut self) -> &mut Canvas {
+        match self.groups.iter_mut().rev().find_map(Option::as_mut) {
+            Some(group) => group,
+            None => &mut self.canvas,
+        }
     }
 }
 
@@ -1419,17 +1606,17 @@ impl Sink for Renderer {
     }
     fn fill(&mut self, path: &[Command], colour: Rgba, clip: &Clip) {
         if self.mark() {
-            self.canvas.fill(path, colour, clip.as_deref());
+            self.top().fill(path, colour, clip.as_deref());
         }
     }
     fn stroke(&mut self, path: &[Command], pen: &Pen, colour: Rgba, clip: &Clip) {
         if self.mark() {
-            self.canvas.stroke(path, pen, colour, clip.as_deref());
+            self.top().stroke(path, pen, colour, clip.as_deref());
         }
     }
     fn gradient(&mut self, gradient: &Gradient, clip: &Clip) {
         if self.mark() {
-            self.canvas
+            self.top()
                 .shade(|point| gradient.colour_at(point), clip.as_deref());
         }
     }
@@ -1443,7 +1630,7 @@ impl Sink for Renderer {
             height,
         }) = picture
         {
-            self.canvas
+            self.top()
                 .image(&rgba, (width, height), matrix, alpha, clip.as_deref());
         }
     }
@@ -1457,6 +1644,38 @@ impl Sink for Renderer {
             return clip.clone();
         }
         Some(Rc::new(self.canvas.clip_mask(path, clip.as_deref())))
+    }
+    fn set_blend(&mut self, blend: Blend) {
+        self.top().mode = blend;
+    }
+    fn combine(&mut self, a: &Clip, b: &Clip) -> Clip {
+        if self.layer != self.target {
+            return a.clone();
+        }
+        super::raster::combine(a.as_deref(), b.as_deref()).map(Rc::new)
+    }
+    fn begin_group(&mut self, mask: bool) {
+        if mask {
+            self.masking += 1;
+        }
+        let canvas =
+            (self.layer == self.target).then(|| Canvas::new(self.canvas.width, self.canvas.height));
+        self.groups.push(canvas);
+    }
+    fn end_group(&mut self, alpha: f32, blend: Blend, clip: &Clip) {
+        if let Some(Some(group)) = self.groups.pop() {
+            let top = self.top();
+            let mode = std::mem::replace(&mut top.mode, blend);
+            top.composite(&group, alpha, clip.as_deref());
+            top.mode = mode;
+        }
+    }
+    fn end_mask(&mut self, backdrop: Option<[f32; 3]>) -> Clip {
+        self.masking = self.masking.saturating_sub(1);
+        match self.groups.pop() {
+            Some(Some(group)) => Some(Rc::new(group.mask_of(backdrop))),
+            _ => None,
+        }
     }
 }
 

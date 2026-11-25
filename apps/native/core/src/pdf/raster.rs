@@ -6,6 +6,7 @@
 //! Left out: the even-odd rule (filled as nonzero), dashes (drawn solid), and line caps and
 //! joins beyond round joints.
 
+use super::blend::Blend;
 use super::stroke::Pen;
 use crate::deck::Command;
 
@@ -27,6 +28,22 @@ pub struct Canvas {
     pub height: usize,
     /// Premultiplied RGBA.
     pixels: Vec<u8>,
+    /// How what is painted next mixes with what is there.
+    pub mode: Blend,
+}
+
+/// Where both masks cover: their product, or whichever there is.
+pub fn combine(a: Option<&Mask>, b: Option<&Mask>) -> Option<Mask> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(
+            a.iter()
+                .zip(b)
+                .map(|(a, b)| (u16::from(*a) * u16::from(*b) / 255) as u8)
+                .collect(),
+        ),
+        (Some(only), None) | (None, Some(only)) => Some(only.clone()),
+        (None, None) => None,
+    }
 }
 
 /// A path flattened into polygons, each a list of points.
@@ -249,12 +266,17 @@ impl Canvas {
             width,
             height,
             pixels: vec![0; width * height * 4],
+            mode: Blend::Normal,
         }
     }
 
     fn blend(&mut self, index: usize, colour: Rgba, amount: f32) {
         let alpha = colour[3] * amount;
         if alpha <= 0.0 {
+            return;
+        }
+        if self.mode != Blend::Normal {
+            self.blend_mixed(index, colour, alpha);
             return;
         }
         let pixel = &mut self.pixels[index * 4..index * 4 + 4];
@@ -266,6 +288,73 @@ impl Canvas {
         pixel[3] = (alpha * 255.0 + f32::from(pixel[3]) * keep)
             .round()
             .clamp(0.0, 255.0) as u8;
+    }
+
+    /// Paints `colour` at `alpha` in a blend mode other than normal: the source's own colour
+    /// where the backdrop is clear, the blended one where both are, weighed by their alphas.
+    fn blend_mixed(&mut self, index: usize, colour: Rgba, alpha: f32) {
+        let pixel = &mut self.pixels[index * 4..index * 4 + 4];
+        let backdrop_alpha = f32::from(pixel[3]) / 255.0;
+        let premultiplied = [0, 1, 2].map(|channel| f32::from(pixel[channel]) / 255.0);
+        let backdrop = premultiplied.map(|channel| {
+            if backdrop_alpha > 0.0 {
+                (channel / backdrop_alpha).min(1.0)
+            } else {
+                0.0
+            }
+        });
+        let source = [colour[0], colour[1], colour[2]];
+        let mixed = self.mode.mix(backdrop, source);
+        for channel in 0..3 {
+            let value = (1.0 - alpha) * premultiplied[channel]
+                + (1.0 - backdrop_alpha) * alpha * source[channel]
+                + alpha * backdrop_alpha * mixed[channel];
+            pixel[channel] = (value * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+        let out = alpha + backdrop_alpha - alpha * backdrop_alpha;
+        pixel[3] = (out * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+
+    /// Paints a group drawn on its own canvas onto this one, at `alpha`, within `mask`, in this
+    /// canvas's blend mode.
+    pub fn composite(&mut self, group: &Canvas, alpha: f32, mask: Option<&Mask>) {
+        for index in 0..self.width * self.height {
+            let pixel = &group.pixels[index * 4..index * 4 + 4];
+            if pixel[3] == 0 {
+                continue;
+            }
+            let own = f32::from(pixel[3]) / 255.0;
+            let colour =
+                [0, 1, 2].map(|channel| (f32::from(pixel[channel]) / 255.0 / own).min(1.0));
+            let masked = mask.map_or(1.0, |mask| f32::from(mask[index]) / 255.0);
+            self.blend(
+                index,
+                [colour[0], colour[1], colour[2], own],
+                alpha * masked,
+            );
+        }
+    }
+
+    /// A soft mask from what this canvas holds: its luminosity over an opaque `backdrop`, or
+    /// its alpha when there is none.
+    pub fn mask_of(&self, backdrop: Option<[f32; 3]>) -> Mask {
+        self.pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| match backdrop {
+                Some(backdrop) => {
+                    let keep = 1.0 - f32::from(pixel[3]) / 255.0;
+                    let [r, g, b] = [0, 1, 2].map(|channel| {
+                        f32::from(pixel[channel]) / 255.0 + keep * backdrop[channel]
+                    });
+                    ((0.3 * r + 0.59 * g + 0.11 * b) * 255.0)
+                        .round()
+                        .clamp(0.0, 255.0) as u8
+                }
+                None => pixel[3],
+            })
+            .collect()
     }
 
     fn paint(&mut self, polygons: &Polygons, colour: Rgba, clip: Option<&Mask>) {
@@ -291,7 +380,6 @@ impl Canvas {
         self.paint(&flatten(path), colour, clip);
     }
 
-    /// Strokes a path given in pixels, `width` pixels wide.
     /// Strokes a path given in pixels with `pen`, its lengths in pixels. A line thinner than a
     /// pixel is drawn a pixel wide and fainter.
     pub fn stroke(&mut self, path: &[Command], pen: &Pen, colour: Rgba, clip: Option<&Mask>) {

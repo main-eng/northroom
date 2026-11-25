@@ -11,6 +11,7 @@
 //! Left out: text selection and search, links and forms' interaction, page zoom beyond the
 //! page view's, and what `render`, `image`, `font` and `raster` say they leave out.
 
+pub mod blend;
 pub mod ccitt;
 pub mod colour;
 pub mod crypt;
@@ -642,6 +643,46 @@ mod tests {
         assert_eq!(canvas.pixel(15, 15)[3], 255, "the shown layer");
         assert_eq!(canvas.pixel(25, 15)[3], 255, "the form in its box");
         assert_eq!(canvas.pixel(35, 15)[3], 0, "the form past its box");
+    }
+
+    #[test]
+    fn a_soft_mask_and_a_blend_mode_apply_to_what_paints_after_them() {
+        let mask = "1 g 0 0 20 20 re f";
+        let bytes = pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 40 40] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /ExtGState << \
+             /Masked << /SMask << /S /Luminosity /G 5 0 R >> >> /Multiply << /BM /Multiply >> >> >> >>"
+                .into(),
+            // Top half: red through a mask white only on its left. Bottom half: red, then half
+            // gray multiplied over it.
+            stream(
+                "q 1 0 0 1 0 20 cm /Masked gs 1 0 0 rg 0 0 40 20 re f Q \
+                 1 0 0 rg 0 0 40 20 re f /Multiply gs 0.5 g 0 0 40 20 re f",
+            ),
+            format!(
+                "<< /Type /XObject /Subtype /Form /BBox [0 0 40 20] \
+                 /Group << /S /Transparency /CS /DeviceGray >> /Length {} >>\n\
+                 stream\n{mask}\nendstream",
+                mask.len()
+            ),
+        ]);
+        let document = Document::open(bytes).expect("open");
+        let pages = pages_of(&document);
+        let mut renderer = render::Renderer::new(40, 40, 0);
+        run_page(&document, &pages[0], &mut renderer, 1.0);
+        let canvas = renderer.canvas;
+        assert_eq!(
+            canvas.pixel(10, 10),
+            [255, 0, 0, 255],
+            "red where the mask is white"
+        );
+        assert_eq!(canvas.pixel(30, 10)[3], 0, "nothing where it is black");
+        let multiplied = canvas.pixel(20, 30);
+        assert!(
+            (126..=129).contains(&multiplied[0]) && multiplied[1] == 0,
+            "{multiplied:?}"
+        );
     }
 
     #[test]
