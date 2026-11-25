@@ -78,6 +78,9 @@ struct Finder {
     current: usize,
 }
 
+/// How far the pointer moves from a press, in points, before it is a drag that selects.
+const DRAG_MIN: f32 = 4.0;
+
 /// The find field's size and its inset from the view's top right corner.
 const FIND_WIDTH: f32 = 240.0;
 const FIND_HEIGHT: f32 = 28.0;
@@ -253,24 +256,23 @@ impl Deck {
             cx.notify();
             return;
         }
+        // A press clears the selection; a drag from it selects (`mouse_move`).
         self.pressed_at = Some(event.position);
-        // A press on a page starts selecting its text from the glyph under it.
-        self.selection = self
-            .glyph_under(event.position)
-            .map(|(slide, glyph)| (slide, glyph, glyph));
-        self.selecting = self.selection.is_some();
+        self.selection = None;
+        self.selecting = true;
         cx.notify();
+    }
+
+    /// Whether the pointer at `at` has moved far enough from the press to be a drag.
+    fn dragged(&self, at: Point<Pixels>) -> bool {
+        self.pressed_at.is_some_and(|from| {
+            (from.x - at.x).abs() >= px(DRAG_MIN) || (from.y - at.y).abs() >= px(DRAG_MIN)
+        })
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if self.selecting {
-            if let Some((slide, anchor, _)) = self.selection {
-                let reached = self.glyph_on(slide, event.position);
-                if let Some(glyph) = reached {
-                    self.selection = Some((slide, anchor, glyph));
-                    cx.notify();
-                }
-            }
+            self.extend_selection(event.position, cx);
             return;
         }
         if self.down.pointer(event.position, self.frame, now()) || self.down.is_held() {
@@ -278,15 +280,31 @@ impl Deck {
         }
     }
 
+    /// Selects from the glyph the drag began on to the one under `at`, once the press has
+    /// moved far enough to be a drag.
+    fn extend_selection(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.selection.is_none() && self.dragged(at) {
+            let start = self
+                .pressed_at
+                .and_then(|pressed| self.glyph_under(pressed));
+            self.selection = start.map(|(slide, glyph)| (slide, glyph, glyph));
+        }
+        let Some((slide, anchor, _)) = self.selection else {
+            return;
+        };
+        if let Some(glyph) = self.glyph_on(slide, at) {
+            self.selection = Some((slide, anchor, glyph));
+            cx.notify();
+        }
+    }
+
     fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
         self.selecting = false;
         // A press that didn't drag follows the link under it.
-        let pressed = self.pressed_at.take();
-        if pressed.is_some_and(|at| {
-            (at.x - event.position.x).abs() < px(4.0) && (at.y - event.position.y).abs() < px(4.0)
-        }) {
+        if self.pressed_at.is_some() && !self.dragged(event.position) {
             self.follow_link(event.position, cx);
         }
+        self.pressed_at = None;
         if self.down.release(now()) {
             cx.notify();
         }
@@ -298,11 +316,9 @@ impl Deck {
         let Some(page) = self.page.as_ref() else {
             return;
         };
-        let scrolled = f64::from(self.down.offset());
-        let (x, y) = self.local(at);
-        let hit = (0..page.slides.len()).find_map(|index| {
-            let frame = slide_frame(page, index, scrolled)?;
-            northroom_core::deck::ffi::link_at(index, frame, (x, y))
+        let hit = self.slide_under(at).and_then(|index| {
+            let frame = slide_frame(page, index, f64::from(self.down.offset()))?;
+            northroom_core::deck::ffi::link_at(index, frame, self.local(at))
         });
         match hit {
             Some(Target::Address(address)) => cx.open_url(&address),
@@ -327,18 +343,23 @@ impl Deck {
 
     /// The slide under window point `at`, and the glyph of its text there.
     fn glyph_under(&self, at: Point<Pixels>) -> Option<(usize, usize)> {
+        let slide = self.slide_under(at)?;
+        Some((slide, self.glyph_on(slide, at)?))
+    }
+
+    /// The slide under window point `at`.
+    fn slide_under(&self, at: Point<Pixels>) -> Option<usize> {
         let page = self.page.as_ref()?;
         let (x, y) = self.local(at);
         let scrolled = f64::from(self.down.offset());
-        let slide = (0..page.slides.len()).find(|&index| {
+        (0..page.slides.len()).find(|&index| {
             slide_frame(page, index, scrolled).is_some_and(|frame| {
                 x >= frame.x
                     && x <= frame.x + frame.width
                     && y >= frame.y
                     && y <= frame.y + frame.height
             })
-        })?;
-        Some((slide, self.glyph_on(slide, at)?))
+        })
     }
 
     /// The glyph of slide `slide`'s text nearest window point `at`.
@@ -654,6 +675,12 @@ impl Screen for Deck {
         }
         self.shown = deck;
         self.place_slides();
+        // What was selected or found belonged to the file as it was.
+        self.selection = None;
+        if let Some(finder) = &self.finder {
+            let query = finder.field.read(cx).editing.content.clone();
+            self.search(&query, cx);
+        }
         cx.notify();
     }
 

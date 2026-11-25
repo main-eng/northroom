@@ -540,6 +540,10 @@ impl Field {
 
     /// Speaks the selection, or all the text when nothing is selected.
     fn start_speaking(&mut self, _: &StartSpeaking, _: &mut Window, _: &mut Context<Self>) {
+        // A password is never read aloud.
+        if self.secret {
+            return;
+        }
         let words = if self.editing.selected.is_empty() {
             self.editing.content.as_str()
         } else {

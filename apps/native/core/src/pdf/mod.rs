@@ -518,6 +518,19 @@ pub fn page_text(bytes: Vec<u8>, password: Option<&[u8]>, number: usize) -> Resu
     Ok(reader.glyphs)
 }
 
+/// Every page's text, from one reading of the document, for finding across it.
+pub fn document_text(bytes: Vec<u8>, password: Option<&[u8]>) -> Result<Vec<Vec<TextGlyph>>> {
+    let (document, pages) = open_pages(bytes, password)?;
+    Ok(pages
+        .iter()
+        .map(|page| {
+            let mut reader = Reader::default();
+            run_page(&document, page, &mut reader, 1.0);
+            reader.glyphs
+        })
+        .collect())
+}
+
 /// A link on a page: where it sits, in page points from the top left, and where it leads.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Link {
@@ -976,6 +989,22 @@ mod tests {
         );
         assert_eq!(links[0].frame, Rect::new(10.0, 70.0, 40.0, 20.0));
         assert_eq!(links[1].target, links::Target::Page(1));
+    }
+
+    #[test]
+    fn a_name_tree_that_loops_back_on_itself_ends() {
+        let bytes = pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R /Names << /Dests 6 0 R >> >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 100] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Annots [5 0 R] >>".into(),
+            stream(""),
+            "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /Dest (missing) >>".into(),
+            // Each node's kids are itself, twice.
+            "<< /Kids [6 0 R 6 0 R] >>".into(),
+        ]);
+        let started = std::time::Instant::now();
+        assert!(page_links(bytes, None, 0).expect("links").is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]

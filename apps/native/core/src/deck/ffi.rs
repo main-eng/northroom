@@ -192,6 +192,7 @@ pub fn deck_find(query: &str) -> Vec<(usize, usize, usize)> {
     let Some(deck) = opened_deck() else {
         return Vec::new();
     };
+    read_all_text(deck.slides.len());
     (0..deck.slides.len())
         .flat_map(|slide| {
             let glyphs: Vec<super::text::Glyph> = page_glyphs(slide)
@@ -206,6 +207,34 @@ pub fn deck_find(query: &str) -> Vec<(usize, usize, usize)> {
                 .map(move |(first, last)| (slide, first, last))
         })
         .collect()
+}
+
+/// Reads every page's text the cache lacks in one reading of the open PDF, so finding across
+/// it reads the file once rather than once a page.
+fn read_all_text(count: usize) {
+    let Some((path, Kind::Pdf)) = opened_path() else {
+        return;
+    };
+    let complete = TEXT.relock().as_ref().is_some_and(|known| {
+        known.path == path
+            && known.version == version_of(&path)
+            && (0..count).all(|page| known.pages.contains_key(&page))
+    });
+    if complete {
+        return;
+    }
+    let password = crate::pdf::passwords::of(&path);
+    let Some(pages) = super::read_bytes(&path)
+        .ok()
+        .and_then(|bytes| crate::pdf::document_text(bytes, password.as_deref()).ok())
+    else {
+        return;
+    };
+    *TEXT.relock() = Some(PageCache {
+        path: path.clone(),
+        version: version_of(&path),
+        pages: pages.into_iter().map(Arc::new).enumerate().collect(),
+    });
 }
 
 /// Forgets the file last read, so the next ask reads it again, as after a password is typed.

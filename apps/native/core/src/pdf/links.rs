@@ -19,6 +19,8 @@ pub enum Target {
 
 /// How deep a name tree is followed.
 const TREE_DEPTH_MAX: usize = 32;
+/// How many of a name tree's nodes one lookup visits at most.
+const TREE_NODES_MAX: usize = 10_000;
 
 /// The schemes a link may open: the web and mail. Anything else (`file:`, `javascript:`)
 /// stays shut.
@@ -90,14 +92,24 @@ fn named(document: &Document, name: &[u8]) -> Option<Object> {
     }
     let names = document.entry(catalog, "Names");
     let tree = document.entry(names.as_dict()?, "Dests");
-    in_tree(document, tree.as_dict()?, name, 0)
+    let mut budget = TREE_NODES_MAX;
+    in_tree(document, tree.as_dict()?, name, 0, &mut budget)
 }
 
 /// `name`'s value in a name tree: in a node's `Names` pairs, else under its `Kids`.
-fn in_tree(document: &Document, node: &Dict, name: &[u8], depth: usize) -> Option<Object> {
-    if depth > TREE_DEPTH_MAX {
+/// `budget` counts down the nodes still to visit, so a tree whose kids loop back on themselves
+/// ends rather than running for ever.
+fn in_tree(
+    document: &Document,
+    node: &Dict,
+    name: &[u8],
+    depth: usize,
+    budget: &mut usize,
+) -> Option<Object> {
+    if depth > TREE_DEPTH_MAX || *budget == 0 {
         return None;
     }
+    *budget -= 1;
     if let Some(pairs) = document.entry(node, "Names").as_array() {
         for pair in pairs.chunks(2) {
             if document.resolve(&pair[0]).as_bytes() == Some(name) {
@@ -108,6 +120,6 @@ fn in_tree(document: &Document, node: &Dict, name: &[u8], depth: usize) -> Optio
     let kids = document.entry(node, "Kids");
     kids.as_array()?.iter().find_map(|kid| {
         let kid = document.resolve(kid);
-        in_tree(document, kid.as_dict()?, name, depth + 1)
+        in_tree(document, kid.as_dict()?, name, depth + 1, budget)
     })
 }
