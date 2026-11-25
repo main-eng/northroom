@@ -16,6 +16,7 @@ mod odf;
 pub mod odp;
 pub mod odt;
 pub mod pptx;
+pub mod rtf;
 
 use crate::geometry::Rect;
 use crate::package::PackageError;
@@ -71,6 +72,8 @@ pub enum Kind {
     OpenDocumentText,
     /// OpenDocument presentation: `.odp` and its template form.
     OpenDocumentPresentation,
+    /// Rich text: `.rtf`, and `.rtfd`, a folder holding it with its pictures.
+    RichText,
 }
 
 /// The largest file drawn; a larger one shows its details. A file is read whole when it opens,
@@ -89,6 +92,7 @@ impl Kind {
             "docx" | "docm" | "dotx" | "dotm" => Kind::WordDocument,
             "odt" | "ott" => Kind::OpenDocumentText,
             "odp" | "otp" => Kind::OpenDocumentPresentation,
+            "rtf" | "rtfd" => Kind::RichText,
             _ => return None,
         })
     }
@@ -102,6 +106,7 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
         Kind::WordDocument => Ok(flow::paginate(docx::read(path)?, measure)),
         Kind::OpenDocumentText => Ok(flow::paginate(odt::read(path)?, measure)),
         Kind::OpenDocumentPresentation => odp::read(path),
+        Kind::RichText => Ok(flow::paginate(rtf::read(path)?, measure)),
     }
 }
 

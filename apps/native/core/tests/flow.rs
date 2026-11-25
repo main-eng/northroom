@@ -2,7 +2,7 @@
 //! in `fixtures/flow`, with the script that made it where a script did.
 
 use northroom_core::deck::flow::{self, Block, Flow};
-use northroom_core::deck::{docx, odt, Align, Colour, Fit, Paragraph, Source, Spacing};
+use northroom_core::deck::{docx, odt, rtf, Align, Colour, Fit, Paragraph, Source, Spacing};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> PathBuf {
@@ -208,4 +208,32 @@ fn the_sample_opendocument_letter_reads_like_its_word_twin() {
     };
     assert_eq!(words(&flow), words(&word));
     assert_eq!(paragraphs(&flow)[1].runs[0].colour, hex("1b5e3a"));
+}
+
+#[test]
+fn the_sample_rich_text_letters_read_like_their_word_twin() {
+    let word = docx::read(&fixture("Wholesale letter.docx")).expect("read");
+    let words = |flow: &Flow| -> Vec<String> {
+        paragraphs(flow)
+            .into_iter()
+            .map(|paragraph| text(paragraph).split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|line| !line.is_empty())
+            .collect()
+    };
+    let plain = rtf::read(&fixture("Wholesale letter.rtf")).expect("read");
+    assert_eq!(words(&plain), words(&word));
+    let heading = &paragraphs(&plain)[1].runs[0];
+    assert_eq!(
+        (heading.text.as_str(), heading.bold, heading.colour, heading.size),
+        ("HARBOR COFFEE", true, hex("1b5e3a"), 29.0)
+    );
+    assert_eq!(plain.pictures, []);
+
+    let package = rtf::read(&fixture("Wholesale letter.rtfd")).expect("read");
+    assert_eq!(words(&package), words(&word));
+    assert_eq!(
+        package.pictures,
+        [Source::File(fixture("Wholesale letter.rtfd").join("Attachment.png"))]
+    );
+    assert!(matches!(package.blocks[0], Block::Picture { picture: 0, .. }));
 }

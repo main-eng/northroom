@@ -620,7 +620,7 @@ const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
     // Presentations the deck cannot read: legacy PowerPoint, Keynote and OpenDocument.
     "ppt", "pps", "pot", "key",
     // Documents the page view cannot read: legacy Word, rich text, Pages and OpenDocument.
-    "doc", "rtf", "rtfd", "pages",
+    "doc", "pages",
     // Spreadsheets the table cannot read: legacy Excel and Numbers.
     "xls", "numbers",
     // Fonts.
@@ -709,20 +709,23 @@ pub fn read_file(path: &Path) -> FileRead {
     read_text_preview(path, stat.len())
 }
 
-/// A folder listed as a file (`Shape::File`): a previewable document package uses the
-/// previewer; an application or anything else opens on its own.
+/// A folder listed as a file (`Shape::File`): a document package the app draws shows as pages,
+/// another uses the previewer; an application or anything else opens on its own.
 fn read_folder_as_file(path: &Path, stat: &fs::Metadata) -> FileRead {
     let extension = path
         .extension()
         .map(|extension| extension.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if stat.is_dir()
+    let package = stat.is_dir()
         && DOCUMENT_PACKAGE_EXTENSIONS.contains(&extension.as_str())
-        && is_package(path, &extension)
-    {
-        FileRead::SystemPreview
-    } else {
-        FileRead::External
+        && is_package(path, &extension);
+    let drawn = path
+        .file_name()
+        .is_some_and(|name| crate::deck::Kind::of_name(&name.to_string_lossy()).is_some());
+    match (package, drawn) {
+        (true, true) => FileRead::Deck,
+        (true, false) => FileRead::SystemPreview,
+        (false, _) => FileRead::External,
     }
 }
 
@@ -2566,6 +2569,30 @@ mod tests {
     }
 
     #[test]
+    fn a_document_package_is_read_as_the_single_file_finder_shows() {
+        let root = tempfile::tempdir().expect("root");
+        let package = root.path().join("Letter.rtfd");
+        std::fs::create_dir(&package).expect("package");
+        std::fs::write(package.join("TXT.rtf"), b"{\\rtf1 A}").expect("its text");
+        // A package the app draws shows as pages, on a Mac where it is a package.
+        let drawn = if cfg!(target_os = "macos") {
+            FileRead::Deck
+        } else {
+            FileRead::External
+        };
+        assert_eq!(read_file(&package), drawn);
+        assert!(
+            is_package(&package, "rtfd") == cfg!(target_os = "macos"),
+            "a package only on a Mac"
+        );
+        // A plain folder with a package name but no package contents stays a folder.
+        let keys = root.path().join("deploy.key");
+        std::fs::create_dir(&keys).expect("folder");
+        std::fs::write(keys.join("server.pem"), b"pem").expect("a key");
+        assert!(!is_package(&keys, "key"));
+    }
+
+    #[test]
     fn a_file_is_read_as_what_its_name_and_bytes_make_it() {
         let root = tempfile::tempdir().expect("root");
         let write = |name: &str, bytes: &[u8]| {
@@ -2660,20 +2687,6 @@ mod tests {
             assert_eq!(read_file(&write(name, b"text")), previewed, "{name}");
         }
         assert_eq!(read_text_file(&root.path().join("Bag.obj")), None);
-        // A document package is a folder on disk, read as the single file Finder shows.
-        let package = root.path().join("Letter.rtfd");
-        std::fs::create_dir(&package).expect("package");
-        std::fs::write(package.join("TXT.rtf"), b"{\\rtf1 A}").expect("its text");
-        assert_eq!(read_file(&package), previewed);
-        assert!(
-            is_package(&package, "rtfd") == cfg!(target_os = "macos"),
-            "a package only on a Mac"
-        );
-        // A plain folder with a package name but no package contents stays a folder.
-        let keys = root.path().join("deploy.key");
-        std::fs::create_dir(&keys).expect("folder");
-        std::fs::write(keys.join("server.pem"), b"pem").expect("a key");
-        assert!(!is_package(&keys, "key"));
         assert_eq!(
             read_file(&write("Card.html", b"<h1>A</h1>")),
             FileRead::Html("<h1>A</h1>".to_owned())
