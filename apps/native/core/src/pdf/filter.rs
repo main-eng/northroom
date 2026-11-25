@@ -61,10 +61,15 @@ pub fn decode(stream: &Stream, document: Option<&Document>) -> Result<Vec<u8>> {
             "ASCIIHexDecode" | "AHx" => ascii_hex(&data),
             "ASCII85Decode" | "A85" => ascii_85(&data),
             "RunLengthDecode" | "RL" => run_length(&data),
+            "BrotliDecode" | "Br" => brotli(&data)?,
             "CCITTFaxDecode" | "CCF" => ccitt(&data, &parameters)?,
             "JBIG2Decode" => jbig2(&data, &parameters, document)?,
             "DCTDecode" | "DCT" | "JPXDecode" | "Crypt" => return Ok(data),
-            other => return Err(PdfError(format!("The filter {other} is not read."))),
+            other => {
+                return Err(PdfError::Damaged(format!(
+                    "The filter {other} is not read."
+                )))
+            }
         };
     }
     Ok(data)
@@ -370,7 +375,7 @@ fn ccitt(data: &[u8], parameters: &Dict) -> Result<Vec<u8>> {
     let black_is_1 = flag("BlackIs1");
     let rows = super::ccitt::decode(data, &fax);
     if rows.is_empty() {
-        return Err(PdfError("A CCITT fax image is damaged.".into()));
+        return Err(PdfError::Damaged("A CCITT fax image is damaged.".into()));
     }
     let mut bits = BitRows::new(fax.columns);
     // Rows the data lacks stay white.
@@ -404,14 +409,14 @@ fn jbig2(data: &[u8], parameters: &Dict, document: Option<&Document>) -> Result<
         .as_deref()
         .and_then(|data| hayro_jbig2::Globals::new(data, &settings).ok());
     let damaged = |error: hayro_jbig2::DecodeError| {
-        PdfError(format!("A JBIG2 image is damaged ({error:?})."))
+        PdfError::Damaged(format!("A JBIG2 image is damaged ({error:?})."))
     };
     // Some writers embed a whole JBIG2 file, header and all, where bare segments belong.
     if data.starts_with(JBIG2_FILE_HEADER) {
         let file = hayro_jbig2::File::new(data, &settings).map_err(damaged)?;
         let page = file
             .page(0)
-            .ok_or_else(|| PdfError("A JBIG2 file has no page.".into()))?;
+            .ok_or_else(|| PdfError::Damaged("A JBIG2 file has no page.".into()))?;
         return jbig2_rows(&page).map_err(damaged);
     }
     let page =
@@ -426,6 +431,16 @@ fn jbig2_rows(page: &hayro_jbig2::Page) -> std::result::Result<Vec<u8>, hayro_jb
     let mut bits = BitRows::new(page.width() as usize);
     page.decode(&mut bits)?;
     Ok(bits.finish())
+}
+
+/// Undoes Brotli compression (`BrotliDecode`, from PDF 2.0's extensions).
+fn brotli(data: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    brotli_decompressor::Decompressor::new(data, 4096)
+        .take(OUTPUT_MAX as u64)
+        .read_to_end(&mut out)
+        .map_err(|error| PdfError::Damaged(format!("A Brotli stream is damaged ({error}).")))?;
+    Ok(out)
 }
 
 fn run_length(data: &[u8]) -> Vec<u8> {

@@ -38,6 +38,8 @@ pub enum ReadError {
     NotItsKind,
     /// A part names another that is not there: a slide with no layout, a layout with no master.
     Missing(String),
+    /// The file is encrypted and needs a password to open.
+    Locked,
 }
 
 impl std::fmt::Display for ReadError {
@@ -48,6 +50,7 @@ impl std::fmt::Display for ReadError {
             ReadError::Missing(part) => {
                 write!(formatter, "\"{part}\" names a part that is missing.")
             }
+            ReadError::Locked => formatter.write_str("The file needs a password to open."),
         }
     }
 }
@@ -176,7 +179,7 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
         Kind::RawPhoto => picture::read_raw_file(path),
         Kind::AppleDocument => iwork::read(path),
         Kind::Font => font::read(path),
-        Kind::Pdf => crate::pdf::read(path).map_err(|error| ReadError::Damaged(error.0)),
+        Kind::Pdf => crate::pdf::read(path).map_err(ReadError::from),
     }
 }
 
@@ -246,14 +249,20 @@ impl Source {
             }
             Source::File(path) => read_bytes(path),
             Source::Bytes { bytes, .. } => Ok(bytes.as_ref().clone()),
-            Source::PdfLayer { page, layer } => {
-                crate::pdf::render_layer(read_bytes(file)?, *page, *layer)
-                    .map_err(|error| ReadError::Damaged(error.0))
-            }
-            Source::PdfPicture { page, picture, .. } => {
-                crate::pdf::extract_picture(read_bytes(file)?, *page, *picture)
-                    .map_err(|error| ReadError::Damaged(error.0))
-            }
+            Source::PdfLayer { page, layer } => crate::pdf::render_layer(
+                read_bytes(file)?,
+                crate::pdf::passwords::of(file).as_deref(),
+                *page,
+                *layer,
+            )
+            .map_err(ReadError::from),
+            Source::PdfPicture { page, picture, .. } => crate::pdf::extract_picture(
+                read_bytes(file)?,
+                crate::pdf::passwords::of(file).as_deref(),
+                *page,
+                *picture,
+            )
+            .map_err(ReadError::from),
         }
     }
 }

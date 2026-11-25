@@ -14,7 +14,15 @@ pub enum Space {
     Gray,
     Rgb,
     Cmyk,
-    Lab,
+    /// CIE L*a*b*, `range` bounding a* and b* (min and max of each).
+    Lab {
+        range: [f32; 4],
+    },
+    /// CalGray (one channel) or CalRGB (three): each channel raised to its gamma.
+    Calibrated {
+        channels: usize,
+        gamma: [f32; 3],
+    },
     Indexed {
         base: Box<Space>,
         high: usize,
@@ -39,6 +47,54 @@ fn cmyk_to_rgb(c: f32, m: f32, y: f32, k: f32) -> [f32; 3] {
 }
 
 /// A Lab colour (L 0–100, a and b about ±100) in sRGB, with a D65 white.
+/// A CIE-based space from its dictionary: CalGray and CalRGB by their gamma, Lab by its range.
+fn calibrated(document: &Document, family: &str, dict: &Object) -> Space {
+    let numbers = |key: &str| -> Vec<f32> {
+        dict.as_dict()
+            .map(|dict| document.entry(dict, key))
+            .and_then(|object| {
+                object.as_array().map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Object::as_f64)
+                        .map(|value| value as f32)
+                        .collect()
+                })
+            })
+            .unwrap_or_default()
+    };
+    let gamma = dict.as_dict().map(|dict| document.entry(dict, "Gamma"));
+    match family {
+        "CalGray" => {
+            let gamma = gamma.and_then(|gamma| gamma.as_f64()).unwrap_or(1.0) as f32;
+            Space::Calibrated {
+                channels: 1,
+                gamma: [gamma; 3],
+            }
+        }
+        "CalRGB" => {
+            let gammas = numbers("Gamma");
+            let gamma = <[f32; 3]>::try_from(gammas.as_slice()).unwrap_or([1.0; 3]);
+            Space::Calibrated { channels: 3, gamma }
+        }
+        _ => {
+            let range = <[f32; 4]>::try_from(numbers("Range").as_slice())
+                .unwrap_or([-100.0, 100.0, -100.0, 100.0]);
+            Space::Lab { range }
+        }
+    }
+}
+
+/// A linear-light channel in sRGB's encoding.
+fn encode_srgb(channel: f32) -> f32 {
+    let channel = channel.clamp(0.0, 1.0);
+    if channel <= 0.003_130_8 {
+        12.92 * channel
+    } else {
+        1.055 * channel.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 fn lab_to_rgb(l: f32, a: f32, b: f32) -> [f32; 3] {
     let fy = (l + 16.0) / 116.0;
     let (fx, fz) = (fy + a / 500.0, fy - b / 200.0);
@@ -55,21 +111,15 @@ fn lab_to_rgb(l: f32, a: f32, b: f32) -> [f32; 3] {
         -0.9689 * x + 1.8758 * y + 0.0415 * z,
         0.0557 * x - 0.2040 * y + 1.0570 * z,
     ];
-    linear.map(|channel| {
-        let channel = channel.clamp(0.0, 1.0);
-        if channel <= 0.003_130_8 {
-            12.92 * channel
-        } else {
-            1.055 * channel.powf(1.0 / 2.4) - 0.055
-        }
-    })
+    linear.map(encode_srgb)
 }
 
 impl Space {
     pub fn components(&self) -> usize {
         match self {
             Space::Gray | Space::Indexed { .. } | Space::Pattern(_) => 1,
-            Space::Rgb | Space::Lab => 3,
+            Space::Rgb | Space::Lab { .. } => 3,
+            Space::Calibrated { channels, .. } => *channels,
             Space::Cmyk => 4,
             Space::Tint { components, .. } => *components,
         }
@@ -90,11 +140,18 @@ impl Space {
             Space::Gray | Space::Pattern(_) => [at(0); 3],
             Space::Rgb => [at(0), at(1), at(2)],
             Space::Cmyk => cmyk_to_rgb(at(0), at(1), at(2), at(3)),
-            Space::Lab => lab_to_rgb(
+            Space::Lab { .. } => lab_to_rgb(
                 values.first().copied().unwrap_or(0.0),
                 values.get(1).copied().unwrap_or(0.0),
                 values.get(2).copied().unwrap_or(0.0),
             ),
+            Space::Calibrated { channels, gamma } => {
+                let linear = |index: usize| encode_srgb(at(index).powf(gamma[index]));
+                match channels {
+                    1 => [linear(0); 3],
+                    _ => [linear(0), linear(1), linear(2)],
+                }
+            }
             Space::Indexed { base, high, lookup } => {
                 let index = values
                     .first()
@@ -103,9 +160,13 @@ impl Space {
                     .round()
                     .clamp(0.0, *high as f32) as usize;
                 let count = base.components();
+                let ranges = base.ranges();
                 let entry: Vec<f32> = (0..count)
                     .map(|component| {
-                        f32::from(*lookup.get(index * count + component).unwrap_or(&0)) / 255.0
+                        let (low, high) = ranges[component];
+                        let share =
+                            f32::from(*lookup.get(index * count + component).unwrap_or(&0)) / 255.0;
+                        low + share * (high - low)
                     })
                     .collect();
                 base.rgb(&entry)
@@ -126,6 +187,15 @@ impl Space {
                     [1.0 - ink.clamp(0.0, 1.0); 3]
                 }
             },
+        }
+    }
+
+    /// Each component's range: what its lowest and highest samples stand for.
+    pub fn ranges(&self) -> Vec<(f32, f32)> {
+        match self {
+            Space::Lab { range } => vec![(0.0, 100.0), (range[0], range[1]), (range[2], range[3])],
+            Space::Indexed { high, .. } => vec![(0.0, *high as f32)],
+            other => vec![(0.0, 1.0); other.components()],
         }
     }
 
@@ -164,9 +234,9 @@ impl Space {
                     _ => Space::Rgb,
                 })
             }
-            "CalGray" => Some(Space::Gray),
-            "CalRGB" => Some(Space::Rgb),
-            "Lab" => Some(Space::Lab),
+            "CalGray" | "CalRGB" | "Lab" => {
+                Some(calibrated(document, family.as_name()?, &entry(1)))
+            }
             "Indexed" | "I" => {
                 let base = Space::read(document, &entry(1), depth + 1)?;
                 let high = entry(2).as_i64().unwrap_or(0).clamp(0, 255) as usize;

@@ -7,7 +7,7 @@
 //! middle colour), text rendering's clip modes (drawn as fills), and optional content.
 
 use super::blend::Blend;
-use super::colour::Space;
+use super::colour::{Function, Space};
 use super::font::Font;
 use super::image::{self, Picture};
 use super::layers::Layers;
@@ -125,6 +125,42 @@ impl Paint for Tile {
     }
 }
 
+thread_local! {
+    /// The content streams being run, innermost last, so content that calls itself (a form
+    /// drawing itself, two Type 3 fonts drawing each other) stops rather than multiplying.
+    static RUNNING: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A content stream being run, for as long as it is kept.
+struct Running(usize);
+
+impl Running {
+    /// Notes `stream` as running; `None` when it already is, or when content is nested as deep
+    /// as it may be.
+    fn enter(stream: &Stream) -> Option<Self> {
+        let id = Rc::as_ptr(&stream.raw) as usize;
+        RUNNING.with(|running| {
+            let mut running = running.borrow_mut();
+            if running.contains(&id) || running.len() >= DEPTH_MAX {
+                return None;
+            }
+            running.push(id);
+            Some(Running(id))
+        })
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        RUNNING.with(|running| {
+            let mut running = running.borrow_mut();
+            if let Some(at) = running.iter().rposition(|id| *id == self.0) {
+                running.remove(at);
+            }
+        });
+    }
+}
+
 /// The clip in effect: none, or a coverage mask over the canvas.
 pub type Clip = Option<Rc<Mask>>;
 
@@ -154,8 +190,9 @@ pub trait Sink {
     fn begin_group(&mut self, _mask: bool) {}
     /// Paints the group begun last onto what is under it, at `alpha` within `clip`, in `blend`.
     fn end_group(&mut self, _alpha: f32, _blend: Blend, _clip: &Clip) {}
-    /// Ends the soft mask begun last: its luminosity over `backdrop`, or its alpha.
-    fn end_mask(&mut self, _backdrop: Option<[f32; 3]>) -> Clip {
+    /// Ends the soft mask begun last: its luminosity over `backdrop`, or its alpha, each value
+    /// then remapped through `transfer` when it has one.
+    fn end_mask(&mut self, _backdrop: Option<[f32; 3]>, _transfer: Option<&[u8; 256]>) -> Clip {
         None
     }
 }
@@ -749,6 +786,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         step: (f64, f64),
         size: (usize, usize),
     ) -> Option<Canvas> {
+        let _running = Running::enter(stream)?;
         let content = self.document.stream_data(stream).ok()?;
         let resources = self
             .document
@@ -855,6 +893,9 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         let Some(procedure) = font.procedure(self.document, code) else {
             return;
         };
+        let Some(_running) = Running::enter(&procedure.stream) else {
+            return;
+        };
         let Ok(content) = self.document.stream_data(&procedure.stream) else {
             return;
         };
@@ -881,13 +922,14 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             }
             return;
         };
-        for code in font.codes(bytes) {
+        for shown in font.codes(bytes) {
+            let code = shown.code;
             let glyph_matrix = multiply(
                 [text.size * text.scale, 0.0, 0.0, text.size, 0.0, text.rise],
                 self.text_matrix,
             );
             self.draw_glyph(&font, code, glyph_matrix);
-            let spacing = if !font.two_byte && code == 32 {
+            let spacing = if shown.is_space {
                 text.word_spacing
             } else {
                 0.0
@@ -1076,9 +1118,20 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             Some("Alpha") => None,
             _ => Some(self.mask_backdrop(dict, &group)),
         };
+        let transfer = self.mask_transfer(dict);
         self.sink.begin_group(true);
         self.draw_fresh(&group);
-        self.sink.end_mask(backdrop)
+        self.sink.end_mask(backdrop, transfer.as_ref())
+    }
+
+    /// A soft mask's transfer function (`TR`), sampled at each mask value; `None` for the
+    /// identity.
+    fn mask_transfer(&self, dict: &Dict) -> Option<[u8; 256]> {
+        let function = Function::read(self.document, dict.get("TR")?, 0)?;
+        Some(std::array::from_fn(|value| {
+            let out = function.evaluate(&[value as f32 / 255.0]);
+            (out.first().copied().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round() as u8
+        }))
     }
 
     /// A luminosity mask's backdrop (`BC`), in its group's colour space; black by default.
@@ -1114,6 +1167,9 @@ impl<'a, S: Sink> Interpreter<'a, S> {
     }
 
     fn draw_form_content(&mut self, stream: &Stream) {
+        let Some(_running) = Running::enter(stream) else {
+            return;
+        };
         let matrix = self
             .document
             .entry(&stream.dict, "Matrix")
@@ -1449,6 +1505,9 @@ impl<'a, S: Sink> Interpreter<'a, S> {
 
     /// Draws an annotation's normal appearance in its rectangle.
     pub fn run_appearance(&mut self, stream: &Stream, rectangle: [f64; 4]) {
+        let Some(_running) = Running::enter(stream) else {
+            return;
+        };
         let matrix: Matrix = self
             .document
             .entry(&stream.dict, "Matrix")
@@ -1705,12 +1764,17 @@ impl Sink for Renderer {
             top.mode = mode;
         }
     }
-    fn end_mask(&mut self, backdrop: Option<[f32; 3]>) -> Clip {
+    fn end_mask(&mut self, backdrop: Option<[f32; 3]>, transfer: Option<&[u8; 256]>) -> Clip {
         self.masking = self.masking.saturating_sub(1);
-        match self.groups.pop() {
-            Some(Some(group)) => Some(Rc::new(group.mask_of(backdrop))),
-            _ => None,
+        let Some(Some(group)) = self.groups.pop() else {
+            return None;
+        };
+        let mut mask = group.mask_of(backdrop);
+        if let Some(transfer) = transfer {
+            mask.iter_mut()
+                .for_each(|value| *value = transfer[usize::from(*value)]);
         }
+        Some(Rc::new(mask))
     }
 }
 

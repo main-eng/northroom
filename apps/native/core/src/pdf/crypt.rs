@@ -1,8 +1,10 @@
-//! PDF's standard security handler, for files encrypted with an empty user password: most
-//! encrypted PDFs are, to set permissions rather than to keep anyone out. RC4 and AES-128
-//! (revisions 2 to 4) and AES-256 (revisions 5 and 6) are read.
+//! PDF's standard security handler: RC4 and AES-128 (revisions 2 to 4) and AES-256 (revisions
+//! 5 and 6). Most encrypted PDFs open with an empty user password, being encrypted to set
+//! permissions rather than to keep anyone out; others open with the user's or the owner's
+//! password, which the person types in (`pdf::passwords`).
 //!
-//! A file that needs a password to open shows as not readable; asking for one is left out.
+//! Left out: preparing a revision 6 password with SASLprep, so a password outside ASCII may not
+//! match.
 
 use super::object::{Document, Object, Ref, Stream};
 use super::PdfError;
@@ -110,18 +112,24 @@ fn cbc_encrypt_128(key: &[u8], iv: &[u8], data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The hash of revision 6 (Algorithm 2.B) for an empty password.
-fn hash_r6(salt: &[u8], user_key: &[u8]) -> Vec<u8> {
+/// The hash of revisions 5 and 6 (Algorithm 2.B; plain SHA-256 for 5) of `password` with
+/// `salt` and, for the owner, the user's `U` (`udata`).
+fn hash_2b(revision: i64, password: &[u8], salt: &[u8], udata: &[u8]) -> Vec<u8> {
     let mut first = Sha256::new();
+    first.update(password);
     first.update(salt);
-    first.update(user_key);
+    first.update(udata);
     let mut key = first.finalize().to_vec();
+    if revision < 6 {
+        return key;
+    }
     let mut round = 0usize;
     loop {
-        let mut block = Vec::with_capacity(64 * (key.len() + user_key.len()));
+        let mut block = Vec::with_capacity(64 * (password.len() + key.len() + udata.len()));
         for _ in 0..64 {
+            block.extend_from_slice(password);
             block.extend_from_slice(&key);
-            block.extend_from_slice(user_key);
+            block.extend_from_slice(udata);
         }
         let encrypted = cbc_encrypt_128(&key[..16], &key[16..32], &block);
         let choice: u32 = encrypted[..16]
@@ -152,29 +160,136 @@ fn bytes_of(document: &Document, dict: &super::object::Dict, key: &str) -> Vec<u
         .unwrap_or_default()
 }
 
-/// The file key for an empty user password, revisions 2 to 4 (Algorithm 2).
-fn key_r4(o: &[u8], p: i64, id: &[u8], length: usize, revision: i64, metadata: bool) -> Vec<u8> {
-    let mut hash = Md5::new();
-    hash.update(PADDING);
-    hash.update(o.get(..32).unwrap_or(o));
-    hash.update((p as i32).to_le_bytes());
-    hash.update(id);
-    if revision >= 4 && !metadata {
-        hash.update([0xff; 4]);
-    }
-    let mut key = hash.finalize().to_vec();
-    let length = if revision == 2 {
-        5
-    } else {
-        length.clamp(5, 16)
-    };
-    if revision >= 3 {
-        for _ in 0..50 {
-            key = Md5::digest(&key[..length]).to_vec();
+/// A password as revisions 2 to 4 take it: its first 32 bytes, filled out with `PADDING`.
+fn padded(password: &[u8]) -> [u8; 32] {
+    let mut out = PADDING;
+    let length = password.len().min(32);
+    out[..length].copy_from_slice(&password[..length]);
+    out[length..].copy_from_slice(&PADDING[..32 - length]);
+    out
+}
+
+/// What revisions 2 to 4 derive a file key from, besides the password.
+struct Legacy {
+    owner: Vec<u8>,
+    user: Vec<u8>,
+    permissions: i64,
+    id: Vec<u8>,
+    length: usize,
+    revision: i64,
+    metadata: bool,
+}
+
+impl Legacy {
+    fn key_length(&self) -> usize {
+        if self.revision == 2 {
+            5
+        } else {
+            self.length.clamp(5, 16)
         }
     }
-    key.truncate(length);
-    key
+
+    /// The file key for a padded user password (Algorithm 2).
+    fn key(&self, password: &[u8; 32]) -> Vec<u8> {
+        let mut hash = Md5::new();
+        hash.update(password);
+        hash.update(self.owner.get(..32).unwrap_or(&self.owner));
+        hash.update((self.permissions as i32).to_le_bytes());
+        hash.update(&self.id);
+        if self.revision >= 4 && !self.metadata {
+            hash.update([0xff; 4]);
+        }
+        let mut key = hash.finalize().to_vec();
+        let length = self.key_length();
+        if self.revision >= 3 {
+            for _ in 0..50 {
+                key = Md5::digest(&key[..length]).to_vec();
+            }
+        }
+        key.truncate(length);
+        key
+    }
+
+    /// Whether `key` is the file's: its `U` computed from it matches (Algorithms 4 and 5).
+    fn opens(&self, key: &[u8]) -> bool {
+        if self.revision == 2 {
+            return rc4(key, &PADDING) == self.user.get(..32).unwrap_or(&self.user);
+        }
+        let mut hash = Md5::new();
+        hash.update(PADDING);
+        hash.update(&self.id);
+        let mut check = rc4(key, &hash.finalize());
+        for round in 1..=19u8 {
+            let turned: Vec<u8> = key.iter().map(|byte| byte ^ round).collect();
+            check = rc4(&turned, &check);
+        }
+        self.user.get(..16).is_some_and(|user| user == &check[..16])
+    }
+
+    /// The padded user password the owner's password unlocks from `O` (Algorithm 7).
+    fn user_from_owner(&self, owner: &[u8]) -> [u8; 32] {
+        let mut hash = Md5::digest(padded(owner)).to_vec();
+        let length = self.key_length();
+        if self.revision >= 3 {
+            for _ in 0..50 {
+                hash = Md5::digest(&hash).to_vec();
+            }
+        }
+        let key = &hash[..length];
+        let mut user = self.owner.get(..32).unwrap_or(&self.owner).to_vec();
+        if self.revision == 2 {
+            user = rc4(key, &user);
+        } else {
+            for round in (0..=19u8).rev() {
+                let turned: Vec<u8> = key.iter().map(|byte| byte ^ round).collect();
+                user = rc4(&turned, &user);
+            }
+        }
+        padded(&user)
+    }
+
+    /// The file key `password` opens, as the user's or the owner's.
+    fn file_key(&self, password: &[u8]) -> Option<Vec<u8>> {
+        let as_user = self.key(&padded(password));
+        if self.opens(&as_user) {
+            return Some(as_user);
+        }
+        let as_owner = self.key(&self.user_from_owner(password));
+        self.opens(&as_owner).then_some(as_owner)
+    }
+}
+
+/// The file key `password` opens in revisions 5 and 6, as the user's or the owner's
+/// (Algorithms 2.A, 11 and 12).
+fn modern_key(
+    document: &Document,
+    encrypt: &super::object::Dict,
+    revision: i64,
+    password: &[u8],
+) -> Option<Vec<u8>> {
+    let password = &password[..password.len().min(127)];
+    let (user, owner) = (
+        bytes_of(document, encrypt, "U"),
+        bytes_of(document, encrypt, "O"),
+    );
+    let (user, owner) = (user.get(..48)?, owner.get(..48)?);
+    if hash_2b(revision, password, &user[32..40], &[]) == user[..32] {
+        let key = hash_2b(revision, password, &user[40..48], &[]);
+        return Some(cbc_decrypt(
+            &key,
+            &[0; 16],
+            bytes_of(document, encrypt, "UE").get(..32)?,
+        ));
+    }
+    if hash_2b(revision, password, &owner[32..40], user) == owner[..32] {
+        let key = hash_2b(revision, password, &owner[40..48], user);
+        return Some(cbc_decrypt(
+            &key,
+            &[0; 16],
+            bytes_of(document, encrypt, "OE").get(..32)?,
+        ));
+    }
+    None
 }
 
 fn cipher_named(document: &Document, encrypt: &super::object::Dict, which: &str) -> Cipher {
@@ -200,7 +315,9 @@ fn cipher_named(document: &Document, encrypt: &super::object::Dict, which: &str)
 }
 
 impl Crypt {
-    pub fn from_document(document: &Document) -> Result<Option<Self>> {
+    /// The decryption an encrypted document needs, opened with an empty password or
+    /// `password`; `None` when the document isn't encrypted.
+    pub fn from_document(document: &Document, password: Option<&[u8]>) -> Result<Option<Self>> {
         let holder = match document.trailer.get("Encrypt") {
             Some(Object::Ref(reference)) => Some(*reference),
             Some(_) => None,
@@ -211,7 +328,7 @@ impl Crypt {
             return Ok(None);
         };
         if document.entry(encrypt, "Filter").as_name() != Some("Standard") {
-            return Err(PdfError(
+            return Err(PdfError::Damaged(
                 "The file is encrypted by a handler this reader lacks.".into(),
             ));
         }
@@ -229,38 +346,38 @@ impl Crypt {
         } else {
             (Cipher::Rc4, Cipher::Rc4)
         };
-        let key = if revision >= 5 {
-            let user = bytes_of(document, encrypt, "U");
-            let user_encrypted = bytes_of(document, encrypt, "UE");
-            let salt = user.get(40..48).unwrap_or(&[]);
-            let intermediate = if revision >= 6 {
-                hash_r6(salt, &[])
-            } else {
-                Sha256::digest(salt).to_vec()
-            };
-            cbc_decrypt(
-                &intermediate,
-                &[0; 16],
-                user_encrypted.get(..32).unwrap_or(&[]),
-            )
-        } else {
-            let id = document
+        // Only the attachments are encrypted (`AuthEvent /EFOpen`): the document itself opens
+        // without a key.
+        if strings == Cipher::Identity && streams == Cipher::Identity {
+            return Ok(None);
+        }
+        let legacy = Legacy {
+            owner: bytes_of(document, encrypt, "O"),
+            user: bytes_of(document, encrypt, "U"),
+            permissions: document.entry(encrypt, "P").as_i64().unwrap_or(0),
+            id: document
                 .entry(&document.trailer, "ID")
                 .as_array()
                 .and_then(|ids| ids.first())
                 .and_then(|id| id.as_bytes().map(<[u8]>::to_vec))
-                .unwrap_or_default();
-            let length = document.entry(encrypt, "Length").as_i64().unwrap_or(40) as usize / 8;
-            let p = document.entry(encrypt, "P").as_i64().unwrap_or(0);
-            key_r4(
-                &bytes_of(document, encrypt, "O"),
-                p,
-                &id,
-                length,
-                revision,
-                metadata,
-            )
+                .unwrap_or_default(),
+            length: document
+                .entry(encrypt, "Length")
+                .as_i64()
+                .unwrap_or(40)
+                .max(0) as usize
+                / 8,
+            revision,
+            metadata,
         };
+        // An empty password first: most encrypted files open with it.
+        let key = [b"".as_slice(), password.unwrap_or_default()]
+            .into_iter()
+            .find_map(|password| match revision {
+                5.. => modern_key(document, encrypt, revision, password),
+                _ => legacy.file_key(password),
+            })
+            .ok_or(PdfError::Locked)?;
         Ok(Some(Crypt {
             key,
             strings,

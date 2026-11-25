@@ -13,7 +13,7 @@ use std::rc::Rc;
 type Result<T> = std::result::Result<T, PdfError>;
 
 fn fail<T>(why: &str) -> Result<T> {
-    Err(PdfError(why.to_owned()))
+    Err(PdfError::Damaged(why.to_owned()))
 }
 
 /// A reference to an indirect object: its number and generation.
@@ -129,8 +129,12 @@ pub struct Lexer<'a> {
 const NESTING_MAX: usize = 4096;
 
 impl<'a> Lexer<'a> {
+    /// A lexer from `at`, or from the end when `at` is past it, as a damaged offset may be.
     pub fn new(bytes: &'a [u8], at: usize) -> Self {
-        Self { bytes, at }
+        Self {
+            bytes,
+            at: at.min(bytes.len()),
+        }
     }
 
     pub fn skip_white(&mut self) {
@@ -426,7 +430,17 @@ pub struct Document {
     places: HashMap<u32, Place>,
     pub trailer: Dict,
     cache: std::cell::RefCell<HashMap<u32, Rc<Object>>>,
+    /// Object streams decoded once, by their object number.
+    object_streams: std::cell::RefCell<HashMap<u32, Rc<ObjectStream>>>,
     pub(super) crypt: Option<super::crypt::Crypt>,
+}
+
+/// An object stream's decoded bytes and where each object in it starts.
+struct ObjectStream {
+    data: Vec<u8>,
+    /// Each object's number and its offset from `first`.
+    offsets: Vec<(u32, usize)>,
+    first: usize,
 }
 
 /// The entries of a cross-reference section of `count` from object `first`: each object in use
@@ -472,7 +486,15 @@ fn find_last(bytes: &[u8], word: &[u8]) -> Option<usize> {
 
 impl Document {
     pub fn open(bytes: Vec<u8>) -> Result<Self> {
-        if !bytes.windows(5).take(1024).any(|window| window == b"%PDF-") {
+        Self::open_with(bytes, None)
+    }
+
+    /// Opens a document, decrypting it with `password` when an empty one doesn't open it.
+    pub fn open_with(bytes: Vec<u8>, password: Option<&[u8]>) -> Result<Self> {
+        // A PDF begins `%PDF-`, though some lose it; their objects show what they are.
+        let head = &bytes[..bytes.len().min(1024)];
+        let has_header = head.windows(5).any(|window| window == b"%PDF-");
+        if !has_header && !head.windows(4).any(|window| window == b" obj") {
             return fail("The file is not a PDF.");
         }
         let mut document = Document {
@@ -480,21 +502,25 @@ impl Document {
             places: HashMap::new(),
             trailer: Dict::new(),
             cache: Default::default(),
+            object_streams: Default::default(),
             crypt: None,
         };
         if document.read_xref_chain().is_err() || !document.trailer.contains_key("Root") {
             document.places.clear();
             document.scan_objects();
         }
-        document.crypt = super::crypt::Crypt::from_document(&document)?;
+        document.crypt = super::crypt::Crypt::from_document(&document, password)?;
+        // Objects read while finding the encryption were read before it applied.
+        document.cache.borrow_mut().clear();
+        document.object_streams.borrow_mut().clear();
         Ok(document)
     }
 
     /// Reads every cross-reference section from the last `startxref`, newest first: an entry
     /// already known is not replaced by an older one.
     fn read_xref_chain(&mut self) -> Result<()> {
-        let start =
-            find_last(&self.bytes, b"startxref").ok_or_else(|| PdfError("No startxref.".into()))?;
+        let start = find_last(&self.bytes, b"startxref")
+            .ok_or_else(|| PdfError::Damaged("No startxref.".into()))?;
         let mut parser = Parser::new(&self.bytes, start + 9);
         let Some(Token::Integer(mut at)) = parser.next_token() else {
             return fail("startxref names no offset.");
@@ -541,7 +567,7 @@ impl Document {
                     return parser
                         .object(0)
                         .and_then(|trailer| trailer.as_dict().cloned())
-                        .ok_or_else(|| PdfError("The trailer is damaged.".into()));
+                        .ok_or_else(|| PdfError::Damaged("The trailer is damaged.".into()));
                 }
                 _ => return fail("A cross-reference table is damaged."),
             }
@@ -734,29 +760,71 @@ impl Document {
         }
     }
 
-    fn load_from_stream(&self, container: u32, index: usize, number: u32) -> Option<Object> {
+    /// Object stream `container`, decoded and indexed on first use.
+    fn object_stream(&self, container: u32) -> Option<Rc<ObjectStream>> {
+        if let Some(known) = self.object_streams.borrow().get(&container) {
+            return Some(known.clone());
+        }
         let holder = self.get(container);
         let Object::Stream(stream) = holder.as_ref() else {
             return None;
         };
         let data = filter::decode(stream, None).ok()?;
-        let count = stream.dict.get("N").and_then(Object::as_i64)? as usize;
-        let first = stream.dict.get("First").and_then(Object::as_i64)? as usize;
+        let count = stream
+            .dict
+            .get("N")
+            .and_then(Object::as_i64)?
+            .clamp(0, 100_000) as usize;
+        let first = stream.dict.get("First").and_then(Object::as_i64)?.max(0) as usize;
         let mut parser = Parser::new(&data, 0);
-        let mut offsets = Vec::with_capacity(count.min(100_000));
-        for _ in 0..count.min(100_000) {
+        let mut offsets = Vec::with_capacity(count);
+        for _ in 0..count {
             let (Some(Token::Integer(object)), Some(Token::Integer(offset))) =
                 (parser.next_token(), parser.next_token())
             else {
                 break;
             };
-            offsets.push((object as u32, offset as usize));
+            offsets.push((object as u32, offset.max(0) as usize));
         }
-        let (_, offset) = offsets
+        let decoded = Rc::new(ObjectStream {
+            data,
+            offsets,
+            first,
+        });
+        self.object_streams
+            .borrow_mut()
+            .insert(container, decoded.clone());
+        Some(decoded)
+    }
+
+    fn load_from_stream(&self, container: u32, index: usize, number: u32) -> Option<Object> {
+        let decoded = self.object_stream(container)?;
+        let (_, offset) = decoded
+            .offsets
             .get(index)
             .filter(|(object, _)| *object == number)
-            .or_else(|| offsets.iter().find(|(object, _)| *object == number))?;
-        Parser::new(&data, first + offset).object(0)
+            .or_else(|| decoded.offsets.iter().find(|(object, _)| *object == number))?;
+        Parser::new(&decoded.data, decoded.first + offset).object(0)
+    }
+
+    /// Finds every object by scanning the file, for when its cross-references lead nowhere.
+    pub fn rescan(&mut self) {
+        self.places.clear();
+        self.cache.borrow_mut().clear();
+        self.object_streams.borrow_mut().clear();
+        let trailer = std::mem::take(&mut self.trailer);
+        self.scan_objects();
+        // Keep what the old trailer said that the scan didn't find, such as its encryption.
+        for (key, value) in trailer {
+            self.trailer.entry(key).or_insert(value);
+        }
+    }
+
+    /// The numbers of the objects the file has, in order.
+    pub fn numbers(&self) -> Vec<u32> {
+        let mut numbers: Vec<u32> = self.places.keys().copied().collect();
+        numbers.sort_unstable();
+        numbers
     }
 
     /// Object `number`, read once.

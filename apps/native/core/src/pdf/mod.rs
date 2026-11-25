@@ -13,6 +13,8 @@
 
 pub mod blend;
 pub mod ccitt;
+pub mod cff;
+pub mod cmap;
 pub mod colour;
 pub mod crypt;
 pub mod encoding;
@@ -21,6 +23,7 @@ pub mod font;
 pub mod image;
 pub mod layers;
 pub mod object;
+pub mod passwords;
 pub mod raster;
 pub mod render;
 pub mod shading;
@@ -34,11 +37,28 @@ use render::{Fonts, Interpreter, Matrix, Part};
 
 /// Why a PDF can't be read; the words are for logs and tests.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PdfError(pub String);
+pub enum PdfError {
+    /// The file is damaged, or uses something this reader lacks; the words say what.
+    Damaged(String),
+    /// The file is encrypted, and neither an empty password nor one given opens it.
+    Locked,
+}
 
 impl std::fmt::Display for PdfError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
+        match self {
+            PdfError::Damaged(why) => formatter.write_str(why),
+            PdfError::Locked => formatter.write_str("The PDF needs a password to open."),
+        }
+    }
+}
+
+impl From<PdfError> for crate::deck::ReadError {
+    fn from(error: PdfError) -> Self {
+        match error {
+            PdfError::Damaged(why) => crate::deck::ReadError::Damaged(why),
+            PdfError::Locked => crate::deck::ReadError::Locked,
+        }
     }
 }
 
@@ -119,21 +139,9 @@ struct Inherited {
     resources: Option<Dict>,
 }
 
-fn collect_pages(
-    document: &Document,
-    node: &Object,
-    inherited: Inherited,
-    depth: usize,
-    pages: &mut Vec<Page>,
-) {
-    if depth > TREE_DEPTH_MAX {
-        return;
-    }
-    let node = document.resolve(node);
-    let Some(dict) = node.as_dict() else {
-        return;
-    };
-    let inherited = Inherited {
+/// What a page inherits once `dict`, a node of the page tree, has added its own.
+fn inherited_from(document: &Document, dict: &Dict, inherited: Inherited) -> Inherited {
+    Inherited {
         media: dict
             .get("MediaBox")
             .and_then(|object| read_box(document, object))
@@ -148,7 +156,24 @@ fn collect_pages(
             .as_dict()
             .cloned()
             .or(inherited.resources),
+    }
+}
+
+fn collect_pages(
+    document: &Document,
+    node: &Object,
+    inherited: Inherited,
+    depth: usize,
+    pages: &mut Vec<Page>,
+) {
+    if depth > TREE_DEPTH_MAX {
+        return;
+    }
+    let node = document.resolve(node);
+    let Some(dict) = node.as_dict() else {
+        return;
     };
+    let inherited = inherited_from(document, dict, inherited);
     match document.entry(dict, "Kids") {
         Object::Array(kids) => {
             for kid in kids {
@@ -328,13 +353,64 @@ fn slide_of(document: &Document, page: &Page, number: usize, pictures: &mut Vec<
     }
 }
 
-/// Reads a PDF held in memory as a deck of its pages.
-pub fn parse(bytes: Vec<u8>) -> Result<Deck> {
-    let document = Document::open(bytes)?;
-    let pages = pages_of(&document);
-    if pages.is_empty() {
-        return Err(PdfError("The PDF has no pages.".into()));
+/// The pages of a document that lists none in its page tree: every page object in it, each
+/// inheriting from the parents it names, as pdf.js recovers them.
+fn loose_pages(document: &Document) -> Vec<Page> {
+    let mut pages = Vec::new();
+    for number in document.numbers() {
+        let object = document.get(number);
+        let Some(dict) = object.as_dict() else {
+            continue;
+        };
+        if document.entry(dict, "Type").as_name() != Some("Page") {
+            continue;
+        }
+        let mut ancestors = Vec::new();
+        let mut parent = document.entry(dict, "Parent");
+        while let (Some(node), true) = (parent.as_dict().cloned(), ancestors.len() < TREE_DEPTH_MAX)
+        {
+            parent = document.entry(&node, "Parent");
+            ancestors.push(node);
+        }
+        let inherited = ancestors
+            .iter()
+            .rev()
+            .fold(Inherited::default(), |inherited, node| {
+                inherited_from(document, node, inherited)
+            });
+        collect_pages(
+            document,
+            &Object::Ref(object::Ref(number, 0)),
+            inherited,
+            0,
+            &mut pages,
+        );
     }
+    pages
+}
+
+/// Opens a document and finds its pages: through its page tree; else after finding its
+/// objects again by scanning, as damaged cross-references hide them; else every page object.
+fn open_pages(bytes: Vec<u8>, password: Option<&[u8]>) -> Result<(Document, Vec<Page>)> {
+    let mut document = Document::open_with(bytes, password)?;
+    let mut pages = pages_of(&document);
+    if pages.is_empty() {
+        document.rescan();
+        pages = pages_of(&document);
+    }
+    if pages.is_empty() {
+        pages = loose_pages(&document);
+    }
+    if pages.is_empty() {
+        return Err(PdfError::Damaged("The PDF has no pages.".into()));
+    }
+    Ok((document, pages))
+}
+
+/// Reads a PDF held in memory as a deck of its pages, opening it with `password` if it needs
+/// one.
+pub fn parse(bytes: Vec<u8>, password: Option<&[u8]>) -> Result<Deck> {
+    let (document, pages) = open_pages(bytes, password)?;
     let mut pictures = Vec::new();
     let slides: Vec<Slide> = pages
         .iter()
@@ -358,17 +434,21 @@ pub fn parse(bytes: Vec<u8>) -> Result<Deck> {
 /// Reads the PDF at `path` as a deck of its pages.
 pub fn read(path: &std::path::Path) -> Result<Deck> {
     let bytes = std::fs::read(path)
-        .map_err(|error| PdfError(format!("The PDF could not be read ({error})")))?;
-    parse(bytes)
+        .map_err(|error| PdfError::Damaged(format!("The PDF could not be read ({error})")))?;
+    parse(bytes, passwords::of(path).as_deref())
 }
 
 /// Draws layer `layer` of page `number` as a PNG.
-pub fn render_layer(bytes: Vec<u8>, number: usize, layer: usize) -> Result<Vec<u8>> {
-    let document = Document::open(bytes)?;
-    let pages = pages_of(&document);
+pub fn render_layer(
+    bytes: Vec<u8>,
+    password: Option<&[u8]>,
+    number: usize,
+    layer: usize,
+) -> Result<Vec<u8>> {
+    let (document, pages) = open_pages(bytes, password)?;
     let page = pages
         .get(number)
-        .ok_or_else(|| PdfError("The PDF has no such page.".into()))?;
+        .ok_or_else(|| PdfError::Damaged("The PDF has no such page.".into()))?;
     let scale = scale_of(page);
     let (width, height) = page.size();
     let mut renderer = render::Renderer::new(
@@ -381,17 +461,21 @@ pub fn render_layer(bytes: Vec<u8>, number: usize, layer: usize) -> Result<Vec<u
 }
 
 /// The bytes of encoded picture `picture` on page `number`.
-pub fn extract_picture(bytes: Vec<u8>, number: usize, picture: usize) -> Result<Vec<u8>> {
-    let document = Document::open(bytes)?;
-    let pages = pages_of(&document);
+pub fn extract_picture(
+    bytes: Vec<u8>,
+    password: Option<&[u8]>,
+    number: usize,
+    picture: usize,
+) -> Result<Vec<u8>> {
+    let (document, pages) = open_pages(bytes, password)?;
     let page = pages
         .get(number)
-        .ok_or_else(|| PdfError("The PDF has no such page.".into()))?;
+        .ok_or_else(|| PdfError::Damaged("The PDF has no such page.".into()))?;
     let mut extractor = render::Extractor::new(picture);
     run_page(&document, page, &mut extractor, 1.0);
     extractor
         .found
-        .ok_or_else(|| PdfError("The page has no such picture.".into()))
+        .ok_or_else(|| PdfError::Damaged("The page has no such picture.".into()))
 }
 
 #[cfg(test)]
@@ -450,7 +534,7 @@ mod tests {
 
     #[test]
     fn pages_read_with_their_inherited_size_and_turn() {
-        let deck = parse(sample()).expect("a deck");
+        let deck = parse(sample(), None).expect("a deck");
         assert_eq!(deck.slides.len(), 2);
         assert_eq!((deck.width, deck.height), (200.0, 200.0));
         assert_eq!(deck.fit, Fit::Width);
@@ -547,7 +631,7 @@ mod tests {
 
     #[test]
     fn a_plain_jpeg_is_left_to_the_system_cut_by_its_rectangular_clip() {
-        let deck = parse(pictures()).expect("a deck");
+        let deck = parse(pictures(), None).expect("a deck");
         let [Item::Picture(placed)] = deck.slides[0].items.as_slice() else {
             panic!("one picture: {:?}", deck.slides[0].items);
         };
@@ -565,7 +649,7 @@ mod tests {
 
     #[test]
     fn a_see_through_masked_or_shaped_jpeg_is_drawn_into_its_page() {
-        let deck = parse(pictures()).expect("a deck");
+        let deck = parse(pictures(), None).expect("a deck");
         for slide in &deck.slides[1..] {
             let [Item::Picture(placed)] = slide.items.as_slice() else {
                 panic!("one layer: {:?}", slide.items);
@@ -712,11 +796,50 @@ mod tests {
     }
 
     #[test]
+    fn an_encrypted_pdf_opens_with_its_user_or_owner_password_and_no_other() {
+        let files: [(&str, &[u8]); 4] = [
+            (
+                "RC4",
+                include_bytes!("../../tests/fixtures/pdf/locked-rc4-user.pdf"),
+            ),
+            (
+                "AES-128",
+                include_bytes!("../../tests/fixtures/pdf/locked-r4-user.pdf"),
+            ),
+            (
+                "AES-256",
+                include_bytes!("../../tests/fixtures/pdf/locked-r6-user.pdf"),
+            ),
+            (
+                "AES-256, no user password",
+                include_bytes!("../../tests/fixtures/pdf/locked-r6-empty.pdf"),
+            ),
+        ];
+        for (name, bytes) in files {
+            let opens = |password: Option<&[u8]>| {
+                parse(bytes.to_vec(), password).map(|deck| deck.slides.len())
+            };
+            assert_eq!(opens(Some(b"secret")), Ok(1), "{name}, the user's password");
+            assert_eq!(opens(Some(b"owner")), Ok(1), "{name}, the owner's password");
+            if name.ends_with("no user password") {
+                assert_eq!(opens(None), Ok(1), "{name}, no password");
+            } else {
+                assert_eq!(opens(None), Err(PdfError::Locked), "{name}, no password");
+                assert_eq!(
+                    opens(Some(b"wrong")),
+                    Err(PdfError::Locked),
+                    "{name}, a wrong one"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn damaged_bytes_are_an_error_not_a_panic() {
-        assert!(parse(b"%PDF-1.4\nnot really".to_vec()).is_err());
-        assert!(parse(Vec::new()).is_err());
+        assert!(parse(b"%PDF-1.4\nnot really".to_vec(), None).is_err());
+        assert!(parse(Vec::new(), None).is_err());
         let mut cut = sample();
         cut.truncate(cut.len() / 2);
-        let _ = parse(cut);
+        let _ = parse(cut, None);
     }
 }

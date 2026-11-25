@@ -8,6 +8,7 @@
 //! Left out: predefined CJK CMaps other than Identity (their codes are read as two-byte CIDs),
 //! and synthetic bold and italic for fonts drawn in the fallback face.
 
+use super::cmap::CMap;
 use super::encoding::{char_of_name, name_of_char, Base};
 use super::object::{Dict, Document, Object, Stream};
 use super::type1::Type1;
@@ -76,6 +77,10 @@ impl OutlinePen for Pen<'_> {
 struct Sfnt {
     bytes: Vec<u8>,
     names: OnceLock<HashMap<String, u32>>,
+    /// A bare CFF program's built-in encoding.
+    encoding: Option<super::cff::Encoding>,
+    /// A CID-keyed CFF program's glyph for each CID.
+    cid_glyphs: Option<HashMap<u32, u32>>,
 }
 
 impl Sfnt {
@@ -84,6 +89,8 @@ impl Sfnt {
         Some(Self {
             bytes,
             names: OnceLock::new(),
+            encoding: None,
+            cid_glyphs: None,
         })
     }
 
@@ -149,113 +156,10 @@ fn fallback(mono: bool) -> &'static Sfnt {
 
 // --- CFF wrapped as OpenType ---------------------------------------------------------------
 
-fn be16(data: &[u8], at: usize) -> Option<usize> {
-    Some(usize::from(u16::from_be_bytes(
-        data.get(at..at + 2)?.try_into().ok()?,
-    )))
-}
-
-/// An INDEX at `at`: its item count and where it ends.
-fn cff_index(data: &[u8], at: usize) -> Option<(usize, usize, Vec<usize>)> {
-    let count = be16(data, at)?;
-    if count == 0 {
-        return Some((0, at + 2, Vec::new()));
-    }
-    let size = usize::from(*data.get(at + 2)?);
-    let offset = |index: usize| -> Option<usize> {
-        let start = at + 3 + index * size;
-        Some(
-            data.get(start..start + size)?
-                .iter()
-                .fold(0usize, |value, byte| value << 8 | usize::from(*byte)),
-        )
-    };
-    let offsets: Vec<usize> = (0..=count).map(offset).collect::<Option<_>>()?;
-    let base = at + 3 + (count + 1) * size - 1;
-    Some((
-        count,
-        base + offsets[count],
-        offsets.iter().map(|offset| base + offset).collect(),
-    ))
-}
-
-/// The CharStrings offset a Top DICT gives (operator 17).
-fn charstrings_offset(dict: &[u8]) -> Option<usize> {
-    let mut operands: Vec<i64> = Vec::new();
-    let mut at = 0;
-    while at < dict.len() {
-        let byte = dict[at];
-        at += 1;
-        match byte {
-            17 => return operands.last().map(|offset| *offset as usize),
-            12 => {
-                at += 1;
-                operands.clear();
-            }
-            0..=21 => operands.clear(),
-            30 => {
-                at = skip_real(dict, at);
-                operands.push(0);
-            }
-            _ => {
-                let (operand, used) = dict_operand(byte, dict.get(at..)?)?;
-                operands.extend(operand);
-                at += used;
-            }
-        }
-    }
-    None
-}
-
-/// Past a real number's nibbles, ended by a nibble of 15.
-fn skip_real(dict: &[u8], mut at: usize) -> usize {
-    while let Some(&nibbles) = dict.get(at) {
-        at += 1;
-        if nibbles & 0x0f == 0x0f || nibbles >> 4 == 0x0f {
-            break;
-        }
-    }
-    at
-}
-
-/// The integer a CFF DICT operand starting with `byte` stands for, and the bytes after `byte`
-/// it took; no operand for a byte that starts none.
-fn dict_operand(byte: u8, rest: &[u8]) -> Option<(Option<i64>, usize)> {
-    let next = || rest.first().copied().map(i64::from);
-    Some(match byte {
-        28 => (
-            Some(i64::from(i16::from_be_bytes(
-                rest.get(..2)?.try_into().ok()?,
-            ))),
-            2,
-        ),
-        29 => (
-            Some(i64::from(i32::from_be_bytes(
-                rest.get(..4)?.try_into().ok()?,
-            ))),
-            4,
-        ),
-        32..=246 => (Some(i64::from(byte) - 139), 0),
-        247..=250 => (Some((i64::from(byte) - 247) * 256 + next()? + 108), 1),
-        251..=254 => (Some(-(i64::from(byte) - 251) * 256 - next()? - 108), 1),
-        _ => (None, 0),
-    })
-}
-
-/// How many glyphs a bare CFF program holds.
-fn cff_glyph_count(cff: &[u8]) -> Option<usize> {
-    let header = usize::from(*cff.get(2)?);
-    let (_, after_names, _) = cff_index(cff, header)?;
-    let (_, _, tops) = cff_index(cff, after_names)?;
-    let top = cff.get(*tops.first()?..*tops.get(1)?)?;
-    let (count, _, _) = cff_index(cff, charstrings_offset(top)?)?;
-    Some(count)
-}
-
 /// A bare CFF program as an OpenType font skrifa reads: the CFF with the `head`, `maxp`,
 /// `hhea` and `hmtx` its outline reader needs.
 fn wrap_cff(cff: &[u8]) -> Option<Vec<u8>> {
-    let count = cff_glyph_count(cff)?.min(65_535) as u16;
+    let count = super::cff::glyph_count(cff)?.min(65_535) as u16;
     let mut head = vec![0u8; 54];
     head[..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
     head[12..16].copy_from_slice(&0x5F0F_3CF5u32.to_be_bytes());
@@ -301,7 +205,37 @@ pub struct Font {
     chars: HashMap<u32, char>,
     symbolic: bool,
     cid_to_gid: Option<Vec<u16>>,
+    /// A composite font's CMap: how its bytes split into codes, and each code's CID.
+    cmap: Option<CMap>,
     outlines: RefCell<HashMap<u32, Option<Rc<Vec<Command>>>>>,
+}
+
+/// A code a string shows: its CID in a composite font, else the code; and whether it is the
+/// single-byte space that word spacing widens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shown {
+    pub code: u32,
+    pub is_space: bool,
+}
+
+/// A font's `ToUnicode` CMap, if it has one.
+fn to_unicode(document: &Document, dict: &Dict) -> Option<CMap> {
+    let Object::Stream(stream) = document.entry(dict, "ToUnicode") else {
+        return None;
+    };
+    Some(CMap::parse(&document.stream_data(&stream).ok()?))
+}
+
+/// A composite font's CMap: an embedded one, else the identity, which other names are read
+/// as too.
+fn composite_cmap(document: &Document, dict: &Dict) -> CMap {
+    match document.entry(dict, "Encoding") {
+        Object::Stream(stream) => document
+            .stream_data(&stream)
+            .map(|data| CMap::parse(&data))
+            .unwrap_or_else(|_| CMap::identity()),
+        _ => CMap::identity(),
+    }
 }
 
 /// What a code draws in a Type 3 font: its procedure, run with the font's matrix and resources.
@@ -450,15 +384,14 @@ fn embedded(document: &Document, descriptor: &Dict) -> Option<Program> {
     }
     if let Object::Stream(stream) = document.entry(descriptor, "FontFile3") {
         let data = document.stream_data(&stream).ok()?;
-        let wrapped = if data.starts_with(b"OTTO")
-            || data.starts_with(&[0, 1, 0, 0])
-            || data.starts_with(b"true")
+        if data.starts_with(b"OTTO") || data.starts_with(&[0, 1, 0, 0]) || data.starts_with(b"true")
         {
-            data
-        } else {
-            wrap_cff(&data)?
-        };
-        return Sfnt::new(wrapped).map(|sfnt| Program::Sfnt(Rc::new(sfnt)));
+            return Sfnt::new(data).map(|sfnt| Program::Sfnt(Rc::new(sfnt)));
+        }
+        let mut sfnt = Sfnt::new(wrap_cff(&data)?)?;
+        sfnt.encoding = super::cff::encoding(&data);
+        sfnt.cid_glyphs = super::cff::cid_glyphs(&data);
+        return Some(Program::Sfnt(Rc::new(sfnt)));
     }
     if let Object::Stream(stream) = document.entry(descriptor, "FontFile") {
         let data = document.stream_data(&stream).ok()?;
@@ -513,10 +446,18 @@ impl Font {
             built_in.as_ref(),
             symbolic && built_in.is_none(),
         );
-        let chars = names
+        let mut chars: HashMap<u32, char> = names
             .iter()
             .filter_map(|(code, name)| Some((*code, char_of_name(name)?)))
             .collect();
+        // What `ToUnicode` says fills in codes the names don't.
+        if let Some(text) = to_unicode(document, dict) {
+            for (code, text) in text.texts() {
+                if let Some(character) = text.chars().next() {
+                    chars.entry(code).or_insert(character);
+                }
+            }
+        }
         let missing =
             descriptor.and_then(|descriptor| document.entry(descriptor, "MissingWidth").as_f64());
         Font {
@@ -528,6 +469,7 @@ impl Font {
             chars,
             symbolic,
             cid_to_gid: None,
+            cmap: None,
             outlines: RefCell::default(),
         }
     }
@@ -560,6 +502,15 @@ impl Font {
             }),
             _ => None,
         };
+        let cmap = composite_cmap(document, dict);
+        // Text by CID, for drawing in the app's own face when the font isn't embedded.
+        let chars = to_unicode(document, dict)
+            .map(|text| {
+                text.texts()
+                    .filter_map(|(code, text)| Some((cmap.cid(code), text.chars().next()?)))
+                    .collect()
+            })
+            .unwrap_or_default();
         Font {
             program,
             two_byte: true,
@@ -569,9 +520,10 @@ impl Font {
                 .as_f64()
                 .unwrap_or(DEFAULT_WIDTH),
             names: HashMap::new(),
-            chars: HashMap::new(),
+            chars,
             symbolic: false,
             cid_to_gid,
+            cmap: Some(cmap),
             outlines: RefCell::default(),
         }
     }
@@ -603,27 +555,39 @@ impl Font {
             names,
             symbolic: true,
             cid_to_gid: None,
+            cmap: None,
             outlines: RefCell::default(),
         }
     }
 
-    /// The codes a string holds: one byte each, or two in a composite font.
-    pub fn codes(&self, bytes: &[u8]) -> Vec<u32> {
-        if self.two_byte {
+    /// The codes a string shows: one byte each, or in a composite font as its CMap splits
+    /// them, each read as its CID.
+    pub fn codes(&self, bytes: &[u8]) -> Vec<Shown> {
+        let Some(cmap) = &self.cmap else {
             return bytes
-                .chunks(2)
-                .map(|pair| u32::from(pair[0]) << 8 | u32::from(*pair.get(1).unwrap_or(&0)))
+                .iter()
+                .map(|byte| Shown {
+                    code: u32::from(*byte),
+                    is_space: *byte == b' ',
+                })
                 .collect();
-        }
-        bytes.iter().map(|byte| u32::from(*byte)).collect()
+        };
+        cmap.split(bytes)
+            .into_iter()
+            .map(|(code, length)| Shown {
+                code: cmap.cid(code),
+                is_space: length == 1 && code == 32,
+            })
+            .collect()
     }
 
     /// The glyph an OpenType program draws for `code`.
     fn sfnt_glyph(&self, sfnt: &Sfnt, code: u32) -> Option<u32> {
         if self.two_byte {
-            return Some(match &self.cid_to_gid {
-                Some(map) => u32::from(*map.get(code as usize)?),
-                None => sfnt.glyph_by_name(&format!("cid{code:05}")).unwrap_or(code),
+            return Some(match (&self.cid_to_gid, &sfnt.cid_glyphs) {
+                (Some(map), _) => u32::from(*map.get(code as usize)?),
+                (None, Some(glyphs)) => *glyphs.get(&code)?,
+                (None, None) => sfnt.glyph_by_name(&format!("cid{code:05}")).unwrap_or(code),
             });
         }
         let named = self
@@ -639,10 +603,18 @@ impl Font {
             sfnt.glyph_by_char(0xF000 + code)
                 .or_else(|| sfnt.glyph_by_char(code))
         };
+        let built_in = || match &sfnt.encoding {
+            Some(super::cff::Encoding::Glyphs(glyphs)) => glyphs.get(&code).copied(),
+            Some(super::cff::Encoding::Standard) => {
+                let character = Base::Standard.char_of(code as u8).filter(|_| code < 256)?;
+                sfnt.glyph_by_name(&name_of_char(character))
+            }
+            None => None,
+        };
         let found = if self.symbolic {
-            symbol().or(named).or_else(by_char)
+            symbol().or_else(built_in).or(named).or_else(by_char)
         } else {
-            named.or_else(by_char).or_else(symbol)
+            named.or_else(by_char).or_else(built_in).or_else(symbol)
         };
         found.filter(|glyph| *glyph != 0)
     }

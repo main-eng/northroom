@@ -253,6 +253,7 @@ fn colour_pixels(
         row_bytes: (width * components * bits).div_ceil(8),
     };
     let indexed = matches!(space, Space::Indexed { .. });
+    let ranges = space.ranges();
     let mut rgba = Vec::with_capacity(width * height * 4);
     let mut values = vec![0.0f32; components];
     for row in 0..height {
@@ -262,7 +263,7 @@ fn colour_pixels(
                 let (low, high) = match decode.get(component * 2..component * 2 + 2) {
                     Some(range) => (range[0], range[1]),
                     None if indexed => (0.0, ((1u32 << bits) - 1) as f32),
-                    None => (0.0, 1.0),
+                    None => ranges.get(component).copied().unwrap_or((0.0, 1.0)),
                 };
                 *value = low + raw * (high - low);
             }
