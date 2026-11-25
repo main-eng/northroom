@@ -3,14 +3,17 @@
 //!
 //! shiki is a JavaScript TextMate-grammar engine, so a shell runs it in the platform's
 //! JavaScript engine. It evaluates [`SCRIPT`] once, then evaluates [`call`]'s expression per
-//! file and passes the settled result to [`runs`]. Grammar choice, the theme, the size limit
+//! file, steps the highlight it settles with a few milliseconds at a time between frames, and
+//! passes the answer to [`runs`]. Grammar choice, the theme, the size limit
 //! and how the result is read all live here. `scripts/syntax/bundle.sh` generates the script
 //! (`core/assets/generated/syntax.js`).
 
 use serde::Deserialize;
 
 /// The highlighter. Evaluating it defines `northroomHighlight(code, language, theme)`, which
-/// returns a promise that settles once its grammars compile. It needs no engine globals and
+/// returns a promise, settled once its grammars compile, of a highlight's number;
+/// `northroomHighlightStep(number)` colours the next few milliseconds of lines and returns null
+/// until the last, then the answer for [`runs`]; `northroomHighlightDrop(number)` forgets one. It needs no engine globals and
 /// brings its own `atob` where the engine lacks one.
 pub const SCRIPT: &str = include_str!("../assets/generated/syntax.js");
 
@@ -68,7 +71,7 @@ pub fn language(extension: &str) -> Option<&'static str> {
 }
 
 /// The JavaScript expression that highlights `code` from a file with `extension`. It evaluates
-/// to a promise of the answer for [`runs`]. `None` when the file stays plain: no grammar, or
+/// to a promise of the highlight's number, which the shell steps to the answer for [`runs`]. `None` when the file stays plain: no grammar, or
 /// more than 100,000 characters.
 pub fn call(code: &str, extension: &str) -> Option<String> {
     let language = language(extension)?;

@@ -12,5 +12,8 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/node_modules" "$(dirname "$out")"
 ln -s "$shiki" "$work/node_modules/shiki"
 cp "$here/scripts/syntax/entry.ts" "$here/scripts/syntax/atob.ts" "$work/"
+# The grammar engine's WebAssembly, as base64: shiki's own `shiki/wasm` is gzipped and unpacked
+# with browser objects (Blob, Response, DecompressionStream) a bare JavaScript engine lacks.
+printf 'export default "%s";\n' "$(base64 < "$shiki/dist/onig.wasm" | tr -d '\n')" > "$work/onig.ts"
 (cd "$work" && bun build ./entry.ts --target=browser --format=iife --minify --outfile "$out" >/dev/null)
 echo "$out $(wc -c < "$out") bytes"

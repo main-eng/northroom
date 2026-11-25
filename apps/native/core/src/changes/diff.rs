@@ -584,6 +584,12 @@ pub fn wrap(text: &str, tab: usize, columns: usize) -> Vec<usize> {
     starts
 }
 
+/// How many monospace cells `text` takes, its tabs already expanded: where a stretch after it
+/// starts, in figures, by the rule `wrap` wraps by.
+pub fn cells(text: &str) -> usize {
+    text.chars().map(cell_width).sum()
+}
+
 /// How many monospace cells `character` takes: two for East Asian wide and full-width forms
 /// and most emoji, else one.
 fn cell_width(character: char) -> usize {
@@ -803,5 +809,12 @@ mod tests {
         assert_eq!(cells.len(), 1 + 7);
         assert_eq!(cells[0], (0, Cell::Header));
         assert_eq!(cells[7], (0, Cell::Line(6)));
+    }
+
+    #[test]
+    fn text_takes_a_cell_a_character_and_two_for_a_wide_one() {
+        assert_eq!(cells(""), 0);
+        assert_eq!(cells("let x"), 5);
+        assert_eq!(cells("名前 = 1"), 8);
     }
 }

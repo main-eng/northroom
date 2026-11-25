@@ -209,10 +209,10 @@ struct Row {
 }
 
 impl Row {
-    fn read(file: usize, row: &NrChangesRow, tab: usize) -> Self {
+    fn read(file: usize, row: &NrChangesRow, tab: usize, advance: f32) -> Self {
         let raw = text(&row.text);
         let words = (row.word_first..row.word_first + row.word_count)
-            .filter_map(|word| word_span(&raw, nr_changes_word(file, word), tab))
+            .filter_map(|word| word_span(&raw, nr_changes_word(file, word), tab, advance))
             .collect();
         let text = expand_tabs(&raw, 0, tab);
         let wraps = (row.break_first..row.break_first + row.break_count)
@@ -222,7 +222,7 @@ impl Row {
                     .char_indices()
                     .nth(at)
                     .map_or(text.len(), |(byte, _)| byte);
-                width(&text[..byte], mono())
+                x_of(&text[..byte], advance)
             })
             .collect::<Vec<f32>>();
         Self {
@@ -269,33 +269,42 @@ impl Row {
     }
 }
 
+/// Where text after `before` (tabs expanded) starts, in a monospace face whose figures are
+/// `advance` wide: by its cells, as the core wraps (`diff::cells`), rather than shaping it.
+fn x_of(before: &str, advance: f32) -> f32 {
+    northroom_core::changes::diff::cells(before) as f32 * advance
+}
+
 /// The x span of byte range `range` of `raw`, tabs expanded, in the monospace face.
-fn word_span(raw: &str, range: NrChangesRange, tab: usize) -> Option<(f32, f32)> {
+fn word_span(raw: &str, range: NrChangesRange, tab: usize, advance: f32) -> Option<(f32, f32)> {
     let x = |at: usize| {
         raw.get(..at)
-            .map(|before| width(&expand_tabs(before, 0, tab), mono()))
+            .map(|before| x_of(&expand_tabs(before, 0, tab), advance))
     };
     Some((x(range.start)?, x(range.end)?))
 }
 
-/// A file's drawn rows, read the first time it shows.
+/// A file's drawn rows, read the first time it shows, and how wide the monospace figures they
+/// were placed by are.
 struct Lines {
     rows: Vec<Row>,
+    advance: f32,
 }
 
 impl Lines {
     /// File `file`'s `count` rows as last loaded.
     fn read(file: usize, count: usize) -> Self {
         let tab = nr_source_tab_spaces() as usize;
+        let advance = width("0", mono());
         let rows: Vec<Row> = (0..count)
             .filter_map(|index| {
                 let mut row: NrChangesRow = zeroed();
                 // SAFETY: storage for one row.
                 unsafe { nr_changes_diff_row(file, index, &mut row) }
-                    .then(|| Row::read(file, &row, tab))
+                    .then(|| Row::read(file, &row, tab, advance))
             })
             .collect();
-        Self { rows }
+        Self { rows, advance }
     }
 }
 
@@ -343,6 +352,7 @@ fn syntax_call(extension: &str, code: &str) -> String {
 
 /// The coloured lines of the highlighter's `answer`, tabs expanded every `tab` columns.
 fn coloured_lines(answer: &str, tab: usize) -> Vec<ColouredLine> {
+    let advance = width("0", mono());
     let answer = c(answer);
     // SAFETY: a NUL-terminated answer.
     let count = unsafe { nr_syntax_answer(answer.as_ptr()) };
@@ -359,7 +369,7 @@ fn coloured_lines(answer: &str, tab: usize) -> Vec<ColouredLine> {
             continue;
         }
         let line = lines.last_mut().expect("one line at least");
-        add_stroke(line, &words, run_ink(&run), tab);
+        add_stroke(line, &words, run_ink(&run), tab, advance);
     }
     lines
 }
@@ -377,9 +387,9 @@ fn run_ink(run: &NrSyntaxRun) -> Option<Hsla> {
 }
 
 /// Adds `words` in `ink` to the end of `line`.
-fn add_stroke(line: &mut ColouredLine, words: &str, ink: Option<Hsla>, tab: usize) {
+fn add_stroke(line: &mut ColouredLine, words: &str, ink: Option<Hsla>, tab: usize, advance: f32) {
     let set = expand_tabs(words, line.text.chars().count(), tab);
-    let x = width(&line.text, mono());
+    let x = x_of(&line.text, advance);
     line.text.push_str(&set);
     line.strokes.push(Stroke { text: set, x, ink });
 }
@@ -1106,12 +1116,13 @@ impl Changes {
                 f32::from(view.size.width),
                 line * row.height() as f32,
             );
-            self.paint_row(window, cx, row, file.gutter, colours, at);
+            self.paint_row(window, cx, row, file.gutter, colours, lines.advance, at);
         }
     }
 
     /// One row in `at`: its ground, line numbers on its first line, changed words and text,
     /// each of its visual lines showing the stretch of the text the core wrapped onto it.
+    #[allow(clippy::too_many_arguments)]
     fn paint_row(
         &self,
         window: &mut Window,
@@ -1119,6 +1130,7 @@ impl Changes {
         row: &Row,
         gutter: f32,
         colours: Option<&Colours>,
+        advance: f32,
         at: Bounds<Pixels>,
     ) {
         if let Some(ground) = row.ground() {
@@ -1143,7 +1155,12 @@ impl Changes {
                         row.word_ground(),
                     );
                 }
-                paint_text(window, cx, row, coloured, f32::MAX, start, y);
+                let span = Span {
+                    from: *from,
+                    to,
+                    advance,
+                };
+                paint_text(window, cx, row, coloured, span, start, y);
             });
         }
     }
@@ -1281,55 +1298,90 @@ fn inset_by(bounds: Bounds<Pixels>, by: f32) -> Bounds<Pixels> {
     inset(bounds, by, by)
 }
 
-/// A row's text from `start`: in its syntax colours once answered (`coloured`), else in one
-/// ink, a hunk header muted.
+/// The stretch of a row's text one visual line shows: x from the text's start, `from` up to
+/// `to`, in a monospace face whose figures are `advance` wide.
+#[derive(Clone, Copy)]
+struct Span {
+    from: f32,
+    to: f32,
+    advance: f32,
+}
+
+impl Span {
+    /// The part of `text`, set from `x`, that starts within the span, and the x it starts at:
+    /// only that part is shaped and drawn, not the whole row once per visual line.
+    fn part<'a>(&self, text: &'a str, x: f32) -> Option<(&'a str, f32)> {
+        // Half a figure of slack, so a figure placed on the boundary falls on one side.
+        let slack = self.advance / 2.0;
+        let mut at = x;
+        let (mut first, mut end) = (None, text.len());
+        for (byte, character) in text.char_indices() {
+            if at >= self.to - slack {
+                end = byte;
+                break;
+            }
+            if first.is_none() && at >= self.from - slack {
+                first = Some((byte, at));
+            }
+            at += northroom_core::changes::diff::cells(character.encode_utf8(&mut [0; 4])) as f32
+                * self.advance;
+        }
+        let (start, placed) = first?;
+        (start < end).then(|| (&text[start..end], placed))
+    }
+}
+
+/// The stretch `span` of a row's text, the text set from `start`: in its syntax colours once
+/// answered (`coloured`), else in one ink, a hunk header muted.
 fn paint_text(
     window: &mut Window,
     cx: &mut App,
     row: &Row,
     coloured: Option<&ColouredLine>,
-    wide: f32,
+    span: Span,
     start: f32,
     top: f32,
 ) {
-    let line = 16.0;
     let foreground = color(Token::Foreground);
-    if let Some(coloured) = coloured {
-        for stroke in &coloured.strokes {
-            let ink = stroke.ink.unwrap_or(foreground);
-            let x = start + stroke.x;
-            draw_line(
-                window,
-                cx,
-                &stroke.text,
-                mono(),
-                ink,
-                x,
-                top,
-                line,
-                wide,
-                None,
-            );
-        }
-        return;
-    }
-    let ink = match row.shows {
+    let plain = match row.shows {
         NrChangesRowShows::Header => color(Token::MutedForeground),
         _ => foreground,
     };
-    draw_line(
-        window,
-        cx,
-        &row.text,
-        mono(),
-        ink,
-        start,
-        top,
-        line,
-        wide,
-        None,
-    );
+    let whole = [(row.text.as_str(), 0.0, plain)];
+    let strokes: Vec<(&str, f32, Hsla)> = match coloured {
+        Some(coloured) => coloured
+            .strokes
+            .iter()
+            .map(|stroke| {
+                (
+                    stroke.text.as_str(),
+                    stroke.x,
+                    stroke.ink.unwrap_or(foreground),
+                )
+            })
+            .collect(),
+        None => whole.to_vec(),
+    };
+    for (text, x, ink) in strokes {
+        if let Some((part, placed)) = span.part(text, x) {
+            draw_line(
+                window,
+                cx,
+                part,
+                mono(),
+                ink,
+                start + placed,
+                top,
+                TEXT_LINE,
+                f32::MAX,
+                None,
+            );
+        }
+    }
 }
+
+/// The line box a diff row's text is set in.
+const TEXT_LINE: f32 = 16.0;
 
 /// A row's two line numbers, right-aligned in their columns from `at`, muted.
 fn paint_numbers(window: &mut Window, cx: &mut App, row: &Row, at: Bounds<Pixels>) {

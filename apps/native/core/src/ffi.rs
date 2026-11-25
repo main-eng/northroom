@@ -2972,8 +2972,8 @@ pub extern "C" fn nr_syntax_script() -> NrText {
 }
 
 /// The JavaScript expression that colours `code`, the open file's text as the shell shows it:
-/// a promise of the answer for `nr_syntax_answer`, settled once the highlighter's grammars
-/// have compiled (in the same evaluation when they have). Empty when the file stays plain (no
+/// a promise of a highlight, settled once the highlighter's grammars have compiled (in the same
+/// evaluation when they have), which the shell steps to the answer for `nr_syntax_answer`. Empty when the file stays plain (no
 /// grammar for its kind, too long, no file open). Valid until the next call that lends text.
 ///
 /// # Safety
