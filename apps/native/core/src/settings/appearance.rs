@@ -38,8 +38,9 @@ pub const ACCENTS: [(&str, Key, Option<&str>); 9] = [
 /// A preset's values for one mode: background, foreground, accent, contrast.
 type PresetColors = (&'static str, &'static str, &'static str, f64);
 
-/// Presets in dropdown order: id, name key, light values, dark values.
-pub const PRESETS: [(&str, Key, PresetColors, PresetColors); 5] = [
+/// Presets in dropdown order: id, name key, light values, dark values. Those after Terminal
+/// are the published palettes of the themes they are named for.
+pub const PRESETS: [(&str, Key, PresetColors, PresetColors); 6] = [
     (
         "northroom",
         key::APPEARANCE_PRESET_NORTHROOM,
@@ -47,28 +48,34 @@ pub const PRESETS: [(&str, Key, PresetColors, PresetColors); 5] = [
         ("#111111", "#EEEEF0", "#EEEEF0", 50.0),
     ),
     (
-        "graphite",
-        key::APPEARANCE_PRESET_GRAPHITE,
-        ("#FAFAFA", "#121212", "#121212", 50.0),
-        ("#111111", "#EEEEEE", "#EEEEEE", 50.0),
-    ),
-    (
-        "ink",
-        key::APPEARANCE_PRESET_INK,
-        ("#FDFDFD", "#060606", "#4382F2", 78.0),
-        ("#050505", "#FAFAFA", "#4382F2", 78.0),
-    ),
-    (
-        "parchment",
-        key::APPEARANCE_PRESET_PARCHMENT,
-        ("#FAF6EE", "#261D16", "#CC6900", 46.0),
-        ("#1A1510", "#EBE7DF", "#AA8000", 46.0),
-    ),
-    (
         "terminal",
         key::APPEARANCE_PRESET_TERMINAL,
         ("#F1F9F3", "#101911", "#30A054", 50.0),
         ("#0B110D", "#DFECE1", "#30A054", 50.0),
+    ),
+    (
+        "nord",
+        key::APPEARANCE_PRESET_NORD,
+        ("#ECEFF4", "#2E3440", "#5E81AC", 50.0),
+        ("#2E3440", "#D8DEE9", "#88C0D0", 50.0),
+    ),
+    (
+        "rose-pine",
+        key::APPEARANCE_PRESET_ROSE_PINE,
+        ("#FAF4ED", "#575279", "#907AA9", 50.0),
+        ("#191724", "#E0DEF4", "#C4A7E7", 50.0),
+    ),
+    (
+        "gruvbox",
+        key::APPEARANCE_PRESET_GRUVBOX,
+        ("#FBF1C7", "#3C3836", "#D65D0E", 50.0),
+        ("#282828", "#EBDBB2", "#FE8019", 50.0),
+    ),
+    (
+        "solarized",
+        key::APPEARANCE_PRESET_SOLARIZED,
+        ("#FDF6E3", "#586E75", "#268BD2", 50.0),
+        ("#002B36", "#93A1A1", "#268BD2", 50.0),
     ),
 ];
 
@@ -771,7 +778,7 @@ mod tests {
                 choices[*selected].id.as_str(),
                 *width
             ),
-            ("appearance.dark.preset", 5, "northroom", 160.0)
+            ("appearance.dark.preset", 6, "northroom", 160.0)
         );
         let accent = &page.sections[2].rows[0];
         let Control::Select {
@@ -827,7 +834,7 @@ mod tests {
                 choices[*selected].id.as_str(),
                 choices[*selected].name.as_str()
             ),
-            (6, "custom", "Custom")
+            (7, "custom", "Custom")
         );
         let Control::Select {
             choices, selected, ..
@@ -850,7 +857,14 @@ mod tests {
         let names: Vec<&str> = english.iter().map(|choice| choice.name.as_str()).collect();
         assert_eq!(
             names,
-            ["Northroom", "Graphite", "Ink", "Parchment", "Terminal"]
+            [
+                "Northroom",
+                "Terminal",
+                "Nord",
+                "Rosé Pine",
+                "Gruvbox",
+                "Solarized"
+            ]
         );
     }
 
@@ -871,13 +885,13 @@ mod tests {
             (Choice::Dark, Choice::Dark)
         );
         assert!(!settings.act(THEME_ACTION, "3"), "no fourth choice");
-        assert!(settings.act("appearance.light.preset", "ink"));
+        assert!(settings.act("appearance.light.preset", "nord"));
         assert_eq!(
             (
                 settings.light.preset.as_str(),
                 settings.dark.preset.as_str()
             ),
-            ("ink", "northroom")
+            ("nord", "northroom")
         );
         assert!(!settings.act("appearance.light.preset", "sepia"));
         assert!(settings.act("appearance.dark.accent", "teal"));
@@ -927,10 +941,11 @@ mod tests {
             theme.cta_color, "#DFECE1",
             "the call to action stays the text colour"
         );
-        assert!(theme.apply_preset("parchment", Mode::Light));
+        assert!(theme.apply_preset("gruvbox", Mode::Light));
         assert_eq!(
-            (theme.accent_preset.as_str(), theme.contrast),
-            ("orange", 46.0)
+            (theme.accent_color.as_str(), theme.accent_preset.as_str()),
+            ("#D65D0E", "custom"),
+            "a palette's own accent has no name"
         );
         assert!(!theme.apply_preset("custom", Mode::Light));
     }
@@ -969,12 +984,12 @@ mod tests {
         assert_eq!(settings.dark, ThemeChoice::shipped(Mode::Dark));
         assert_eq!(settings.mode(true), Mode::Dark);
         settings.theme = Choice::Light;
-        settings.dark.apply_preset("ink", Mode::Dark);
+        settings.dark.apply_preset("nord", Mode::Dark);
         settings.save().expect("save");
 
         let again = Settings::open(&file);
         assert_eq!(again.theme, Choice::Light);
-        assert_eq!(again.dark.preset, "ink");
+        assert_eq!(again.dark.preset, "nord");
         assert_eq!(again.mode(true), Mode::Light);
         let kept = crate::settings::file::read(&file).expect("settings");
         assert_eq!(kept["drive"], "/a", "the other keys are left as they were");

@@ -313,14 +313,14 @@
     "expected": "Appearance"
   },
   {
-    "message": "Graphite",
+    "message": "Gruvbox",
     "args": {},
-    "expected": "Graphite"
+    "expected": "Gruvbox"
   },
   {
-    "message": "Ink",
+    "message": "Nord",
     "args": {},
-    "expected": "Ink"
+    "expected": "Nord"
   },
   {
     "message": "Northroom",
@@ -328,9 +328,14 @@
     "expected": "Northroom"
   },
   {
-    "message": "Parchment",
+    "message": "Rosé Pine",
     "args": {},
-    "expected": "Parchment"
+    "expected": "Rosé Pine"
+  },
+  {
+    "message": "Solarized",
+    "args": {},
+    "expected": "Solarized"
   },
   {
     "message": "Terminal",
