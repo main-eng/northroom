@@ -595,6 +595,14 @@ fn show_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> u64 {
                 .map(|text| crate::terminal::transcript::shown(&text, interface_language()))
                 .unwrap_or_default();
             let started = Terminal::start(view, launch, palette, turns, &restored);
+            // An agent open in it at the last quit opens its conversation again: the command is
+            // typed once the shell waits at its prompt.
+            let resume = metadata
+                .as_deref()
+                .and_then(|metadata| crate::terminal::transcript::take_resume(metadata, id));
+            if let Some(command) = resume {
+                started.type_ahead(format!("{}\r", command.trim()).into_bytes());
+            }
             sessions.insert(id.to_owned(), started);
         }
     }
@@ -4781,6 +4789,7 @@ pub extern "C" fn nr_terminals_quit() {
     for (id, session) in sessions {
         if let Some(metadata) = &metadata {
             keep_transcript(metadata, &id, &session.transcript());
+            keep_resume(metadata, &id, session.resume_command().as_deref());
         }
         session.stop();
     }
@@ -4790,10 +4799,19 @@ pub extern "C" fn nr_terminals_quit() {
         if trash_if_throwaway(&id) {
             if let Some(metadata) = &metadata {
                 keep_transcript(metadata, &id, "");
+                keep_resume(metadata, &id, None);
             }
         }
     }
     crate::changes::ffi::save_now();
+}
+
+/// Keeps the command that resumes terminal `id`'s agent, or clears it for `None`
+/// (`transcript::keep_resume`); a failure is only reported.
+fn keep_resume(metadata: &Path, id: &str, command: Option<&str>) {
+    if let Err(error) = crate::terminal::transcript::keep_resume(metadata, id, command) {
+        eprintln!("the terminal's agent was not kept to resume: {error}");
+    }
 }
 
 /// Keeps terminal `id`'s `text` (`transcript::keep`); a failure is only reported.

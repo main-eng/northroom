@@ -226,6 +226,10 @@ pub struct Changes {
     pub activity: Option<Activity>,
     /// The files the hook reported the agent edited, in order.
     pub edits: Vec<String>,
+    /// The agent's conversation id the hook reported last, checked (`resume::is_conversation_id`).
+    pub conversation: Option<String>,
+    /// The folder the agent runs in, as the hook reported it last: an absolute path.
+    pub conversation_folder: Option<String>,
 }
 
 /// An OSC longer than this is not a title or notification, so the rest is skipped.
@@ -234,6 +238,8 @@ const TITLE_MAX_CHARS: usize = 512;
 const ACTIVITY_OSC: &str = "6973";
 const ACTIVITY_PREFIX: &str = "northroom;activity=";
 const EDIT_PREFIX: &str = "northroom;edit=";
+const SESSION_PREFIX: &str = "northroom;session=";
+const SESSION_FOLDER_PREFIX: &str = "northroom;session-dir=";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Parser {
@@ -332,7 +338,8 @@ impl Signals {
     }
 }
 
-/// What Northroom's hook reported in one OSC 6973: an activity, or a file the agent edited.
+/// What Northroom's hook reported in one OSC 6973: an activity, a file the agent edited, or
+/// the agent's conversation and its folder. An id or folder that is not one is left out.
 fn read_hook(text: &str, changes: &mut Changes) {
     if let Some(activity) = text.strip_prefix(ACTIVITY_PREFIX).and_then(Activity::named) {
         changes.activity = Some(activity);
@@ -341,6 +348,16 @@ fn read_hook(text: &str, changes: &mut Changes) {
         .filter(|path| !path.is_empty())
     {
         changes.edits.push(path.to_owned());
+    } else if let Some(id) = text
+        .strip_prefix(SESSION_PREFIX)
+        .filter(|id| crate::terminal::resume::is_conversation_id(id))
+    {
+        changes.conversation = Some(id.to_owned());
+    } else if let Some(folder) = text
+        .strip_prefix(SESSION_FOLDER_PREFIX)
+        .filter(|folder| folder.starts_with('/') && !folder.chars().any(char::is_control))
+    {
+        changes.conversation_folder = Some(folder.to_owned());
     }
 }
 
@@ -359,6 +376,11 @@ pub struct Session {
     title_working: bool,
     /// The program has ended. The session keeps waiting for the person until they have seen it.
     ended: bool,
+    /// The agent's conversation and the folder it runs in, as its hook reported them, and the
+    /// arguments it was started with: what resumes it after a relaunch (`resume_command`).
+    conversation: Option<String>,
+    conversation_folder: Option<String>,
+    launched: Vec<String>,
 }
 
 impl Default for Session {
@@ -371,6 +393,9 @@ impl Default for Session {
             hooked: false,
             title_working: false,
             ended: false,
+            conversation: None,
+            conversation_folder: None,
+            launched: Vec::new(),
         }
     }
 }
@@ -379,6 +404,12 @@ impl Session {
     /// Applies what a chunk of output reported. `watched` says whether the session is on screen;
     /// a turn that ends while watched counts as seen. Returns whether the activity changed.
     pub fn observe(&mut self, changes: &Changes, watched: bool) -> bool {
+        if let Some(id) = &changes.conversation {
+            self.conversation = Some(id.clone());
+        }
+        if let Some(folder) = &changes.conversation_folder {
+            self.conversation_folder = Some(folder.clone());
+        }
         let read = self.read(changes);
         if let Some(title) = &changes.title {
             self.title.clone_from(title);
@@ -439,6 +470,13 @@ impl Session {
         if agent == self.agent {
             return false;
         }
+        // Leaving an agent drops its conversation. One just found keeps what its hook reported
+        // first, which can come before the foreground is looked at.
+        if self.agent.is_some() {
+            self.conversation = None;
+            self.conversation_folder = None;
+            self.launched.clear();
+        }
         self.agent = agent;
         self.hooked = false;
         self.title_working = false;
@@ -450,6 +488,22 @@ impl Session {
             };
         }
         true
+    }
+
+    /// Records the arguments the foreground agent was started with (`resume_command`).
+    pub fn launched(&mut self, arguments: Vec<String>) {
+        self.launched = arguments;
+    }
+
+    /// The command that opens the agent's conversation again after a relaunch
+    /// (`resume::command`): `None` with no agent in the foreground, or none it can resume.
+    pub fn resume_command(&self) -> Option<String> {
+        crate::terminal::resume::command(
+            self.agent?,
+            self.conversation.as_deref()?,
+            self.conversation_folder.as_deref(),
+            &self.launched,
+        )
     }
 
     /// Records whether something the person started holds the foreground (`busy`). Returns whether
@@ -491,6 +545,46 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hook_s_conversation_resumes_the_agent_until_it_leaves() {
+        use crate::terminal::agent::Agent;
+        let mut signals = Signals::default();
+        let mut session = Session::default();
+        // An id that is not one, or a folder that is not a path, is left out.
+        let bad = signals.observe(
+            "\u{1b}]6973;northroom;session=a;rm -rf ~\u{7}\u{1b}]6973;northroom;session-dir=p\u{7}",
+        );
+        assert_eq!((bad.conversation, bad.conversation_folder), (None, None));
+        // The hook can report before the foreground is looked at; the agent keeps it.
+        let heard = signals.observe(
+            "\u{1b}]6973;northroom;session=3f2a-c91\u{7}\u{1b}]6973;northroom;session-dir=/p/My Work\u{7}",
+        );
+        session.observe(&heard, true);
+        assert_eq!(
+            session.resume_command(),
+            None,
+            "no agent in the foreground yet"
+        );
+        session.runs(Some(Agent::Claude), true);
+        session.launched(vec![
+            "claude".to_owned(),
+            "--dangerously-skip-permissions".to_owned(),
+        ]);
+        assert_eq!(
+            session.resume_command().as_deref(),
+            Some("cd '/p/My Work' && claude --resume 3f2a-c91 --dangerously-skip-permissions")
+        );
+        // Back at the shell (/exit), there is nothing to resume.
+        session.runs(None, true);
+        assert_eq!(session.resume_command(), None);
+        session.runs(Some(Agent::Claude), true);
+        assert_eq!(
+            session.resume_command(),
+            None,
+            "a new run waits for its own report"
+        );
+    }
 
     #[test]
     fn activities_are_numbered_and_running_ones_take_references() {

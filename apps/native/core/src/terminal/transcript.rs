@@ -70,6 +70,30 @@ pub fn take(metadata: &Path, id: &str) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// Keeps the command that resumes terminal `id`'s agent (`resume::command`), or clears it for
+/// `None`.
+pub fn keep_resume(metadata: &Path, id: &str, command: Option<&str>) -> std::io::Result<()> {
+    let path = file(metadata, id).with_extension("resume");
+    let Some(command) = command else {
+        return match fs::remove_file(&path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
+        };
+    };
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder)?;
+    }
+    fs::write(path, command)
+}
+
+/// Takes terminal `id`'s resume command, which runs once: it is gone once read.
+pub fn take_resume(metadata: &Path, id: &str) -> Option<String> {
+    let path = file(metadata, id).with_extension("resume");
+    let command = fs::read_to_string(&path).ok()?;
+    let _ = fs::remove_file(&path);
+    (!command.trim().is_empty()).then_some(command)
+}
+
 /// What a session shows before its shell's first output: `text` dimmed, then a dimmed line in
 /// `language` saying it was restored.
 pub fn shown(text: &str, language: &str) -> Vec<u8> {
@@ -112,6 +136,20 @@ mod tests {
         keep(metadata.path(), "t", "old").expect("kept");
         keep(metadata.path(), "t", "  \n \n").expect("cleared");
         assert_eq!(take(metadata.path(), "t"), None);
+    }
+
+    #[test]
+    fn a_resume_command_runs_once_and_none_clears_it() {
+        let metadata = tempfile::tempdir().expect("metadata");
+        keep_resume(metadata.path(), "t", Some("claude --resume s")).expect("kept");
+        assert_eq!(
+            take_resume(metadata.path(), "t").as_deref(),
+            Some("claude --resume s")
+        );
+        assert_eq!(take_resume(metadata.path(), "t"), None);
+        keep_resume(metadata.path(), "t", Some("claude --resume s")).expect("kept");
+        keep_resume(metadata.path(), "t", None).expect("cleared");
+        assert_eq!(take_resume(metadata.path(), "t"), None);
     }
 
     #[test]

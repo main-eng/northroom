@@ -486,7 +486,7 @@ impl TappedPty {
         };
         let busy = !self.agent.is_shell(group);
         let agent = self.agent.look(group, Instant::now(), arguments_of);
-        self.shared.foreground(agent, busy);
+        self.shared.foreground(agent, busy, self.agent.arguments());
     }
 }
 
@@ -503,7 +503,11 @@ impl std::io::Read for TappedPty {
             .observe(&String::from_utf8_lossy(&buffer[..count]));
         // The emulator supplies complete titles; a chunk here may end mid-title.
         changes.title = None;
-        if changes.notification.is_some() || changes.activity.is_some() || !changes.edits.is_empty()
+        if changes.notification.is_some()
+            || changes.activity.is_some()
+            || !changes.edits.is_empty()
+            || changes.conversation.is_some()
+            || changes.conversation_folder.is_some()
         {
             self.shared.heard(&changes);
         }
@@ -638,10 +642,24 @@ fn watch_foreground(pty: &tty::Pty, shared: &Arc<Shared>) {
 fn look_at_foreground(shared: &Shared, terminal: std::os::fd::RawFd, shell: i32) -> bool {
     // SAFETY: signal 0 only checks that the process exists; nothing is sent.
     let alive = unsafe { libc::kill(shell, 0) } == 0;
-    let busy = alive
-        && crate::terminal::agent::foreground_group(terminal).is_some_and(|group| group != shell);
-    shared.foreground(None, busy);
+    let foreground = crate::terminal::agent::foreground_group(terminal);
+    let busy = alive && foreground.is_some_and(|group| group != shell);
+    shared.foreground(None, busy, &[]);
+    // A shell reading a line at its prompt turns the terminal's echo off to draw it itself.
+    let at_prompt = alive && foreground == Some(shell) && !echoes(terminal);
+    shared.send_typed_ahead(at_prompt);
     alive
+}
+
+/// Whether the terminal whose app side is `terminal` echoes what is typed, as it does until a
+/// shell takes the line itself. True when it can't be read, so nothing waits on it.
+#[cfg(unix)]
+fn echoes(terminal: std::os::fd::RawFd) -> bool {
+    // SAFETY: an all-zero termios is a valid value for the call to overwrite.
+    let mut settings: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: reads the settings of a descriptor the caller holds open into `settings`.
+    let read = unsafe { libc::tcgetattr(terminal, &mut settings) } == 0;
+    !read || settings.c_lflag & libc::ECHO != 0
 }
 
 #[cfg(test)]

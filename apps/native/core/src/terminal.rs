@@ -16,6 +16,7 @@ pub mod harness;
 pub mod input;
 pub mod launch;
 pub mod palette;
+pub mod resume;
 pub(crate) mod screen;
 pub mod transcript;
 
@@ -75,6 +76,11 @@ pub fn watch_frames(changed: extern "C" fn()) {
     let _ = FRAME_CHANGED.set(changed);
 }
 
+/// The longest typed-ahead input waits for the shell's prompt before it is sent anyway, for a
+/// shell that never turns its echo off.
+#[cfg(unix)]
+const TYPED_AHEAD_MOST: Duration = Duration::from_secs(5);
+
 struct State {
     /// The session is on screen; it keeps running while it is not.
     shown: bool,
@@ -99,6 +105,9 @@ struct State {
     palette: Palette,
     /// The shell was told there is something new to draw and has not taken a frame since.
     told: bool,
+    /// Input held until the shell waits at its prompt (`type_ahead`), and since when.
+    #[cfg(unix)]
+    typed_ahead: Option<(Vec<u8>, Instant)>,
 }
 
 impl State {
@@ -158,6 +167,8 @@ impl Shared {
                 cursor_rect: [0.0; 4],
                 palette,
                 told: false,
+                #[cfg(unix)]
+                typed_ahead: None,
             }),
             engine: Mutex::new(None),
             pointer: Mutex::new(Pointer::default()),
@@ -217,6 +228,27 @@ impl Shared {
         }
     }
 
+    /// Sends the input held by `Terminal::type_ahead` once the shell waits at its prompt
+    /// (`at_prompt`), or once it has waited `TYPED_AHEAD_MOST` regardless.
+    #[cfg(unix)]
+    fn send_typed_ahead(&self, at_prompt: bool) {
+        let due = {
+            let mut state = self.state.relock();
+            let ready = state
+                .typed_ahead
+                .as_ref()
+                .is_some_and(|(_, since)| at_prompt || since.elapsed() >= TYPED_AHEAD_MOST);
+            if ready {
+                state.typed_ahead.take().map(|(bytes, _)| bytes)
+            } else {
+                None
+            }
+        };
+        if let Some(bytes) = due {
+            self.send(bytes);
+        }
+    }
+
     /// The emulator has new output. A session's first output ends its starting state.
     fn output_changed(&self) {
         self.heard(&crate::terminal::activity::Changes::default());
@@ -258,14 +290,22 @@ impl Shared {
     }
 
     /// Records what holds the terminal's foreground: `agent` when the agent changed (`Some(None)`
-    /// for none now), and whether something the person started holds it (`busy`). Windows
-    /// exposes no foreground program.
+    /// for none now), started with `arguments`, and whether something the person started holds
+    /// it (`busy`). Windows exposes no foreground program.
     #[cfg(unix)]
-    fn foreground(&self, agent: Option<Option<crate::terminal::agent::Agent>>, busy: bool) {
+    fn foreground(
+        &self,
+        agent: Option<Option<crate::terminal::agent::Agent>>,
+        busy: bool,
+        arguments: &[String],
+    ) {
         let changed = {
             let mut state = self.state.relock();
             let watched = state.is_watched();
             let ran = agent.is_some_and(|agent| state.session.runs(agent, watched));
+            if ran {
+                state.session.launched(arguments.to_vec());
+            }
             let held = state.session.holds(busy);
             ran || held
         };
@@ -626,6 +666,24 @@ impl Terminal {
             self.shared
                 .send(report.repeat(lines.unsigned_abs() as usize));
         }
+    }
+
+    /// Types `bytes` into the shell once it waits at its prompt, not while it is still starting:
+    /// input typed sooner is echoed twice, once as it arrives and again as the prompt reads it.
+    /// Windows exposes no prompt to wait for, so it is typed at once there.
+    pub fn type_ahead(&self, bytes: Vec<u8>) {
+        #[cfg(unix)]
+        {
+            self.shared.state.relock().typed_ahead = Some((bytes, Instant::now()));
+        }
+        #[cfg(not(unix))]
+        self.shared.send(bytes);
+    }
+
+    /// The command that opens this terminal's agent conversation again after a relaunch
+    /// (`activity::Session::resume_command`).
+    pub fn resume_command(&self) -> Option<String> {
+        self.shared.state.relock().session.resume_command()
     }
 
     /// The whole session's text, scrollback included, as the app quits (`transcript::keep`).

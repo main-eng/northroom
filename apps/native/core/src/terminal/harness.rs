@@ -73,6 +73,12 @@ pub fn activity_hook_script() -> String {
         "done",
         "[ -n \"$terminal\" ] || exit 0",
         "printf '\\033]6973;northroom;activity=%s\\007' \"$activity\" > \"$terminal\" 2>/dev/null",
+        "# The conversation and its folder, so a relaunch can resume it (terminal::resume).",
+        "session=$(field session_id | tr -d '\\007\\033')",
+        "folder=$(field cwd | tr -d '\\007\\033')",
+        "case \"$folder\" in *\\\\*) folder= ;; esac",
+        "[ -z \"$session\" ] || printf '\\033]6973;northroom;session=%s\\007' \"$session\" > \"$terminal\" 2>/dev/null",
+        "[ -z \"$folder\" ] || printf '\\033]6973;northroom;session-dir=%s\\007' \"$folder\" > \"$terminal\" 2>/dev/null",
         "# An escaped path is left out rather than reported wrong.",
         "case \"$edited\" in *\\\\*) edited= ;; esac",
         "edited=$(printf '%s' \"$edited\" | tr -d '\\007\\033')",
@@ -352,6 +358,14 @@ mod tests {
         );
         assert_eq!(edit.activity, Some(Activity::Working));
         assert_eq!(edit.edits, ["/p/my file.rs"]);
+        // Every event also says which conversation it is and where, to resume it later.
+        assert_eq!(
+            (
+                edit.conversation.as_deref(),
+                edit.conversation_folder.as_deref()
+            ),
+            (Some("s"), Some("/p"))
+        );
         assert_eq!(
             edited(r#"{"tool_name": "Write", "tool_input": {"file_path": "/p/new.md"}}"#).edits,
             ["/p/new.md"]

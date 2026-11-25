@@ -109,6 +109,8 @@ pub struct Watch {
     /// The foreground program has been identified, or has had `SETTLE` to exec.
     settled: bool,
     agent: Option<Agent>,
+    /// The arguments the agent was identified by; empty with no agent.
+    arguments: Vec<String>,
 }
 
 impl Watch {
@@ -120,7 +122,13 @@ impl Watch {
             asked: Instant::now(),
             settled: false,
             agent: None,
+            arguments: Vec::new(),
         }
+    }
+
+    /// The arguments the current agent was started with; empty with no agent.
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
     }
 
     /// Whether process group `group` is the session's own shell, meaning the terminal is at its
@@ -145,17 +153,20 @@ impl Watch {
         } else if self.settled || now.duration_since(self.asked) < ASK_EVERY {
             return None;
         }
-        let agent = if self.settled {
+        let found = if self.settled {
             None
         } else {
             self.asked = now;
-            arguments_of(group).and_then(|arguments| Agent::running(&arguments))
+            arguments_of(group)
+                .and_then(|arguments| Agent::running(&arguments).map(|agent| (agent, arguments)))
         };
+        let agent = found.as_ref().map(|(agent, _)| *agent);
         if agent.is_some() || now.duration_since(self.since) >= SETTLE {
             self.settled = true;
         }
         (agent != self.agent).then(|| {
             self.agent = agent;
+            self.arguments = found.map(|(_, arguments)| arguments).unwrap_or_default();
             agent
         })
     }
