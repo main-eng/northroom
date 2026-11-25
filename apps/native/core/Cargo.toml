@@ -1,7 +1,7 @@
 [package]
 name = "northroom-core"
 # The app's version, written only here: scripts/bundle.sh puts it in Info.plist.
-version = "1.3.0"
+version = "1.4.0"
 edition = "2021"
 publish = false
 description = "Northroom's native core as one library a platform shell links (ADR-0001)"
