@@ -125,10 +125,10 @@ pub struct Layout {
     pub reveal: Option<(f64, f64)>,
 }
 
-/// Lays out a `width` × `height` window holding `holds`. A file beside the columns takes the
-/// remaining width while that is at least half the window. Otherwise the columns scroll and the
-/// file takes all but its own column, which stays visible for navigation while earlier columns
-/// scroll off to the left.
+/// Lays out a `width` × `height` window holding `holds`. A file beside the columns takes all
+/// of the window but one column's width, whatever its kind and however many columns are open.
+/// Its own column stays visible beside it for navigation; earlier columns scroll off to the
+/// left and scroll back.
 pub fn layout(width: f64, height: f64, holds: Holds) -> Layout {
     let covered = holds.covers_folder();
     let top = TITLE_BAR_HEIGHT;
@@ -145,7 +145,7 @@ pub fn layout(width: f64, height: f64, holds: Holds) -> Layout {
     // kind of file, terminals included, sits beside them.
     let beside = holds.columns > 0 && holds.opened.is_some();
     let pane = if beside {
-        measure_preview_width(width, across)
+        (width - COLUMN_WIDTH).max(0.0)
     } else {
         0.0
     };
@@ -203,17 +203,6 @@ pub fn layout(width: f64, height: f64, holds: Holds) -> Layout {
     }
 }
 
-/// The file takes the space the columns leave while that is at least half the window;
-/// otherwise only the last column stays beside it.
-fn measure_preview_width(window_width: f64, columns_width: f64) -> f64 {
-    let left = window_width - columns_width;
-    if left >= window_width / 2.0 {
-        left
-    } else {
-        window_width - COLUMN_WIDTH
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,29 +256,33 @@ mod tests {
     }
 
     #[test]
-    fn a_file_beside_the_columns_takes_what_they_leave_or_all_but_its_column() {
-        // Two columns in 1280: the file takes the 800 left.
-        let two = layout(1280.0, 800.0, holds(2, Some(OpenedView::Details)));
-        assert!(two.beside);
+    fn a_file_beside_the_columns_takes_all_but_one_column() {
+        // One column in 1280: the file takes the 1040 beside it and nothing scrolls.
+        let one = layout(1280.0, 800.0, holds(1, Some(OpenedView::Details)));
+        assert!(one.beside);
         assert_eq!(
-            two.opened,
+            one.opened,
             Frame {
-                x: 480.0,
+                x: 240.0,
                 y: 0.0,
-                width: 800.0,
+                width: 1040.0,
                 height: 758.0
             }
         );
-        assert_eq!(two.columns_content.width, 1280.0);
-        assert_eq!(two.reveal, Some((480.0, 1280.0)));
-        // Two in 960 leave just half, so the file still takes what they leave.
-        let half = layout(960.0, 800.0, holds(2, Some(OpenedView::Page)));
+        assert_eq!(one.columns_content.width, 1280.0);
+        assert_eq!(one.reveal, Some((240.0, 1280.0)));
+        // Two columns would leave 800, but the file still takes 1040: the first column scrolls
+        // off and the file's own column alone stays beside it.
+        let two = layout(1280.0, 800.0, holds(2, Some(OpenedView::Page)));
         assert_eq!(
-            (half.opened.width, half.columns_content.width),
-            (480.0, 960.0)
+            (two.opened.x, two.opened.width, two.columns_content.width),
+            (480.0, 1040.0, 1520.0)
         );
-        // Three leave less than half, so the columns scroll and the file takes all but its own
-        // column, which alone stays visible beside it.
+        assert_eq!(two.reveal, Some((480.0, 1520.0)));
+        // The same in a wide window, where the columns would leave more than half.
+        let wide = layout(2000.0, 800.0, holds(2, Some(OpenedView::Page)));
+        assert_eq!((wide.opened.x, wide.opened.width), (480.0, 1760.0));
+        // And for any kind of file with more columns open.
         let three = layout(1280.0, 800.0, holds(3, Some(OpenedView::Terminal)));
         assert_eq!(
             (
@@ -307,6 +300,36 @@ mod tests {
             (960.0, 784.0, 1744.0)
         );
         assert!(four.folder_hidden && !four.details_fills && !four.columns_hidden);
+    }
+
+    #[test]
+    fn every_kind_of_file_gets_the_same_frame_beside_the_columns() {
+        let kinds = [
+            OpenedView::Terminal,
+            OpenedView::Html,
+            OpenedView::Page,
+            OpenedView::Table,
+            OpenedView::Deck,
+            OpenedView::Model,
+            OpenedView::Source,
+            OpenedView::Details,
+        ];
+        for columns in 1..=5 {
+            for kind in kinds {
+                let laid = layout(1600.0, 900.0, holds(columns, Some(kind)));
+                assert!(laid.beside, "{kind:?} beside {columns}");
+                assert_eq!(
+                    laid.opened,
+                    Frame {
+                        x: columns as f64 * COLUMN_WIDTH,
+                        y: 0.0,
+                        width: 1600.0 - COLUMN_WIDTH,
+                        height: 900.0 - TITLE_BAR_HEIGHT
+                    },
+                    "{kind:?} beside {columns}"
+                );
+            }
+        }
     }
 
     #[test]
