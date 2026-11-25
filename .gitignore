@@ -46,3 +46,6 @@ infra/terraform/**/*.tfvars
 
 # Per-person terminal files that open an agent in this folder from the Northroom drive.
 /*.nterm
+
+# Swift packages
+**/.build/
