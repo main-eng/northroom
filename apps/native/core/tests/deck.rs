@@ -4,7 +4,7 @@
 //! sample-files script writes.
 
 use northroom_core::deck::{
-    pptx, Align, Anchor, Colour, Deck, Form, Item, ReadError, Shape, Slide, Source,
+    odp, pptx, Align, Anchor, Colour, Deck, Form, Item, ReadError, Shape, Slide, Source,
 };
 use northroom_core::geometry::Rect;
 use std::path::PathBuf;
@@ -223,4 +223,62 @@ fn a_file_that_is_not_a_presentation_says_so() {
     let workbook =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/workbooks/Budget.xlsx");
     assert_eq!(pptx::read(&workbook), Err(ReadError::NotItsKind));
+}
+
+#[test]
+fn an_opendocument_presentation_reads_with_its_masters_styles_and_shapes() {
+    let deck = odp::read(&fixture("odfpy.odp")).expect("read");
+    // 28 by 15.75 centimetres.
+    assert!((deck.width - 793.7).abs() < 0.01 && (deck.height - 446.46).abs() < 0.01);
+    let (first, second) = (&deck.slides[0], &deck.slides[1]);
+    // The master's background, and the second slide's own.
+    assert_eq!(
+        (first.ground, second.ground),
+        (hex("f6f3ec"), hex("1f6f4a"))
+    );
+    let drawn = shapes(first);
+    // The master's strip under every slide; its empty title slot is not drawn.
+    assert_eq!((drawn[0].fill, drawn.len()), (Some(hex("1f6f4a")), 3));
+    let title = &drawn[1].text.as_ref().expect("text").paragraphs[0].runs[0];
+    assert_eq!(
+        (title.text.as_str(), title.size, title.bold),
+        ("Harbor Monthly", 40.0, true)
+    );
+    assert_eq!(drawn[1].text.as_ref().expect("text").anchor, Anchor::Middle);
+    let outline = drawn[2].text.as_ref().expect("text");
+    let marks: Vec<Option<&str>> = outline
+        .paragraphs
+        .iter()
+        .map(|p| p.bullet.as_deref())
+        .collect();
+    assert_eq!(marks, [Some("–"), Some("–")]);
+    assert_eq!(outline.paragraphs[0].runs[0].size, 24.0);
+
+    let drawn = shapes(second);
+    assert!(matches!(drawn[1].form, Form::Rounded(_)));
+    assert_eq!(drawn[1].fill, Some(hex("e9dfc9")));
+    assert_eq!(
+        drawn[1].stroke.map(|stroke| stroke.colour),
+        Some(hex("1f6f4a"))
+    );
+    let label = &drawn[1].text.as_ref().expect("text").paragraphs[0].runs[0];
+    assert_eq!(
+        (label.text.as_str(), label.colour),
+        ("Solo · $19", hex("1f6f4a"))
+    );
+    assert_eq!(drawn[2].form, Form::Oval);
+    assert_eq!(drawn[3].form, Form::Line { rising: false });
+    assert_eq!(
+        deck.pictures,
+        [Source::Entry("Pictures/sand.png".to_owned())]
+    );
+    assert!(second
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Picture(_))));
+    let words = &drawn[4].text.as_ref().expect("text").paragraphs[0];
+    assert_eq!(
+        (words.align, words.runs[0].colour),
+        (Align::Center, hex("f6f3ec"))
+    );
 }

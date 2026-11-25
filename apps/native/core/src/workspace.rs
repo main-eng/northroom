@@ -618,9 +618,9 @@ pub fn is_system_preview_file(path: &Path) -> bool {
 #[rustfmt::skip]
 const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
     // Presentations the deck cannot read: legacy PowerPoint, Keynote and OpenDocument.
-    "ppt", "pps", "pot", "key", "odp",
+    "ppt", "pps", "pot", "key",
     // Documents the page view cannot read: legacy Word, rich text, Pages and OpenDocument.
-    "doc", "rtf", "rtfd", "pages", "odt",
+    "doc", "rtf", "rtfd", "pages",
     // Spreadsheets the table cannot read: legacy Excel and Numbers.
     "xls", "numbers",
     // Fonts.

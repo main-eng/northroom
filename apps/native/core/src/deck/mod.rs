@@ -12,6 +12,9 @@ pub mod docx;
 pub mod ffi;
 pub mod flow;
 pub mod layout;
+mod odf;
+pub mod odp;
+pub mod odt;
 pub mod pptx;
 
 use crate::geometry::Rect;
@@ -64,6 +67,10 @@ pub enum Kind {
     Presentation,
     /// Word: `.docx` and its macro and template forms.
     WordDocument,
+    /// OpenDocument text: `.odt` and its template form.
+    OpenDocumentText,
+    /// OpenDocument presentation: `.odp` and its template form.
+    OpenDocumentPresentation,
 }
 
 /// The largest file drawn; a larger one shows its details. A file is read whole when it opens,
@@ -80,6 +87,8 @@ impl Kind {
         Some(match extension.as_str() {
             "pptx" | "pptm" | "ppsx" | "ppsm" | "potx" | "potm" => Kind::Presentation,
             "docx" | "docm" | "dotx" | "dotm" => Kind::WordDocument,
+            "odt" | "ott" => Kind::OpenDocumentText,
+            "odp" | "otp" => Kind::OpenDocumentPresentation,
             _ => return None,
         })
     }
@@ -91,6 +100,8 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
     match kind {
         Kind::Presentation => pptx::read(path),
         Kind::WordDocument => Ok(flow::paginate(docx::read(path)?, measure)),
+        Kind::OpenDocumentText => Ok(flow::paginate(odt::read(path)?, measure)),
+        Kind::OpenDocumentPresentation => odp::read(path),
     }
 }
 

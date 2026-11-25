@@ -2,7 +2,7 @@
 //! in `fixtures/flow`, with the script that made it where a script did.
 
 use northroom_core::deck::flow::{self, Block, Flow};
-use northroom_core::deck::{docx, Align, Colour, Fit, Paragraph, Source, Spacing};
+use northroom_core::deck::{docx, odt, Align, Colour, Fit, Paragraph, Source, Spacing};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> PathBuf {
@@ -132,4 +132,80 @@ fn a_file_that_is_not_a_word_document_says_so() {
     let workbook =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/workbooks/Budget.xlsx");
     assert!(docx::read(&workbook).is_err());
+}
+
+#[test]
+fn an_opendocument_text_reads_with_its_styles_lists_table_break_and_picture() {
+    let flow = odt::read(&fixture("odfpy.odt")).expect("read");
+    // A4 with 2.5 cm sides and 2 cm top and bottom.
+    assert!((flow.page.width - 595.28).abs() < 0.01);
+    assert!((flow.page.margins[0] - 70.87).abs() < 0.01);
+    let written = paragraphs(&flow);
+    let heading = &written[0].runs[0];
+    assert_eq!(
+        (
+            heading.text.as_str(),
+            heading.size,
+            heading.bold,
+            heading.colour
+        ),
+        ("Launch plan", 20.0, true, hex("1f6f4a"))
+    );
+    // The heading's style is based on Text, whose spacing it keeps.
+    assert_eq!(written[0].after, Spacing::Points(6.0));
+    assert_eq!(
+        text(written[1]),
+        "Our regulars already buy monthly.\nSecond line"
+    );
+    assert!(written[1].runs[1].bold && !written[1].runs[0].bold);
+    assert_eq!(written[2].align, Align::Center);
+    let marks: Vec<Option<&str>> = written[3..7]
+        .iter()
+        .map(|paragraph| paragraph.bullet.as_deref())
+        .collect();
+    assert_eq!(marks, [Some("–"), Some("–"), Some("1."), Some("2.")]);
+    // Half a centimetre before the label and half for it.
+    assert!((written[3].left - 28.35).abs() < 0.01);
+    let Some(Block::Table(table)) = flow
+        .blocks
+        .iter()
+        .find(|block| matches!(block, Block::Table(_)))
+    else {
+        panic!("the table");
+    };
+    assert_eq!((table.rows[0].len(), table.rows[0][0].span), (1, 2));
+    assert_eq!(table.rows[0][0].fill, Some(hex("f6f3ec")));
+    assert_eq!(text(&table.rows[1][1].paragraphs[0]), "$19");
+    assert!(flow
+        .blocks
+        .iter()
+        .any(|block| matches!(block, Block::PageBreak)));
+    assert_eq!(
+        flow.pictures,
+        [Source::Entry("Pictures/green.png".to_owned())]
+    );
+    assert!(matches!(
+        flow.blocks.last(),
+        Some(Block::Picture { picture: 0, .. })
+    ));
+}
+
+#[test]
+fn the_sample_opendocument_letter_reads_like_its_word_twin() {
+    let flow = odt::read(&fixture("Wholesale letter.odt")).expect("read");
+    let word = docx::read(&fixture("Wholesale letter.docx")).expect("read");
+    let words = |flow: &Flow| -> Vec<String> {
+        paragraphs(flow)
+            .into_iter()
+            .map(|paragraph| {
+                text(paragraph)
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .filter(|line| !line.is_empty())
+            .collect()
+    };
+    assert_eq!(words(&flow), words(&word));
+    assert_eq!(paragraphs(&flow)[1].runs[0].colour, hex("1b5e3a"));
 }
