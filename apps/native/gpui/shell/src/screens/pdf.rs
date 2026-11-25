@@ -242,10 +242,6 @@ impl Render for Pdf {
     }
 }
 
-/// A hosted AppKit view's current contents, for a window screenshot.
-#[cfg(target_os = "macos")]
-pub(super) use mac::picture as picture_of_view;
-
 /// PDFKit's view, through plain `msg_send!`s.
 #[cfg(target_os = "macos")]
 mod mac {

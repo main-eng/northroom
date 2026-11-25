@@ -8,7 +8,9 @@
 //! normals worked out from its faces. STL is turned from Z-up to the Y-up glTF expects, as CAD
 //! programs write it; USD is turned when it says it is Z-up.
 //!
-//! Left out: textures, materials beyond one colour each, transforms in USD, and Alembic.
+//! Alembic (`.abc`) is read through `alembic`; its faces wind the other way, so they are turned.
+//!
+//! Left out: textures, materials beyond one colour each, and transforms in USD and Alembic.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -594,6 +596,38 @@ fn read_usd(bytes: &[u8]) -> Option<Mesh> {
     Some(if z_up { mesh.y_up() } else { mesh })
 }
 
+/// An Alembic file's meshes, their faces turned to wind as glTF expects.
+fn read_alembic(bytes: &[u8]) -> Option<Mesh> {
+    let shapes = crate::alembic::read_shapes(bytes)
+        .map_err(|error| eprintln!("the Alembic file was not read: {}", error.0))
+        .ok()?;
+    let mut mesh = Mesh::default();
+    for shape in shapes {
+        let mut part = Mesh {
+            positions: shape.points,
+            ..Mesh::default()
+        };
+        let mut at = 0;
+        for count in shape.counts {
+            let count = usize::try_from(count).unwrap_or(0);
+            let corners: Vec<u32> = shape
+                .corners
+                .iter()
+                .skip(at)
+                .take(count)
+                .map(|corner| *corner as u32)
+                .collect();
+            fan(&corners, &mut part.triangles);
+            at += count;
+        }
+        for triangle in &mut part.triangles {
+            triangle.swap(1, 2);
+        }
+        mesh.add(part.checked());
+    }
+    Some(mesh)
+}
+
 /// The root layer of a `.usdz` package: its first USD file.
 fn usdz_layer(bytes: &[u8]) -> Option<Vec<u8>> {
     let archive = crate::package::ZipArchive::open(bytes).ok()?;
@@ -717,7 +751,7 @@ pub fn write_glb(mesh: &Mesh) -> Vec<u8> {
 pub fn is_mesh_extension(extension: &str) -> bool {
     matches!(
         extension,
-        "obj" | "stl" | "ply" | "usda" | "usdc" | "usd" | "usdz"
+        "obj" | "stl" | "ply" | "usda" | "usdc" | "usd" | "usdz" | "abc"
     )
 }
 
@@ -731,6 +765,7 @@ pub fn read(path: &Path) -> Option<Mesh> {
         "ply" => read_ply(&bytes),
         "usda" | "usdc" | "usd" => read_usd(&bytes)?,
         "usdz" => read_usd(&usdz_layer(&bytes)?)?,
+        "abc" => read_alembic(&bytes)?,
         _ => return None,
     };
     (!mesh.triangles.is_empty()).then_some(mesh)

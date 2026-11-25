@@ -2,6 +2,7 @@
 //! commands, reads the view state the core publishes, and hands over native GPU layers that
 //! the core draws into on its own timing. No shell types appear here.
 
+pub mod alembic;
 pub mod app_ffi;
 pub mod archive;
 pub mod board;

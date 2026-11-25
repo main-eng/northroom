@@ -326,13 +326,11 @@ fn page_has_keys(window: &Window, cx: &App) -> bool {
         .opened
         .as_ref()
         .is_some_and(|opened| {
-            matches!(
-                opened.kind,
-                NrOpenedViewKind::Html | NrOpenedViewKind::Pdf | NrOpenedViewKind::SystemPreview
-            ) && opened
-                .screen
-                .keys(cx)
-                .is_some_and(|keys| keys.is_focused(window))
+            matches!(opened.kind, NrOpenedViewKind::Html | NrOpenedViewKind::Pdf)
+                && opened
+                    .screen
+                    .keys(cx)
+                    .is_some_and(|keys| keys.is_focused(window))
         });
     hosting && kit::platform::hosted_has_keys(window)
 }

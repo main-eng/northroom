@@ -994,22 +994,6 @@ pub(crate) fn opened_is_pdf() -> bool {
     .unwrap_or(false)
 }
 
-/// Whether the open file is one the platform's own previewer draws (Quick Look on a Mac).
-/// Elsewhere there is none, and such a file shows as its details.
-pub(crate) fn opened_is_system_preview() -> bool {
-    cfg!(target_os = "macos")
-        && with_columns(|columns| {
-            let opened = columns.opened()?.clone();
-            let path = columns.workspace().path_of(&opened.id).ok()?;
-            Some(
-                matches!(opened.kind, EntryKind::File)
-                    && crate::workspace::is_system_preview_file(&path),
-            )
-        })
-        .flatten()
-        .unwrap_or(false)
-}
-
 /// The path of the open file, or an empty text when none is open.
 #[no_mangle]
 pub extern "C" fn nr_opened_path() -> NrText {

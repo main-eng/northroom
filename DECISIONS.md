@@ -158,10 +158,11 @@ reason it was rejected.
 ## ADR-0015: Northroom draws every file itself
 
 - Every kind of file opens inside Northroom, drawn by its own code, the same on all three systems. Nothing is handed to another application.
-- The core reads each format into Northroom's own types and the shell draws them (ADR-0001). Formats that share a container share its reader: the zip and XML readers serve Excel and OpenDocument files alike.
+- The core reads each format into Northroom's own types and the shell draws them (ADR-0001). Formats that share a container share its reader: `package` (zip and XML) serves Office and OpenDocument files, `compound` serves Office 97–2003. Documents and slides become a `deck` of pages, spreadsheets, contacts and events a table, 3D files a `.glb` the still renderer draws, and fonts a specimen drawn from their own outlines.
 - A view shows a file; it does not edit it. It reads right: the same words, numbers, pictures and positions, not a copy of another program's line breaks.
-- Quick Look is a stopgap on the Mac for the formats still on `SYSTEM_PREVIEW_EXTENSIONS`. A format leaves that list in the change that adds its own view, and nothing is added to it.
-- Media still goes through the system's codecs (ADR-0004), and PDF keeps PDFKit and the web view until the other formats are done.
+- Nothing goes to Quick Look. It was a stopgap while formats gained views, and it was removed when the last one did. A new kind of file gets its own view or shows its details.
+- Media still goes through the system's codecs (ADR-0004), and PDF is drawn inside the app by PDFKit on the Mac and the web view elsewhere (ADR-0001). An own PDF renderer is the one part of this decision not built.
+- A reader works from the format's specification or its reference implementation, and is checked against files another program wrote.
 - **Why:** off the Mac a file without a view only shows its details, and on the Mac Quick Look draws a picture the app can't select from, search or keep the same across systems.
 - **Rejected:**
   - Quick Look for good: Mac only, read as a picture.

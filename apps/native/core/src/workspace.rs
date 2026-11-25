@@ -603,25 +603,6 @@ pub fn is_pdf_file(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
-/// Whether `path` is a file the platform previewer draws and Northroom does not, by name
-/// (`SYSTEM_PREVIEW_EXTENSIONS`): Quick Look on a Mac, as Finder's space bar shows. It is
-/// view-only.
-pub fn is_system_preview_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .is_some_and(|extension| SYSTEM_PREVIEW_EXTENSIONS.contains(&extension.as_str()))
-}
-
-/// Formats Quick Look previews that Northroom has no view for. Formats the app draws itself
-/// (pages, text, tables, decks, PDFs, decodable pictures, media, 3D meshes) are excluded.
-// One kind of file per line, under its comment.
-#[rustfmt::skip]
-const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
-    // 3D scenes the app does not read: Alembic.
-    "abc",
-];
-
 /// Document packages: folders on disk that Finder and the app list as one file.
 pub(crate) const DOCUMENT_PACKAGE_EXTENSIONS: [&str; 4] = ["rtfd", "pages", "numbers", "key"];
 
@@ -636,9 +617,6 @@ pub enum FileRead {
     Media(Media),
     /// A PDF, by name: pages when opened, glyph and name on its card.
     Pdf,
-    /// A file the platform previewer draws, by name (`is_system_preview_file`), where one
-    /// exists. Elsewhere such a file opens in its own application.
-    SystemPreview,
     /// An Excel or OpenDocument workbook up to `workbook::FILE_MAX_BYTES`, by name: a table
     /// when opened.
     Workbook,
@@ -663,11 +641,7 @@ impl FileRead {
     /// icon, the glyph stays.
     pub fn shows_system_thumbnail(&self) -> bool {
         match self {
-            FileRead::Pdf
-            | FileRead::SystemPreview
-            | FileRead::Workbook
-            | FileRead::Deck
-            | FileRead::External => true,
+            FileRead::Pdf | FileRead::Workbook | FileRead::Deck | FileRead::External => true,
             FileRead::Media(_) | FileRead::Text(_) | FileRead::Html(_) | FileRead::Database(_) => {
                 false
             }
@@ -698,8 +672,8 @@ pub fn read_file(path: &Path) -> FileRead {
     read_text_preview(path, stat.len())
 }
 
-/// A folder listed as a file (`Shape::File`): a document package the app draws shows as pages,
-/// another uses the previewer; an application or anything else opens on its own.
+/// A folder listed as a file (`Shape::File`): a document package the app draws shows as pages;
+/// an application or anything else opens on its own.
 fn read_folder_as_file(path: &Path, stat: &fs::Metadata) -> FileRead {
     let extension = path
         .extension()
@@ -711,30 +685,21 @@ fn read_folder_as_file(path: &Path, stat: &fs::Metadata) -> FileRead {
     let drawn = path.file_name().is_some_and(|name| {
         crate::deck::Kind::of_name(&name.to_string_lossy()).is_some_and(|kind| kind.claims(path))
     });
-    match (package, drawn) {
-        (true, true) => FileRead::Deck,
-        (true, false) => FileRead::SystemPreview,
-        (false, _) => FileRead::External,
+    if package && drawn {
+        FileRead::Deck
+    } else {
+        FileRead::External
     }
 }
 
-/// How `path`, `length_bytes` long, is read by name alone: media, PDF, system preview or
-/// workbook. `None` when the name decides nothing.
+/// How `path`, `length_bytes` long, is read by name alone: media, PDF, a document drawn as pages
+/// or a workbook. `None` when the name decides nothing.
 fn read_by_name(path: &Path, length_bytes: u64) -> Option<FileRead> {
     if let Some(media) = media_of_file(path) {
         return Some(FileRead::Media(media));
     }
     if is_pdf_file(path) {
         return Some(FileRead::Pdf);
-    }
-    // Off a Mac there is no previewer, so the file opens in its own application; its bytes
-    // are never shown as text.
-    if is_system_preview_file(path) {
-        return Some(if cfg!(target_os = "macos") {
-            FileRead::SystemPreview
-        } else {
-            FileRead::External
-        });
     }
     read_document(path, length_bytes)
 }
@@ -791,7 +756,6 @@ pub fn read_text_file(path: &Path) -> Option<String> {
         FileRead::Text(text) | FileRead::Html(text) => Some(text),
         FileRead::Media(_)
         | FileRead::Pdf
-        | FileRead::SystemPreview
         | FileRead::Workbook
         | FileRead::Deck
         | FileRead::Database(_)
@@ -2659,14 +2623,11 @@ mod tests {
         assert_eq!(read_file(&write("book.xlsx", b"text")), FileRead::Workbook);
         assert_eq!(read_file(&write("book.ods", b"text")), FileRead::Workbook);
         assert_eq!(read_file(&write("Pitch.PPTX", b"text")), FileRead::Deck);
-        // A system-preview file uses the previewer however plain its bytes, else opens
-        // externally. Its text is never read as text.
-        let previewed = if cfg!(target_os = "macos") {
-            FileRead::SystemPreview
-        } else {
-            FileRead::External
-        };
-        assert_eq!(read_file(&write("Scene.abc", b"text")), previewed);
+        // A model is never read as text, however plain its bytes.
+        assert_eq!(
+            read_file(&write("Scene.abc", b"text")),
+            FileRead::Media(Media::Model)
+        );
         assert_eq!(read_text_file(&root.path().join("Scene.abc")), None);
         assert_eq!(
             read_file(&write("Bag.obj", b"v 0 0 0")),

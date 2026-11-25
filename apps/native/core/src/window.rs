@@ -35,8 +35,6 @@ pub enum OpenedView {
     Page,
     /// A PDF's pages.
     Pdf,
-    /// A file drawn by the platform's own previewer.
-    SystemPreview,
     /// Delimited text or a workbook, as its table.
     Table,
     /// A presentation, as its slides.
@@ -51,11 +49,10 @@ pub enum OpenedView {
 
 impl OpenedView {
     /// The views tried, in order, for a file that is not a terminal.
-    const TRIED: [Self; 8] = [
+    const TRIED: [Self; 7] = [
         Self::Html,
         Self::Page,
         Self::Pdf,
-        Self::SystemPreview,
         Self::Table,
         Self::Deck,
         Self::Model,
@@ -81,13 +78,9 @@ impl OpenedView {
         match self {
             Self::Terminal => true,
             Self::Html | Self::Page => fills_tab,
-            Self::Pdf
-            | Self::SystemPreview
-            | Self::Table
-            | Self::Deck
-            | Self::Model
-            | Self::Source
-            | Self::Details => false,
+            Self::Pdf | Self::Table | Self::Deck | Self::Model | Self::Source | Self::Details => {
+                false
+            }
         }
     }
 }
@@ -236,7 +229,7 @@ mod tests {
             OpenedView::of(EntryKind::Terminal, |_| true),
             OpenedView::Terminal
         );
-        // The order: live page, page, PDF, system preview, table, model, source; else details.
+        // The order: live page, page, PDF, table, deck, model, source; else details.
         let only = |shown: OpenedView| move |view: OpenedView| view == shown;
         for view in OpenedView::TRIED {
             assert_eq!(OpenedView::of(EntryKind::File, only(view)), view);
@@ -260,7 +253,6 @@ mod tests {
         }
         for view in [
             OpenedView::Pdf,
-            OpenedView::SystemPreview,
             OpenedView::Table,
             OpenedView::Deck,
             OpenedView::Model,

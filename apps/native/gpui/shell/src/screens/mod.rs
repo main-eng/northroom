@@ -30,8 +30,6 @@ pub mod preview;
 pub mod settings;
 pub mod sound;
 pub mod source;
-#[cfg(target_os = "macos")]
-pub mod system_preview;
 pub mod table;
 pub mod terminal;
 pub mod terminals;
@@ -198,17 +196,6 @@ pub fn opened(
         ),
         NrOpenedViewKind::Page => made(cx.new(|cx| page::Page::new(window, cx)), "PageView"),
         NrOpenedViewKind::Pdf => made(cx.new(|cx| pdf::Pdf::new(window, cx)), "PdfFileView"),
-        #[cfg(target_os = "macos")]
-        NrOpenedViewKind::SystemPreview => made(
-            cx.new(|cx| system_preview::SystemPreview::new(window, cx)),
-            "SystemPreviewFileView",
-        ),
-        // Only a Mac has a system previewer; elsewhere the core shows the file's details.
-        #[cfg(not(target_os = "macos"))]
-        NrOpenedViewKind::SystemPreview => made(
-            cx.new(|cx| details::Details::new(window, cx)),
-            "DetailsView",
-        ),
         NrOpenedViewKind::Table => {
             made(cx.new(|cx| table::Table::new(window, cx)), "TableFileView")
         }
