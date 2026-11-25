@@ -456,6 +456,8 @@ pub fn render_layer(
         (height * scale).ceil() as usize,
         layer,
     );
+    // The thinnest line is a pixel of a high-density display: half a point.
+    renderer.canvas.hairline = (scale / 2.0).max(1.0);
     run_page(&document, page, &mut renderer, scale);
     Ok(renderer.canvas.png())
 }

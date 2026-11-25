@@ -134,6 +134,12 @@ impl Shading {
     }
 }
 
+/// Whether `function` of `inputs` inputs gives a value for each of `space`'s components; a
+/// shading whose function doesn't is broken and paints nothing.
+fn gives_colours(function: &Function, space: &Space, inputs: usize) -> Option<()> {
+    (function.evaluate(&vec![0.0; inputs]).len() >= space.components()).then_some(())
+}
+
 /// A type 1 shading: a two-input function over a rectangle of its domain.
 fn function_based(
     document: &Document,
@@ -141,6 +147,7 @@ fn function_based(
     function: Function,
     space: Space,
 ) -> Option<Kind> {
+    gives_colours(&function, &space, 2)?;
     let domain = numbers(document, dict, "Domain");
     let domain: [f64; 4] = if domain.len() == 4 {
         domain.try_into().ok()?
@@ -166,6 +173,7 @@ fn gradient(
     function: &Function,
     space: &Space,
 ) -> Option<Kind> {
+    gives_colours(function, space, 1)?;
     let coords = numbers(document, dict, "Coords");
     let domain = numbers(document, dict, "Domain");
     let domain = (

@@ -30,6 +30,11 @@ pub struct Canvas {
     pixels: Vec<u8>,
     /// How what is painted next mixes with what is there.
     pub mode: Blend,
+    /// The thinnest a line is drawn, in pixels: a display pixel.
+    pub hairline: f64,
+    /// The rows and columns painted so far (left, top, right, bottom, exclusive), so a group
+    /// composites only what it holds.
+    touched: Option<[usize; 4]>,
 }
 
 /// Where both masks cover: their product, or whichever there is.
@@ -267,6 +272,8 @@ impl Canvas {
             height,
             pixels: vec![0; width * height * 4],
             mode: Blend::Normal,
+            hairline: HAIRLINE,
+            touched: None,
         }
     }
 
@@ -275,6 +282,16 @@ impl Canvas {
         if alpha <= 0.0 {
             return;
         }
+        let (column, row) = (index % self.width, index / self.width);
+        self.touched = Some(match self.touched {
+            Some([left, top, right, bottom]) => [
+                left.min(column),
+                top.min(row),
+                right.max(column + 1),
+                bottom.max(row + 1),
+            ],
+            None => [column, row, column + 1, row + 1],
+        });
         if self.mode != Blend::Normal {
             self.blend_mixed(index, colour, alpha);
             return;
@@ -318,7 +335,13 @@ impl Canvas {
     /// Paints a group drawn on its own canvas onto this one, at `alpha`, within `mask`, in this
     /// canvas's blend mode.
     pub fn composite(&mut self, group: &Canvas, alpha: f32, mask: Option<&Mask>) {
-        for index in 0..self.width * self.height {
+        let Some([left, top, right, bottom]) = group.touched else {
+            return;
+        };
+        let width = self.width;
+        for index in
+            (top..bottom).flat_map(|row| (left..right).map(move |column| row * width + column))
+        {
             let pixel = &group.pixels[index * 4..index * 4 + 4];
             if pixel[3] == 0 {
                 continue;
@@ -383,10 +406,15 @@ impl Canvas {
     /// Strokes a path given in pixels with `pen`, its lengths in pixels. A line thinner than a
     /// pixel is drawn a pixel wide and fainter.
     pub fn stroke(&mut self, path: &[Command], pen: &Pen, colour: Rgba, clip: Option<&Mask>) {
-        let faint = (pen.width / HAIRLINE).clamp(0.0, 1.0) as f32;
+        // A zero width is the thinnest line the device draws, and solid.
+        let faint = if pen.width <= 0.0 {
+            1.0
+        } else {
+            (pen.width / self.hairline).clamp(0.0, 1.0) as f32
+        };
         let colour = [colour[0], colour[1], colour[2], colour[3] * faint.max(0.35)];
         let pen = Pen {
-            width: pen.width.max(HAIRLINE),
+            width: pen.width.max(self.hairline),
             ..pen.clone()
         };
         let polygons = super::stroke::outline(&flatten(path), &pen);

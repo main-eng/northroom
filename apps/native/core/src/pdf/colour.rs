@@ -301,10 +301,8 @@ pub enum Function {
         encode: Vec<f32>,
     },
     /// Type 0, one input: samples, linearly interpolated.
-    Sampled {
-        samples: Vec<Vec<f32>>,
-        domain: [f32; 2],
-    },
+    /// Type 0: a table of samples over each input, interpolated between its neighbours.
+    Sampled(Box<Samples>),
     /// Type 4: a PostScript calculator program.
     Calculator(Vec<Operation>),
     /// Several functions, one an output.
@@ -371,7 +369,9 @@ impl Function {
                 bounds: floats(document, dict.get("Bounds")),
                 encode: floats(document, dict.get("Encode")),
             }),
-            0 => Self::read_sampled(document, &object, domain),
+            0 => {
+                Samples::read(document, &object).map(|samples| Function::Sampled(Box::new(samples)))
+            }
             4 => {
                 let Object::Stream(stream) = &object else {
                     return None;
@@ -381,42 +381,6 @@ impl Function {
             }
             _ => None,
         }
-    }
-
-    fn read_sampled(document: &Document, object: &Object, domain: [f32; 2]) -> Option<Function> {
-        let Object::Stream(stream) = object else {
-            return None;
-        };
-        let dict = &stream.dict;
-        let count = floats(document, dict.get("Size")).first().copied()? as usize;
-        let bits = document.entry(dict, "BitsPerSample").as_i64().unwrap_or(8) as usize;
-        let outputs = floats(document, dict.get("Range")).len() / 2;
-        let range = floats(document, dict.get("Range"));
-        let data = document.stream_data(stream).ok()?;
-        if !matches!(bits, 8 | 16) || outputs == 0 || count == 0 || count > 65_536 {
-            return None;
-        }
-        let max = ((1u32 << bits) - 1) as f32;
-        let read = |index: usize| -> f32 {
-            match bits {
-                8 => f32::from(*data.get(index).unwrap_or(&0)),
-                _ => f32::from(u16::from_be_bytes([
-                    *data.get(index * 2).unwrap_or(&0),
-                    *data.get(index * 2 + 1).unwrap_or(&0),
-                ])),
-            }
-        };
-        let samples = (0..count)
-            .map(|sample| {
-                (0..outputs)
-                    .map(|output| {
-                        let (low, high) = (range[output * 2], range[output * 2 + 1]);
-                        low + read(sample * outputs + output) / max * (high - low)
-                    })
-                    .collect()
-            })
-            .collect();
-        Some(Function::Sampled { samples, domain })
     }
 
     pub fn evaluate(&self, inputs: &[f32]) -> Vec<f32> {
@@ -465,21 +429,7 @@ impl Function {
                     .get(index)
                     .map_or_else(Vec::new, |function| function.evaluate(&[t]))
             }
-            Function::Sampled { samples, domain } => {
-                let span = (domain[1] - domain[0]).max(f32::EPSILON);
-                let position =
-                    ((x - domain[0]) / span).clamp(0.0, 1.0) * (samples.len() - 1) as f32;
-                let (low, high) = (
-                    position.floor() as usize,
-                    (position.ceil() as usize).min(samples.len() - 1),
-                );
-                let t = position - low as f32;
-                samples[low]
-                    .iter()
-                    .zip(&samples[high])
-                    .map(|(a, b)| a + t * (b - a))
-                    .collect()
-            }
+            Function::Sampled(samples) => samples.evaluate(inputs),
             Function::Calculator(program) => run_calculator(program, inputs),
             Function::Each(functions) => functions
                 .iter()
@@ -487,6 +437,160 @@ impl Function {
                 .collect(),
         }
     }
+}
+
+/// A sampled function's table.
+#[derive(Clone, Debug)]
+pub struct Samples {
+    /// How many samples along each input, the first varying fastest.
+    sizes: Vec<usize>,
+    domain: Vec<[f32; 2]>,
+    encode: Vec<[f32; 2]>,
+    outputs: usize,
+    /// Each sample's outputs, decoded.
+    values: Vec<f32>,
+}
+
+/// The most samples a table holds, so a damaged size can't ask for all memory.
+const SAMPLES_MAX: usize = 1 << 22;
+/// The most inputs interpolated between neighbours; others take the nearest sample below.
+const INTERPOLATED_MAX: usize = 8;
+
+fn pairs(values: &[f32], count: usize, default: impl Fn(usize) -> [f32; 2]) -> Vec<[f32; 2]> {
+    (0..count)
+        .map(|index| match values.get(index * 2..index * 2 + 2) {
+            Some(pair) => [pair[0], pair[1]],
+            None => default(index),
+        })
+        .collect()
+}
+
+impl Samples {
+    fn read(document: &Document, object: &Object) -> Option<Self> {
+        let Object::Stream(stream) = object else {
+            return None;
+        };
+        let dict = &stream.dict;
+        let sizes: Vec<usize> = floats(document, dict.get("Size"))
+            .iter()
+            .map(|size| (*size).max(1.0) as usize)
+            .collect();
+        let count = sizes
+            .iter()
+            .try_fold(1usize, |total, size| total.checked_mul(*size))?;
+        let bits = document
+            .entry(dict, "BitsPerSample")
+            .as_i64()
+            .unwrap_or(8)
+            .clamp(1, 32) as usize;
+        let range = floats(document, dict.get("Range"));
+        let outputs = range.len() / 2;
+        if sizes.is_empty() || outputs == 0 || count > SAMPLES_MAX {
+            return None;
+        }
+        let domain = pairs(&floats(document, dict.get("Domain")), sizes.len(), |_| {
+            [0.0, 1.0]
+        });
+        let encode = pairs(
+            &floats(document, dict.get("Encode")),
+            sizes.len(),
+            |index| [0.0, (sizes[index] - 1) as f32],
+        );
+        let range = pairs(&range, outputs, |_| [0.0, 1.0]);
+        let decode = pairs(&floats(document, dict.get("Decode")), outputs, |index| {
+            range[index]
+        });
+        let data = document.stream_data(stream).ok()?;
+        let max = ((1u64 << bits) - 1) as f32;
+        let values = (0..count * outputs)
+            .map(|index| {
+                let [low, high] = decode[index % outputs];
+                let [floor, ceiling] = range[index % outputs];
+                (low + read_bits(&data, index * bits, bits) as f32 / max * (high - low))
+                    .clamp(floor.min(ceiling), floor.max(ceiling))
+            })
+            .collect();
+        Some(Self {
+            sizes,
+            domain,
+            encode,
+            outputs,
+            values,
+        })
+    }
+
+    /// Where `inputs` fall in the table: each input's sample below and its share of the way to
+    /// the next.
+    fn positions(&self, inputs: &[f32]) -> Vec<(usize, f32)> {
+        self.sizes
+            .iter()
+            .enumerate()
+            .map(|(index, &size)| {
+                let [d0, d1] = self.domain[index];
+                let [e0, e1] = self.encode[index];
+                let x = inputs
+                    .get(index)
+                    .copied()
+                    .unwrap_or(0.0)
+                    .clamp(d0.min(d1), d0.max(d1));
+                let encoded = if d1 == d0 {
+                    e0
+                } else {
+                    e0 + (x - d0) / (d1 - d0) * (e1 - e0)
+                };
+                let position = encoded.clamp(0.0, (size - 1) as f32);
+                let below = (position.floor() as usize).min(size - 1);
+                (below, position - below as f32)
+            })
+            .collect()
+    }
+
+    fn evaluate(&self, inputs: &[f32]) -> Vec<f32> {
+        let positions = self.positions(inputs);
+        // The inputs between two samples: each corner of the cell around the point weighs in.
+        let between: Vec<usize> = (0..positions.len())
+            .filter(|&index| positions[index].1 > 0.0 && positions[index].0 + 1 < self.sizes[index])
+            .take(INTERPOLATED_MAX)
+            .collect();
+        let mut out = vec![0.0f32; self.outputs];
+        for corner in 0..1usize << between.len() {
+            let mut weight = 1.0f32;
+            let mut sample = 0usize;
+            let mut stride = 1usize;
+            for (index, &(below, share)) in positions.iter().enumerate() {
+                let step = between
+                    .iter()
+                    .position(|&known| known == index)
+                    .map_or(0, |bit| (corner >> bit) & 1);
+                weight *= match (between.contains(&index), step) {
+                    (false, _) => 1.0,
+                    (true, 0) => 1.0 - share,
+                    (true, _) => share,
+                };
+                sample += (below + step) * stride;
+                stride *= self.sizes[index];
+            }
+            for (output, value) in out.iter_mut().enumerate() {
+                *value += weight
+                    * self
+                        .values
+                        .get(sample * self.outputs + output)
+                        .copied()
+                        .unwrap_or(0.0);
+            }
+        }
+        out
+    }
+}
+
+/// `count` bits from bit `at`, most significant first.
+fn read_bits(data: &[u8], at: usize, count: usize) -> u64 {
+    (at..at + count).fold(0u64, |value, bit| {
+        let set = data
+            .get(bit / 8)
+            .map_or(0, |byte| (byte >> (7 - bit % 8)) & 1);
+        value << 1 | u64::from(set)
+    })
 }
 
 // --- PostScript calculator functions -------------------------------------------------------
@@ -542,9 +646,15 @@ fn parse_calculator(program: &[u8]) -> Vec<Operation> {
     parse_block(&mut tokens)
 }
 
+/// Runs a calculator program on `inputs`. Taking from an empty stack gives no number (NaN),
+/// which spreads through what uses it; a program that does so gives no outputs, as a broken
+/// function draws nothing.
 fn run_calculator(program: &[Operation], inputs: &[f32]) -> Vec<f32> {
     let mut stack: Vec<f32> = inputs.to_vec();
     execute(program, &mut stack, 0);
+    if stack.iter().any(|value| value.is_nan()) {
+        return Vec::new();
+    }
     stack
 }
 
@@ -556,7 +666,7 @@ fn execute(program: &[Operation], stack: &mut Vec<f32>, depth: usize) {
         match operation {
             Operation::Number(value) => stack.push(*value),
             Operation::Branch(then, otherwise) => {
-                let condition = stack.pop().unwrap_or(0.0) != 0.0;
+                let condition = stack.pop().unwrap_or(f32::NAN) != 0.0;
                 match (condition, otherwise) {
                     (true, _) => execute(then, stack, depth + 1),
                     (false, Some(otherwise)) => execute(otherwise, stack, depth + 1),
@@ -638,7 +748,7 @@ const BINARY: [&str; 18] = [
 ];
 
 fn operate(name: &str, stack: &mut Vec<f32>) {
-    let mut pop = || stack.pop().unwrap_or(0.0);
+    let mut pop = || stack.pop().unwrap_or(f32::NAN);
     if BINARY.contains(&name) {
         let (b, a) = (pop(), pop());
         stack.extend(binary(name, a, b));
@@ -654,7 +764,7 @@ fn operate(name: &str, stack: &mut Vec<f32>) {
 
 /// The operators that move the stack's values about.
 fn rearrange(name: &str, stack: &mut Vec<f32>) {
-    let mut pop = || stack.pop().unwrap_or(0.0);
+    let mut pop = || stack.pop().unwrap_or(f32::NAN);
     let result: Vec<f32> = match name {
         "true" => vec![1.0],
         "false" => vec![0.0],
@@ -690,8 +800,8 @@ fn rearrange(name: &str, stack: &mut Vec<f32>) {
 
 /// The count and shift a `roll` takes off the stack.
 fn pop_pair(stack: &mut Vec<f32>) -> (usize, i64) {
-    let shift = stack.pop().unwrap_or(0.0) as i64;
-    let count = stack.pop().unwrap_or(0.0).max(0.0) as usize;
+    let shift = stack.pop().unwrap_or(f32::NAN) as i64;
+    let count = stack.pop().unwrap_or(f32::NAN).max(0.0) as usize;
     (count, shift)
 }
 
@@ -733,10 +843,25 @@ mod tests {
         assert_eq!(exponential.evaluate(&[0.5]), [0.25]);
         let program = parse_calculator(b"{ dup 0.5 gt { 1 sub } { 2 mul } ifelse exch pop 3 }");
         assert_eq!(run_calculator(&program, &[0.0, 0.25]), [0.5, 3.0]);
-        let sampled = Function::Sampled {
-            samples: vec![vec![0.0], vec![1.0]],
-            domain: [0.0, 1.0],
+        let line = Samples {
+            sizes: vec![2],
+            domain: vec![[0.0, 1.0]],
+            encode: vec![[0.0, 1.0]],
+            outputs: 1,
+            values: vec![0.0, 1.0],
         };
-        assert_eq!(sampled.evaluate(&[0.25]), [0.25]);
+        assert_eq!(Function::Sampled(Box::new(line)).evaluate(&[0.25]), [0.25]);
+        // Two inputs: a 2 × 2 table, bilinear between its corners.
+        let square = Samples {
+            sizes: vec![2, 2],
+            domain: vec![[0.0, 1.0]; 2],
+            encode: vec![[0.0, 1.0]; 2],
+            outputs: 1,
+            values: vec![0.0, 1.0, 1.0, 2.0],
+        };
+        assert_eq!(square.evaluate(&[0.5, 0.5]), [1.0]);
+        assert_eq!(square.evaluate(&[1.0, 0.0]), [1.0]);
+        // A broken calculator gives nothing.
+        assert!(run_calculator(&parse_calculator(b"{ + }"), &[]).is_empty());
     }
 }

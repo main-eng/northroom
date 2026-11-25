@@ -188,7 +188,7 @@ fn read_samples(
     })
 }
 
-fn is_stencil(document: &Document, dict: &Dict) -> bool {
+pub fn is_stencil(document: &Document, dict: &Dict) -> bool {
     matches!(document.entry(dict, "ImageMask"), Object::Bool(true))
         || matches!(document.entry(dict, "IM"), Object::Bool(true))
 }
@@ -278,8 +278,13 @@ fn colour_pixels(
 /// samples hide the image).
 fn apply_masks(document: &Document, dict: &Dict, picture: &mut Picture) {
     if let Object::Stream(soft) = document.entry(dict, "SMask") {
+        let inverted = decode_array(document, &soft.dict).first() == Some(&1.0);
         if let Some(gray) = mask_gray(document, &soft) {
-            apply_alpha(picture, &gray, |value| value);
+            apply_alpha(
+                picture,
+                &gray,
+                |value| if inverted { 255 - value } else { value },
+            );
         }
     } else if let Object::Stream(mask) = document.entry(dict, "Mask") {
         apply_stencil_mask(document, &mask, picture);
@@ -298,12 +303,13 @@ fn apply_stencil_mask(document: &Document, mask: &Stream, picture: &mut Picture)
     }
 }
 
-/// A mask's samples as gray, 0 to 255: its own samples, or a JPEG's first channel.
+/// A mask's samples as gray, 0 to 255: its own samples, or a JPEG's or JPEG 2000's first
+/// channel.
 fn mask_gray(document: &Document, mask: &Stream) -> Option<Picture> {
     let dict = &mask.dict;
     match filter::codec(mask, Some(document)) {
         Some("jpeg") => return decode_jpeg(&filter::decode(mask, Some(document)).ok()?),
-        Some(_) => return None,
+        Some(_) => return decode_jpx(&filter::decode(mask, Some(document)).ok()?),
         None => {}
     }
     let width = number(document, dict, "Width", "W")?.max(1) as usize;

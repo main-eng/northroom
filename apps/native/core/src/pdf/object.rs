@@ -463,21 +463,40 @@ fn read_xref_section(parser: &mut Parser, first: i64, count: i64) -> Result<Vec<
     Ok(places)
 }
 
-/// The object number and start of the `n g obj` that ends at `end`, if the words before it are
-/// an object's.
+/// The object number and start of the `n g obj` that ends at `end`, if the bytes before it are
+/// an object's number and generation.
 fn object_before(bytes: &[u8], end: usize) -> Option<(u32, usize)> {
-    let before = &bytes[end.saturating_sub(24)..end];
-    let text = String::from_utf8_lossy(before);
-    let words: Vec<&str> = text.split_ascii_whitespace().collect();
-    let [.., number, generation] = words[..] else {
-        return None;
+    let white_before = |mut at: usize| {
+        while at > 0 && is_white(bytes[at - 1]) {
+            at -= 1;
+        }
+        at
     };
-    let number = number.parse::<u32>().ok()?;
-    generation.parse::<u16>().ok()?;
-    Some((
-        number,
-        end - before.len() + text.rfind(&format!("{number} ")).unwrap_or(0),
-    ))
+    let digits_before = |mut at: usize| {
+        while at > 0 && bytes[at - 1].is_ascii_digit() {
+            at -= 1;
+        }
+        at
+    };
+    let generation_end = white_before(end);
+    let generation_start = digits_before(generation_end);
+    let number_end = white_before(generation_start);
+    let number_start = digits_before(number_end);
+    let separated = generation_start < generation_end
+        && number_end < generation_start
+        && number_start < number_end;
+    if !separated || end - number_start > 24 {
+        return None;
+    }
+    std::str::from_utf8(&bytes[generation_start..generation_end])
+        .ok()?
+        .parse::<u16>()
+        .ok()?;
+    let number = std::str::from_utf8(&bytes[number_start..number_end])
+        .ok()?
+        .parse::<u32>()
+        .ok()?;
+    Some((number, number_start))
 }
 
 fn find_last(bytes: &[u8], word: &[u8]) -> Option<usize> {

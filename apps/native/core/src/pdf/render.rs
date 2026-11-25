@@ -195,6 +195,10 @@ pub trait Sink {
     fn end_mask(&mut self, _backdrop: Option<[f32; 3]>, _transfer: Option<&[u8; 256]>) -> Clip {
         None
     }
+    /// The coverage a stencil `picture` placed by `matrix` gives, within `clip`.
+    fn picture_mask(&mut self, _picture: Option<Picture>, _matrix: Matrix, clip: &Clip) -> Clip {
+        clip.clone()
+    }
 }
 
 #[derive(Clone)]
@@ -392,6 +396,8 @@ pub struct Interpreter<'a, S: Sink> {
     layers: Layers,
     /// How many groups and soft masks are being drawn on canvases of their own.
     grouped: usize,
+    /// The outlines of glyphs shown in a clipping text mode since `BT`, which clip at `ET`.
+    text_clip: Option<Vec<Command>>,
     /// Open marked content, each whether it hides what it marks (`BMC`, `BDC`, `EMC`).
     marked: Vec<bool>,
 }
@@ -429,6 +435,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             depth: 0,
             layers: Layers::of(document),
             grouped: 0,
+            text_clip: None,
             marked: Vec::new(),
         }
     }
@@ -687,16 +694,26 @@ impl<'a, S: Sink> Interpreter<'a, S> {
 
     /// Fills `path` with the pattern `name`: a shading, or a cell of content repeated.
     fn fill_with_pattern(&mut self, path: &[Command], name: &str) {
-        let pattern = self.resource(self.current_resources.as_ref(), "Pattern", name);
         let paint_clip = self.ready();
         let clip = self.sink.clip(&paint_clip, path);
+        self.paint_pattern(name, &clip);
+    }
+
+    /// Paints pattern `name` within `clip`; planning only notes the mark.
+    fn paint_pattern(&mut self, name: &str, clip: &Clip) {
         if !self.sink.wants_detail() {
-            self.sink.shade(&Nothing, &clip);
+            self.sink.shade(&Nothing, clip);
             return;
         }
-        let Some(dict) = pattern.as_dict() else {
-            return;
-        };
+        if let Some(paint) = self.pattern_paint(name) {
+            self.sink.shade(paint.as_ref(), clip);
+        }
+    }
+
+    /// What pattern `name` paints: a shading, or a cell of content repeated.
+    fn pattern_paint(&mut self, name: &str) -> Option<Box<dyn Paint>> {
+        let pattern = self.resource(self.current_resources.as_ref(), "Pattern", name);
+        let dict = pattern.as_dict()?;
         let matrix: Matrix = self
             .document
             .entry(dict, "Matrix")
@@ -704,26 +721,22 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             .and_then(|items| numbers_of(items).try_into().ok())
             .unwrap_or(IDENTITY);
         let placed = multiply(matrix, self.base);
-        let paint: Option<Box<dyn Paint>> =
-            match (&pattern, self.document.entry(dict, "PatternType").as_i64()) {
-                (Object::Stream(stream), Some(1)) => self
-                    .read_tile(stream, placed)
-                    .map(|tile| Box::new(tile) as Box<dyn Paint>),
-                (_, Some(2)) => {
-                    let shading = self.document.entry(dict, "Shading");
-                    Shading::read(
-                        self.document,
-                        &shading,
-                        placed,
-                        self.state.fill_alpha,
-                        self.current_resources.as_ref(),
-                    )
-                    .map(|shading| Box::new(shading) as Box<dyn Paint>)
-                }
-                _ => None,
-            };
-        if let Some(paint) = paint {
-            self.sink.shade(paint.as_ref(), &clip);
+        match (&pattern, self.document.entry(dict, "PatternType").as_i64()) {
+            (Object::Stream(stream), Some(1)) => self
+                .read_tile(stream, placed)
+                .map(|tile| Box::new(tile) as Box<dyn Paint>),
+            (_, Some(2)) => {
+                let shading = self.document.entry(dict, "Shading");
+                Shading::read(
+                    self.document,
+                    &shading,
+                    placed,
+                    self.state.fill_alpha,
+                    self.current_resources.as_ref(),
+                )
+                .map(|shading| Box::new(shading) as Box<dyn Paint>)
+            }
+            _ => None,
         }
     }
 
@@ -806,6 +819,8 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             let matrix = multiply([1.0, 0.0, 0.0, 1.0, shift.0, shift.1], to_cell);
             let mut inner = Interpreter::new(self.document, &mut renderer, &mut fonts, matrix);
             inner.depth = self.depth + 1;
+            // A cell is drawn whole: its pictures too, none left to the system.
+            inner.grouped = 1;
             inner.run_page(&content, resources.clone());
         }
         Some(renderer.canvas)
@@ -862,12 +877,14 @@ impl<'a, S: Sink> Interpreter<'a, S> {
     /// Draws one glyph at the text matrix: its outline, or its Type 3 procedure.
     fn draw_glyph(&mut self, font: &Rc<Font>, code: u32, glyph_matrix: Matrix) {
         let mode = self.state.text.mode;
-        if mode == 3 || mode == 7 || self.hidden() {
+        if mode == 3 || self.hidden() {
             return;
         }
         let device = multiply(glyph_matrix, self.state.ctm);
         if font.is_type3() {
-            self.draw_type3(font, code, glyph_matrix);
+            if mode != 7 {
+                self.draw_type3(font, code, glyph_matrix);
+            }
             return;
         }
         let Some(outline) = font.outline(code) else {
@@ -877,6 +894,12 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             .iter()
             .map(|command| transform(*command, device))
             .collect();
+        // Modes 4 to 7 add the glyph to the clip the text object leaves.
+        if mode >= 4 {
+            self.text_clip
+                .get_or_insert_with(Vec::new)
+                .extend_from_slice(&path);
+        }
         let stroke = matches!(mode, 1 | 2 | 5 | 6);
         if matches!(mode, 0 | 2 | 4 | 6) {
             self.fill_path(&path);
@@ -910,6 +933,10 @@ impl<'a, S: Sink> Interpreter<'a, S> {
     /// Shows a string: each code's glyph, then the pen moved by its width and spacing.
     fn show(&mut self, bytes: &[u8]) {
         let text = self.state.text.clone();
+        // Noted before any font is read, so planning and drawing agree the clip is shaped.
+        if text.mode >= 4 {
+            self.text_clip.get_or_insert_with(Vec::new);
+        }
         let Some(font) = text.font.clone() else {
             // Without its font, the text still counts as drawn for planning.
             if !self.sink.wants_detail() && !bytes.is_empty() && !matches!(text.mode, 3 | 7) {
@@ -961,6 +988,14 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             b"BT" => {
                 self.text_matrix = IDENTITY;
                 self.line_matrix = IDENTITY;
+                self.text_clip = None;
+            }
+            b"ET" => {
+                if let Some(path) = self.text_clip.take() {
+                    self.state.clip = self.sink.clip(&self.state.clip, &path);
+                    self.state.clip_area = ClipArea::Shaped;
+                    self.refresh_paint_clip();
+                }
             }
             b"Tc" => text.character_spacing = at(0),
             b"Tw" => text.word_spacing = at(0),
@@ -1053,6 +1088,15 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             }
             Placement::Drawn => {}
         }
+        if let Some(name) = self
+            .state
+            .fill_pattern
+            .clone()
+            .filter(|_| image::is_stencil(self.document, &stream.dict))
+        {
+            self.stencil_with_pattern(stream, &name);
+            return;
+        }
         let picture = if self.sink.wants_detail() {
             image::read(
                 self.document,
@@ -1068,16 +1112,28 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             .picture(picture, matrix, self.state.fill_alpha, &clip);
     }
 
-    /// Draws a form: as a transparency group on a canvas of its own when its group's alpha,
-    /// blend mode or soft mask must apply to it as a whole, else straight onto the page.
+    /// A stencil mask filled with a pattern: the pattern painted where the stencil marks.
+    fn stencil_with_pattern(&mut self, stream: &Stream, name: &str) {
+        let clip = self.ready();
+        let stencil = self
+            .sink
+            .wants_detail()
+            .then(|| image::read(self.document, stream, [1.0; 4], None))
+            .flatten();
+        let within = self.sink.picture_mask(stencil, self.state.ctm, &clip);
+        self.paint_pattern(name, &within);
+    }
+
+    /// Draws a form: a transparency group on a canvas of its own, so its content blends among
+    /// itself and its alpha, blend mode and soft mask apply to it whole (every group is drawn
+    /// isolated, and without knockout); any other form straight onto the page.
     fn draw_form(&mut self, stream: &Stream) {
         let group = self.document.entry(&stream.dict, "Group");
         let is_group = group
             .as_dict()
             .is_some_and(|group| self.document.entry(group, "S").as_name() == Some("Transparency"));
         let state = &self.state;
-        let composited = state.fill_alpha < 1.0 || state.blend != Blend::Normal || state.masked;
-        if !(is_group && composited) {
+        if !is_group {
             self.draw_form_content(stream);
             return;
         }
@@ -1420,8 +1476,8 @@ impl<'a, S: Sink> Interpreter<'a, S> {
                     self.shade(&name, resources);
                 }
             }
-            b"BT" | b"Tc" | b"Tw" | b"Tz" | b"TL" | b"Ts" | b"Tr" | b"Tf" | b"Td" | b"TD"
-            | b"Tm" | b"T*" | b"Tj" | b"'" | b"\"" | b"TJ" => {
+            b"BT" | b"ET" | b"Tc" | b"Tw" | b"Tz" | b"TL" | b"Ts" | b"Tr" | b"Tf" | b"Td"
+            | b"TD" | b"Tm" | b"T*" | b"Tj" | b"'" | b"\"" | b"TJ" => {
                 self.text_operator(operator, operands, resources);
             }
             _ => {}
@@ -1752,8 +1808,11 @@ impl Sink for Renderer {
         if mask {
             self.masking += 1;
         }
-        let canvas =
-            (self.layer == self.target).then(|| Canvas::new(self.canvas.width, self.canvas.height));
+        let canvas = (self.layer == self.target).then(|| {
+            let mut canvas = Canvas::new(self.canvas.width, self.canvas.height);
+            canvas.hairline = self.canvas.hairline;
+            canvas
+        });
         self.groups.push(canvas);
     }
     fn end_group(&mut self, alpha: f32, blend: Blend, clip: &Clip) {
@@ -1763,6 +1822,19 @@ impl Sink for Renderer {
             top.composite(&group, alpha, clip.as_deref());
             top.mode = mode;
         }
+    }
+    fn picture_mask(&mut self, picture: Option<Picture>, matrix: Matrix, clip: &Clip) -> Clip {
+        let Some(Picture {
+            rgba,
+            width,
+            height,
+        }) = picture.filter(|_| self.layer == self.target)
+        else {
+            return clip.clone();
+        };
+        let mut stencil = Canvas::new(self.canvas.width, self.canvas.height);
+        stencil.image(&rgba, (width, height), matrix, 1.0, clip.as_deref());
+        Some(Rc::new(stencil.mask_of(None)))
     }
     fn end_mask(&mut self, backdrop: Option<[f32; 3]>, transfer: Option<&[u8; 256]>) -> Clip {
         self.masking = self.masking.saturating_sub(1);
