@@ -123,8 +123,16 @@ impl Overlay {
         let workspace = cx.entity();
         let done: Done = Rc::new(move |effect, window, cx| {
             let said = Said::of(&effect);
+            let changed = said.effect == NrEffect::Changed;
             workspace.update(cx, |workspace, cx| {
-                effects::carry_out(workspace, said, window, cx)
+                effects::carry_out(workspace, said, window, cx);
+                // An answer that changed what the window shows (an unlocked file) redraws it.
+                if changed {
+                    if let Some(opened) = &workspace.opened {
+                        opened.screen.reload(window, cx);
+                    }
+                    workspace.changed(window, cx);
+                }
             });
         });
         self.dialogs

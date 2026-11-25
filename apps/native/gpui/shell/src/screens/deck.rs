@@ -177,6 +177,7 @@ impl Deck {
             page: None,
             down: Scroller::default(),
         };
+        nr_unlock_forget_asked();
         deck.reload(window, cx);
         deck
     }
@@ -306,6 +307,17 @@ impl Screen for Deck {
     /// Reads the open file's deck from the core again. A file that changes on disk keeps its
     /// scroll position, so a slide an agent rewrites is redrawn in place.
     fn reload(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        // A locked file asks for its password (once; the core keeps track). Deferred, as the
+        // first reload runs before the window listens to the new screen.
+        let deck = cx.entity();
+        cx.defer(move |cx| {
+            deck.update(cx, |_, cx| {
+                let unlock = nr_prompt_unlock();
+                if unlock.effect == NrEffect::Prompt {
+                    cx.emit(Ask::Said(kit::lists::rename::Said::of(&unlock)));
+                }
+            });
+        });
         let deck = opened_deck();
         let same = match (&deck, &self.shown) {
             (Some(new), Some(old)) => Arc::ptr_eq(new, old),

@@ -2,7 +2,7 @@
 //! placed for a view, and its pictures as files a shell can load.
 
 use super::layout::{self, Mark, Page};
-use super::{Deck, Kind, Source};
+use super::{Deck, Kind, ReadError, Source};
 use crate::ffi::with_columns;
 use crate::geometry::Rect;
 use crate::workspace::EntryKind;
@@ -45,6 +45,8 @@ struct Read {
     path: PathBuf,
     version: Version,
     deck: Option<Arc<Deck>>,
+    /// The file is encrypted and no password given opens it.
+    locked: bool,
 }
 
 /// The presentation last read, so a view asking on every change of the window reads the file
@@ -59,7 +61,9 @@ fn read(path: &Path, kind: Kind) -> Option<Arc<Deck>> {
             return known.deck.clone();
         }
     }
-    let deck = match super::read(path, kind, &mut crate::text::typeset::width) {
+    let result = super::read(path, kind, &mut crate::text::typeset::width);
+    let locked = matches!(result, Err(ReadError::Locked));
+    let deck = match result {
         Ok(deck) => Some(Arc::new(deck)),
         Err(failure) => {
             eprintln!("the file was not read as pages: {failure}");
@@ -70,8 +74,23 @@ fn read(path: &Path, kind: Kind) -> Option<Arc<Deck>> {
         path: path.to_path_buf(),
         version,
         deck: deck.clone(),
+        locked,
     });
     deck
+}
+
+/// The open file's path when it is locked: encrypted, and no password given opens it.
+pub fn opened_locked() -> Option<PathBuf> {
+    let (path, kind) = opened_path()?;
+    read(&path, kind);
+    let read = READ.relock();
+    let known = read.as_ref()?;
+    (known.path == path && known.locked).then_some(path)
+}
+
+/// Forgets the file last read, so the next ask reads it again, as after a password is typed.
+pub fn forget_read() {
+    *READ.relock() = None;
 }
 
 /// The open file as a deck; `None` when it is not a presentation or cannot be read, and it

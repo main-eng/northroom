@@ -183,7 +183,9 @@ pub extern "C" fn nr_opened_view() -> NrOpenedView {
                 || opened_workbook_path().is_some()
                 || opened_database_path().is_some()
         }
-        OpenedView::Deck => crate::deck::ffi::opened_deck().is_some(),
+        OpenedView::Deck => {
+            crate::deck::ffi::opened_deck().is_some() || crate::deck::ffi::opened_locked().is_some()
+        }
         OpenedView::Model => !owned(nr_opened_model_path()).is_empty(),
         OpenedView::Source => text_form() == Some(TextForm::Source),
         OpenedView::Terminal | OpenedView::Details => false,

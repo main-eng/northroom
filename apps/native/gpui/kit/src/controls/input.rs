@@ -197,6 +197,8 @@ pub struct Field {
     pub enabled: bool,
     /// Whether the caret blinks. Off for scripted screenshots, which keep it shown.
     pub blinks: bool,
+    /// A password: each character shows as a bullet, and it can't be copied or cut.
+    pub secret: bool,
     /// The accessible label; empty means none, as for an untitled AppKit field.
     label: SharedString,
     /// The accessibility identifier (`NSView.identifier`), if not empty. A setting's field
@@ -243,6 +245,7 @@ impl Field {
             keys: Keys::Own,
             enabled: true,
             blinks: true,
+            secret: false,
             label: SharedString::from(label.to_owned()),
             identifier: SharedString::default(),
             scroll: 0.0,
@@ -494,11 +497,17 @@ impl Field {
 
     /// Available only with a selection (`render`).
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.secret {
+            return;
+        }
         write_clipboard(self.editing.selected_words(), cx);
     }
 
     /// Available only with a selection (`render`).
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        if self.secret {
+            return;
+        }
         write_clipboard(self.editing.selected_words(), cx);
         self.edit(None, "", Group::Alone, window, cx);
     }
@@ -590,8 +599,23 @@ impl Field {
             Shape::Wrapped { .. } if room > 0.0 => (room, true),
             _ => (f32::INFINITY, false),
         };
+        // A secret shows a bullet a character; its glyphs map back to the characters' bytes.
+        let starts: Vec<usize> = content
+            .char_indices()
+            .map(|(at, _)| at)
+            .chain([content.len()])
+            .collect();
+        let shown = if self.secret {
+            "\u{2022}".repeat(starts.len() - 1)
+        } else {
+            content.clone()
+        };
+        let byte_of = |at: usize| match self.secret {
+            true => starts[(at / '\u{2022}'.len_utf8()).min(starts.len() - 1)],
+            false => at,
+        };
         let run = Run {
-            text: content.clone(),
+            text: shown,
             face: self.face,
             color: Hsla::default(),
             underline: None,
@@ -605,14 +629,15 @@ impl Field {
             .filter_map(|line| {
                 let piece = line.pieces.into_iter().next()?;
                 Some(FieldLine {
-                    start: piece.start,
-                    end: piece.end,
+                    start: byte_of(piece.start),
+                    end: byte_of(piece.end),
                     width: line.width,
                     glyphs: piece
                         .glyphs
                         .into_iter()
                         .map(|glyph| Placed {
                             x: f64::from(piece.x) + glyph.x,
+                            start: byte_of(glyph.start),
                             ..glyph
                         })
                         .collect(),
@@ -1166,7 +1191,11 @@ impl Render for Field {
             field.accessibility_id(self.identifier.clone())
         };
         field
-            .aria_value(self.editing.content.clone())
+            .aria_value(if self.secret {
+                SharedString::default()
+            } else {
+                self.editing.content.clone().into()
+            })
             .aria_placeholder(placeholder)
             .a11y_synthetic_children(super::heard::heard_words(
                 self.editing.content.clone(),

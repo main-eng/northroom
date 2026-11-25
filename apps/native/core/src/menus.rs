@@ -944,6 +944,8 @@ pub struct Prompt {
     pub action: &'static str,
     pub cancel: &'static str,
     pub destructive: bool,
+    /// The field holds a password: shown as bullets, never trimmed.
+    pub secret: bool,
 }
 
 /// The open panel's button that copies files into the folder, in `language`.
@@ -959,6 +961,26 @@ fn naming(title: &str, value: &str, language: &str) -> Prompt {
         action: strings::text(language, key::COMMON_SAVE),
         cancel: strings::text(language, key::ACCOUNT_CANCEL),
         destructive: false,
+        secret: false,
+    }
+}
+
+/// The dialog that asks for a locked file's password, saying so when `wrong`, the last one
+/// typed, didn't open it.
+pub fn unlock_prompt(name: &str, wrong: bool, language: &str) -> Prompt {
+    let message = if wrong {
+        key::DIALOG_UNLOCK_WRONG
+    } else {
+        key::DIALOG_UNLOCK_MESSAGE
+    };
+    Prompt {
+        title: strings::text(language, key::DIALOG_UNLOCK_TITLE).replace("{name}", name),
+        message: Some(strings::text(language, message).to_owned()),
+        value: Some(String::new()),
+        action: strings::text(language, key::MENU_OPEN),
+        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        destructive: false,
+        secret: true,
     }
 }
 
@@ -1258,6 +1280,7 @@ pub fn quit_prompt(count: usize, language: &str) -> Option<Prompt> {
         action: strings::text(language, key::MENU_QUIT),
         cancel: strings::text(language, key::ACCOUNT_CANCEL),
         destructive: true,
+        secret: false,
     })
 }
 
@@ -1282,6 +1305,7 @@ pub fn end_session_prompt(
         action: strings::text(language, key::MENU_END_SESSION),
         cancel: strings::text(language, key::ACCOUNT_CANCEL),
         destructive: true,
+        secret: false,
     })
 }
 
@@ -1371,6 +1395,25 @@ mod tests {
                 _ => entry.title.clone(),
             })
             .collect()
+    }
+
+    #[test]
+    fn a_locked_file_asks_for_its_password_in_a_secret_field() {
+        let first = unlock_prompt("Report.pdf", false, "en");
+        assert_eq!(first.title, "“Report.pdf” is locked");
+        assert_eq!(
+            first.message.as_deref(),
+            Some("Type its password to open it.")
+        );
+        assert_eq!(
+            (first.value.as_deref(), first.secret, first.action),
+            (Some(""), true, "Open")
+        );
+        let again = unlock_prompt("Report.pdf", true, "en");
+        assert_eq!(
+            again.message.as_deref(),
+            Some("That password didn’t open it. Try again.")
+        );
     }
 
     #[test]

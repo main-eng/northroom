@@ -476,6 +476,7 @@ mod tests {
             action: "Save",
             cancel: "Cancel",
             destructive: false,
+            secret: false,
         }
     }
 
@@ -539,6 +540,7 @@ mod tests {
             action: "Move to Trash",
             cancel: "Cancel",
             destructive: true,
+            secret: false,
         };
         // A narrow window leaves 16 either side.
         let placed = prompt(&warning, 400.0, 600.0, Token::Ink, &mut sevens);

@@ -149,6 +149,7 @@ impl Dialogs {
                     field.face = Face::sans(14.0, 400.0);
                     field.ground = Ground::Bare;
                     field.keys = Keys::Dialog;
+                    field.secret = prompt.secret;
                     field.place(place.frame.bounds(), place.control.bounds(), cx);
                     field.editing.select_all();
                     field

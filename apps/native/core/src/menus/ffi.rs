@@ -732,6 +732,8 @@ pub extern "C" fn nr_shortcut_text(key: u32, held: u32) -> NrText {
 #[derive(Clone, Debug)]
 enum Ask {
     Rename(usize, String),
+    /// Open this locked file with the password typed.
+    Unlock(std::path::PathBuf),
     /// End this terminal file's session once confirmed.
     EndSession(String),
     /// Quit once confirmed.
@@ -739,6 +741,15 @@ enum Ask {
 }
 
 static PROMPT: Mutex<Option<(Ask, Prompt)>> = Mutex::new(None);
+
+/// The locked file last asked about (`nr_prompt_unlock`).
+static UNLOCK_ASKED: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
+/// Lets a locked file ask for its password again, as when it is opened anew.
+#[no_mangle]
+pub extern "C" fn nr_unlock_forget_asked() {
+    *UNLOCK_ASKED.relock() = None;
+}
 
 fn ask(ask: Ask, prompt: Prompt) -> Effect {
     *PROMPT.relock() = Some((ask, prompt));
@@ -830,6 +841,8 @@ pub struct NrPrompt {
     pub action: NrText,
     pub cancel: NrText,
     pub destructive: bool,
+    /// The field holds a password, shown as bullets.
+    pub secret: bool,
 }
 
 /// The most recently requested dialog. Its text is valid until another is requested or it is
@@ -849,6 +862,7 @@ pub extern "C" fn nr_prompt() -> NrPrompt {
             action: NrText::borrowing(""),
             cancel: NrText::borrowing(""),
             destructive: false,
+            secret: false,
         };
     };
     NrPrompt {
@@ -868,6 +882,7 @@ pub extern "C" fn nr_prompt() -> NrPrompt {
         action: NrText::borrowing(prompt.action),
         cancel: NrText::borrowing(prompt.cancel),
         destructive: prompt.destructive,
+        secret: prompt.secret,
     }
 }
 
@@ -886,6 +901,7 @@ pub fn prompt_layout(width: f64, height: f64) -> crate::dialog::layout::PromptLa
             action: "",
             cancel: "",
             destructive: false,
+            secret: false,
         });
     let color = crate::dialog::keys::action_text_color(
         prompt.destructive,
@@ -962,6 +978,17 @@ pub unsafe extern "C" fn nr_prompt_answer(taken: bool, typed: *const c_char) -> 
         *prompt = None;
         return hand_over(Effect::Nothing);
     }
+    if let Ask::Unlock(path) = &ask {
+        // A password is taken as typed, spaces and all.
+        if typed.is_empty() {
+            return hand_over(Effect::Stays);
+        }
+        *prompt = None;
+        crate::pdf::passwords::remember(path, typed.as_bytes());
+        *UNLOCK_ASKED.relock() = None;
+        crate::deck::ffi::forget_read();
+        return hand_over(Effect::Changed);
+    }
     let name = menus::name_of(&typed);
     if shown.value.is_some() && name.is_none() {
         return hand_over(Effect::Stays);
@@ -980,8 +1007,34 @@ pub unsafe extern "C" fn nr_prompt_answer(taken: bool, typed: *const c_char) -> 
             crate::ffi::end_session(&id);
             changed(None)
         }
-        Ask::Quit => changed(None),
+        Ask::Quit | Ask::Unlock(_) => changed(None),
     })
+}
+
+/// Asks for the open file's password when it is locked (`deck::ReadError::Locked`), saying so
+/// when the one last typed didn't open it. Nothing when it isn't locked.
+#[no_mangle]
+pub extern "C" fn nr_prompt_unlock() -> NrMenuEffect {
+    let Some(path) = crate::deck::ffi::opened_locked() else {
+        return hand_over(Effect::Nothing);
+    };
+    // Once a file: not again on each redraw, nor after Cancel, until a password is typed or
+    // the file opens anew (`nr_unlock_forget_asked`).
+    let mut asked = UNLOCK_ASKED.relock();
+    if asked.as_ref() == Some(&path) {
+        return hand_over(Effect::Nothing);
+    }
+    *asked = Some(path.clone());
+    drop(asked);
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let wrong = crate::pdf::passwords::of(&path).is_some();
+    hand_over(ask(
+        Ask::Unlock(path),
+        menus::unlock_prompt(&name, wrong, language()),
+    ))
 }
 
 /// Quits, or confirms first while sessions are working or waiting (`menus::quit_prompt`).
