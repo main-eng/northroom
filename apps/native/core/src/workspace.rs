@@ -596,13 +596,6 @@ pub fn is_code_extension(extension: &str) -> bool {
     )
 }
 
-/// Whether `path` is a PDF by name. A PDF opens as pages drawn by the platform.
-pub fn is_pdf_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
-}
-
 /// Document packages: folders on disk that Finder and the app list as one file.
 pub(crate) const DOCUMENT_PACKAGE_EXTENSIONS: [&str; 4] = ["rtfd", "pages", "numbers", "key"];
 
@@ -615,8 +608,6 @@ pub const TEXT_PREVIEW_MAX_BYTES: u64 = 1024 * 1024;
 pub enum FileRead {
     /// A picture, video, audio or 3D model, by name.
     Media(Media),
-    /// A PDF, by name: pages when opened, glyph and name on its card.
-    Pdf,
     /// An Excel or OpenDocument workbook up to `workbook::FILE_MAX_BYTES`, by name: a table
     /// when opened.
     Workbook,
@@ -641,7 +632,7 @@ impl FileRead {
     /// icon, the glyph stays.
     pub fn shows_system_thumbnail(&self) -> bool {
         match self {
-            FileRead::Pdf | FileRead::Workbook | FileRead::Deck | FileRead::External => true,
+            FileRead::Workbook | FileRead::Deck | FileRead::External => true,
             FileRead::Media(_) | FileRead::Text(_) | FileRead::Html(_) | FileRead::Database(_) => {
                 false
             }
@@ -698,9 +689,6 @@ fn read_by_name(path: &Path, length_bytes: u64) -> Option<FileRead> {
     if let Some(media) = media_of_file(path) {
         return Some(FileRead::Media(media));
     }
-    if is_pdf_file(path) {
-        return Some(FileRead::Pdf);
-    }
     read_document(path, length_bytes)
 }
 
@@ -755,7 +743,6 @@ pub fn read_text_file(path: &Path) -> Option<String> {
     match read_file(path) {
         FileRead::Text(text) | FileRead::Html(text) => Some(text),
         FileRead::Media(_)
-        | FileRead::Pdf
         | FileRead::Workbook
         | FileRead::Deck
         | FileRead::Database(_)
@@ -2609,7 +2596,7 @@ mod tests {
         // A PDF or a picture is never text, however plain its bytes.
         assert_eq!(
             read_file(&write("Brief.pdf", b"%PDF-1.4\nBT (A page) Tj ET\n%%EOF\n")),
-            FileRead::Pdf
+            FileRead::Deck
         );
         assert_eq!(read_text_file(&root.path().join("Brief.pdf")), None);
         assert_eq!(
@@ -2668,8 +2655,6 @@ mod tests {
             read_file(&write("scenes.html", b"<p>")),
             FileRead::Html("<p>".to_owned())
         );
-        assert!(is_pdf_file(Path::new("/drive/Lease.PDF")) && is_pdf_file(Path::new("report.pdf")));
-        assert!(!is_pdf_file(Path::new("/drive/pdf")) && !is_pdf_file(Path::new("notes.pdf.txt")));
     }
 
     #[test]

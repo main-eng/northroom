@@ -316,7 +316,7 @@ fn press_key(key: NrKey, characters: &str, held: Modifiers, window: &mut Window,
     }
 }
 
-/// Whether the open file is a live page or PDF whose screen has GPUI focus and whose view has
+/// Whether the open file is a live page whose screen has GPUI focus and whose view has
 /// AppKit focus. Native focus follows GPUI focus only on draw, and a check's window may not have
 /// drawn since focus moved.
 #[cfg(target_os = "macos")]
@@ -326,7 +326,7 @@ fn page_has_keys(window: &Window, cx: &App) -> bool {
         .opened
         .as_ref()
         .is_some_and(|opened| {
-            matches!(opened.kind, NrOpenedViewKind::Html | NrOpenedViewKind::Pdf)
+            matches!(opened.kind, NrOpenedViewKind::Html)
                 && opened
                     .screen
                     .keys(cx)

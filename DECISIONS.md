@@ -8,7 +8,7 @@ reason it was rejected.
 ## ADR-0001: One Rust core decides; one GPUI shell draws, on all three systems
 
 - Every rule lives in the core. A rule found in the shell moves to the core.
-- Web views are only for live HTML, 3D model stills and PDFs off the Mac. Never for lists, the board, settings, the editor, menus or the terminal.
+- Web views are only for live HTML and 3D model stills. Never for lists, the board, settings, the editor, menus or the terminal.
 - The terminal is drawn by the shell like every other view, in GPUI's frame: the core hands it a frame of what to draw (`terminal::frame`, in Northroom's own types) and the emulator library stays behind `terminal::engine`. The grid and the process are resized at most once a frame, and only when a whole cell is gained or lost.
 - English only. A language ships complete or not at all.
 - No screenshot-comparison tests. They cost more to keep than they caught.
@@ -161,13 +161,15 @@ reason it was rejected.
 - The core reads each format into Northroom's own types and the shell draws them (ADR-0001). Formats that share a container share its reader: `package` (zip and XML) serves Office and OpenDocument files, `compound` serves Office 97–2003. Documents and slides become a `deck` of pages, spreadsheets, contacts and events a table, 3D files a `.glb` the still renderer draws, and fonts a specimen drawn from their own outlines.
 - A view shows a file; it does not edit it. It reads right: the same words, numbers, pictures and positions, not a copy of another program's line breaks.
 - Nothing goes to Quick Look. It was a stopgap while formats gained views, and it was removed when the last one did. A new kind of file gets its own view or shows its details.
-- Media still goes through the system's codecs (ADR-0004), and PDF is drawn inside the app by PDFKit on the Mac and the web view elsewhere (ADR-0001). An own PDF renderer is the one part of this decision not built.
+- PDF is drawn by the core's own renderer (`pdf`): it reads the file's objects, fonts and colour, and rasterizes each page's marks into layers off the UI thread. JPEG and JPEG 2000 pictures on a page stay with the system's decoders, as other media does (ADR-0004), so their transparency and clip shape are not applied.
 - A reader works from the format's specification or its reference implementation, and is checked against files another program wrote.
 - **Why:** off the Mac a file without a view only shows its details, and on the Mac Quick Look draws a picture the app can't select from, search or keep the same across systems.
 - **Rejected:**
   - Quick Look for good: Mac only, read as a picture.
   - Opening the file in its own application: the person leaves Northroom, and needs that application.
   - Converting to HTML for the web view: ADR-0001 keeps web views to live pages.
+  - PDFKit on the Mac and the web view elsewhere for PDF: two renderers that drew differently, neither of them ours.
+  - A bundled PDF library (PDFium, MuPDF): a C dependency to build on three systems, and MuPDF's AGPL licence.
   - A bundled office suite: its size, its licence and its release cycle.
 
 ## Design rules

@@ -238,6 +238,9 @@ fn say_unsupported(route: Route, step: &Step) {
 /// (`kit::hosted::holes_shown`).
 const HOSTED_PICTURE_WAIT: Duration = Duration::from_secs(2);
 
+/// Longest a snapshot waits for the core to draw the pictures of the open deck.
+const DECK_PICTURE_WAIT: Duration = Duration::from_secs(5);
+
 /// Saves a snapshot of the window. Draws the frame here because GPUI only draws on display
 /// refresh while the window is uncovered, and a check's window often isn't.
 async fn picture(handle: WindowHandle<Workspace>, path: &str, whole: bool, cx: &mut AsyncApp) {
@@ -248,6 +251,17 @@ async fn picture(handle: WindowHandle<Workspace>, path: &str, whole: bool, cx: &
     // The first draw requests its thumbnails. Wait up to 1 s for them, as a user would see
     // them arrive.
     let _ = cx.update_window(handle.into(), |_, window, cx| window.draw(cx).clear(cx));
+    // Pages the core draws off the UI thread (a PDF's) come first, then their files load as
+    // thumbnails on the next draw.
+    let deadline = Instant::now() + DECK_PICTURE_WAIT;
+    if northroom_core::deck::ffi::drawing() {
+        while northroom_core::deck::ffi::drawing() && Instant::now() < deadline {
+            cx.background_executor()
+                .timer(Duration::from_millis(10))
+                .await;
+        }
+        let _ = cx.update_window(handle.into(), |_, window, cx| window.draw(cx).clear(cx));
+    }
     let deadline = Instant::now() + Duration::from_secs(1);
     while kit::lists::thumbs::reading() > 0 && Instant::now() < deadline {
         cx.background_executor()

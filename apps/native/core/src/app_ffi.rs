@@ -1,5 +1,5 @@
 //! FFI for the app chrome (ADR-0001): app folders, launch mode, networking, settings, motion,
-//! the colour picker, onboarding, PDF scale and live HTML pages. Returned text is borrowed
+//! the colour picker, onboarding and live HTML pages. Returned text is borrowed
 //! UTF-8, valid until the next call that returns text.
 
 use crate::ffi::{text_of, NrColor, NrText};
@@ -705,34 +705,6 @@ pub fn details_layout(
     crate::ffi::details_layout(width, height, media, fills)
 }
 
-/// PDF actual size on screen: 96 px per inch over 72 PDF points per inch.
-const PDF_TRUE_SIZE: f64 = 96.0 / 72.0;
-
-/// PDF page scale: actual size, or `fit` (the scale that fits the pane) if smaller.
-#[no_mangle]
-pub extern "C" fn nr_pdf_scale(fit: f64) -> f64 {
-    PDF_TRUE_SIZE.min(fit)
-}
-
-/// Pinch zoom limits for PDFs: a quarter of actual size to eight times it.
-const PDF_LEAST_SCALE: f64 = PDF_TRUE_SIZE / 4.0;
-const PDF_MOST_SCALE: f64 = PDF_TRUE_SIZE * 8.0;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PdfZoom {
-    pub least: f64,
-    pub most: f64,
-}
-
-/// Pinch zoom range for pages drawn at `scale`. The lower limit never exceeds `scale`, so pages
-/// already below it in a narrow pane do not jump.
-pub fn pdf_zoom(scale: f64) -> PdfZoom {
-    PdfZoom {
-        least: PDF_LEAST_SCALE.min(scale),
-        most: PDF_MOST_SCALE.max(scale),
-    }
-}
-
 /// Whether the platform can read a picture's size from its file header when the file index
 /// lacks it, for `extension` (lowercase, no dot).
 ///
@@ -794,24 +766,6 @@ pub extern "C" fn nr_html_page_close(id: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn a_pdf_is_its_true_size_unless_the_pane_is_narrower() {
-        assert_eq!(nr_pdf_scale(3.0), 96.0 / 72.0);
-        assert_eq!(nr_pdf_scale(0.5), 0.5);
-    }
-
-    #[test]
-    fn a_pinch_zooms_a_pdf_between_a_quarter_and_eight_times_its_true_size() {
-        let zoom = pdf_zoom(nr_pdf_scale(3.0));
-        assert_eq!(zoom.least, PDF_TRUE_SIZE / 4.0);
-        assert_eq!(zoom.most, PDF_TRUE_SIZE * 8.0);
-        // Pages already below the lower limit can zoom in but not out.
-        assert_eq!(pdf_zoom(0.1).least, 0.1);
-        assert_eq!(pdf_zoom(0.1).most, PDF_TRUE_SIZE * 8.0);
-    }
-
     #[test]
     fn the_platform_reads_the_size_of_pictures_it_decodes() {
         for extension in ["png", "jpg", "tiff", "bmp"] {

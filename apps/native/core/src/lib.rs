@@ -31,6 +31,7 @@ pub mod motion;
 pub mod package;
 pub mod page;
 pub mod paths;
+pub mod pdf;
 pub mod preview;
 pub mod script;
 pub mod scroll;

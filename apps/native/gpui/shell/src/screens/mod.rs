@@ -25,7 +25,6 @@ pub mod model;
 pub mod onboarding;
 pub mod page;
 pub mod page_players;
-pub mod pdf;
 pub mod preview;
 pub mod settings;
 pub mod sound;
@@ -195,7 +194,6 @@ pub fn opened(
             "HtmlFileView",
         ),
         NrOpenedViewKind::Page => made(cx.new(|cx| page::Page::new(window, cx)), "PageView"),
-        NrOpenedViewKind::Pdf => made(cx.new(|cx| pdf::Pdf::new(window, cx)), "PdfFileView"),
         NrOpenedViewKind::Table => {
             made(cx.new(|cx| table::Table::new(window, cx)), "TableFileView")
         }

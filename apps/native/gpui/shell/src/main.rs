@@ -200,6 +200,7 @@ fn start(attendance: Attendance, cx: &mut App) {
     }
     news::watch();
     model_stills::start(cx);
+    northroom_core::deck::ffi::start_rendering(kit::wake::wake);
     let handle = open_window(attendance, cx);
     cx.on_window_closed(|cx, _| cx.quit()).detach();
     // A downloaded update the user deferred with Later installs at quit.

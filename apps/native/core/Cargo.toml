@@ -41,6 +41,12 @@ read-fonts = "0.41"
 # outline reader built on read-fonts (MIT or Apache-2.0; in the GPUI shell's tree, at this
 # version). Writing a CFF charstring interpreter ourselves would duplicate it.
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
+# Encrypted PDFs (`pdf::crypt`): the standard security handler's MD5, AES and SHA-2, from
+# RustCrypto (MIT or Apache-2.0; in the GPUI shell's tree, at these versions). Hand-written
+# ciphers would be the riskier code to keep.
+md-5 = { version = "0.10", default-features = false }
+aes = "0.8"
+sha2 = { version = "0.10", default-features = false }
 harfrust = "0.12"
 # Where a line may break (`typeset`): ICU4X's rules, the Unicode rules Core Text breaks lines
 # by (Unicode-3.0; in the GPUI shell's tree).

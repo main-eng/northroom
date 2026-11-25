@@ -91,6 +91,8 @@ pub enum Kind {
     AppleDocument,
     /// A font file, shown as a specimen of each face it holds.
     Font,
+    /// A PDF, drawn by Northroom's own renderer.
+    Pdf,
 }
 
 /// The largest document drawn; a larger one shows its details. A file is read whole when it
@@ -114,14 +116,15 @@ impl Kind {
             | Kind::RichText
             | Kind::Photoshop
             | Kind::RawPhoto
-            | Kind::Font => true,
+            | Kind::Font
+            | Kind::Pdf => true,
         }
     }
 
     /// The largest file of this kind drawn.
     pub fn max_bytes(self) -> u64 {
         match self {
-            Kind::Photoshop | Kind::RawPhoto | Kind::AppleDocument => PICTURE_MAX_BYTES,
+            Kind::Photoshop | Kind::RawPhoto | Kind::AppleDocument | Kind::Pdf => PICTURE_MAX_BYTES,
             Kind::Presentation
             | Kind::LegacyPresentation
             | Kind::WordDocument
@@ -150,6 +153,7 @@ impl Kind {
             "psd" | "psb" => Kind::Photoshop,
             "key" | "pages" | "numbers" => Kind::AppleDocument,
             "ttf" | "otf" | "ttc" | "otc" | "dfont" => Kind::Font,
+            "pdf" => Kind::Pdf,
             "dng" | "cr2" | "cr3" | "nef" | "nrw" | "arw" | "raf" | "orf" | "rw2" | "pef"
             | "srw" => Kind::RawPhoto,
             _ => return None,
@@ -172,6 +176,7 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
         Kind::RawPhoto => picture::read_raw_file(path),
         Kind::AppleDocument => iwork::read(path),
         Kind::Font => font::read(path),
+        Kind::Pdf => crate::pdf::read(path).map_err(|error| ReadError::Damaged(error.0)),
     }
 }
 
@@ -190,6 +195,14 @@ pub enum Source {
         bytes: Arc<Vec<u8>>,
         extension: &'static str,
     },
+    /// A layer of a PDF page, drawn by the PDF renderer when first shown.
+    PdfLayer { page: usize, layer: usize },
+    /// A JPEG or JPEG 2000 picture on a PDF page, taken out of the file when first shown.
+    PdfPicture {
+        page: usize,
+        picture: usize,
+        extension: &'static str,
+    },
 }
 
 impl Source {
@@ -205,6 +218,19 @@ impl Source {
             Source::Entry(name) => named(Path::new(name)),
             Source::File(path) => named(path),
             Source::Bytes { extension, .. } => (*extension).to_owned(),
+            Source::PdfLayer { .. } => "png".to_owned(),
+            Source::PdfPicture {
+                extension: "jpx", ..
+            } => "jp2".to_owned(),
+            Source::PdfPicture { extension, .. } => (*extension).to_owned(),
+        }
+    }
+
+    /// Whether reading the picture takes long enough to do off the UI thread.
+    pub fn is_slow(&self) -> bool {
+        match self {
+            Source::PdfLayer { .. } | Source::PdfPicture { .. } => true,
+            Source::Entry(_) | Source::File(_) | Source::Bytes { .. } => false,
         }
     }
 
@@ -220,6 +246,14 @@ impl Source {
             }
             Source::File(path) => read_bytes(path),
             Source::Bytes { bytes, .. } => Ok(bytes.as_ref().clone()),
+            Source::PdfLayer { page, layer } => {
+                crate::pdf::render_layer(read_bytes(file)?, *page, *layer)
+                    .map_err(|error| ReadError::Damaged(error.0))
+            }
+            Source::PdfPicture { page, picture, .. } => {
+                crate::pdf::extract_picture(read_bytes(file)?, *page, *picture)
+                    .map_err(|error| ReadError::Damaged(error.0))
+            }
         }
     }
 }

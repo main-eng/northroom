@@ -982,18 +982,6 @@ pub extern "C" fn nr_column_open(column: usize, row: usize) {
     watch_open_columns();
 }
 
-/// Whether the open file is a PDF, which the shell draws as its pages with the platform's own
-/// PDF renderer (PDFKit on a Mac) in place of the file's details.
-pub(crate) fn opened_is_pdf() -> bool {
-    with_columns(|columns| {
-        let opened = columns.opened()?.clone();
-        let path = columns.workspace().path_of(&opened.id).ok()?;
-        Some(matches!(opened.kind, EntryKind::File) && crate::workspace::is_pdf_file(&path))
-    })
-    .flatten()
-    .unwrap_or(false)
-}
-
 /// The path of the open file, or an empty text when none is open.
 #[no_mangle]
 pub extern "C" fn nr_opened_path() -> NrText {
@@ -3128,7 +3116,8 @@ fn with_opened_text<T>(action: impl FnOnce(crate::workspace::TextForm, &str) -> 
         Some((opened.id, opened.title, path))
     })
     .flatten()?;
-    if crate::workspace::is_pdf_file(&path) {
+    // A file drawn as pages (a PDF, a document) is never read as text, however plain its bytes.
+    if crate::deck::Kind::of_name(&title).is_some() {
         return None;
     }
     // A file that cannot be looked at cannot be read either (`workspace::read_file`).

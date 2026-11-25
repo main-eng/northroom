@@ -37,7 +37,3 @@ ureq = { version = "3.5", default-features = false, features = ["native-tls-no-d
 # Embeds the Windows icon and version (`build.rs`). Already in GPUI's tree.
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# PDFKit's view (`screens/pdf.rs`) through plain `msg_send!`. Already in GPUI's tree.
-objc2 = "0.6"

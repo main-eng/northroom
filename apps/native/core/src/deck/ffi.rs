@@ -119,7 +119,109 @@ fn forget_others(folder: &Path, keep_prefix: &str) {
     }
 }
 
-/// Picture `index` of the deck read from `path`, as a file in `folder`: written on first ask.
+/// Reads a picture's bytes and writes them as `file`, through a temporary name so a view never
+/// loads half a picture.
+fn write_picture(
+    path: &Path,
+    source: &Source,
+    folder: &Path,
+    file: &Path,
+    prefix: &str,
+) -> Result<(), String> {
+    let bytes = source.read(path).map_err(|failure| failure.to_string())?;
+    std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    forget_others(folder, prefix);
+    let writing = file.with_extension("writing");
+    std::fs::write(&writing, bytes).map_err(|error| error.to_string())?;
+    std::fs::rename(&writing, file).map_err(|error| error.to_string())
+}
+
+/// A picture to write off the UI thread.
+struct Job {
+    path: PathBuf,
+    source: Source,
+    folder: PathBuf,
+    file: PathBuf,
+    prefix: String,
+}
+
+/// Pictures waiting to be written, those being written, and those that failed.
+#[derive(Default)]
+struct Queue {
+    jobs: Vec<Job>,
+    busy: std::collections::HashSet<PathBuf>,
+    failed: std::collections::HashSet<PathBuf>,
+}
+
+static QUEUE: Mutex<Option<Queue>> = Mutex::new(None);
+static WAITING: std::sync::Condvar = std::sync::Condvar::new();
+static WAKE: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+static WORKER: std::sync::Once = std::sync::Once::new();
+
+/// Lets the core ask the window to redraw when a picture written off the UI thread is ready.
+/// The shell calls it once at launch.
+pub fn start_rendering(wake: fn()) {
+    let _ = WAKE.set(wake);
+}
+
+/// Whether pictures are waiting to be written or being written.
+pub fn drawing() -> bool {
+    QUEUE
+        .relock()
+        .as_ref()
+        .is_some_and(|queue| !queue.busy.is_empty())
+}
+
+/// Writes queued pictures, newest asked first, so the page in view comes before pages scrolled
+/// past.
+fn work() {
+    loop {
+        let job = {
+            let mut queue = QUEUE.relock();
+            loop {
+                if let Some(job) = queue.get_or_insert_with(Queue::default).jobs.pop() {
+                    break job;
+                }
+                queue = WAITING
+                    .wait(queue)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+        };
+        let written = write_picture(&job.path, &job.source, &job.folder, &job.file, &job.prefix);
+        {
+            let mut queue = QUEUE.relock();
+            let queue = queue.get_or_insert_with(Queue::default);
+            queue.busy.remove(&job.file);
+            if let Err(why) = written {
+                eprintln!("a picture of {} was not drawn: {why}", job.path.display());
+                queue.failed.insert(job.file);
+            }
+        }
+        if let Some(wake) = WAKE.get() {
+            wake();
+        }
+    }
+}
+
+/// Asks for a slow picture to be written; it shows once the window redraws.
+fn queue_picture(job: Job) {
+    let mut queue = QUEUE.relock();
+    let queue = queue.get_or_insert_with(Queue::default);
+    if queue.busy.contains(&job.file) || queue.failed.contains(&job.file) {
+        return;
+    }
+    queue.busy.insert(job.file.clone());
+    queue.jobs.push(job);
+    WORKER.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("deck-pictures".into())
+            .spawn(work);
+    });
+    WAITING.notify_one();
+}
+
+/// Picture `index` of the deck read from `path`, as a file in `folder`: written on first ask,
+/// off the UI thread when it is slow to make (a PDF page's layer).
 fn keep_picture(path: &Path, deck: &Deck, index: usize, folder: &Path) -> Option<PathBuf> {
     let source = deck.pictures.get(index)?;
     let kept = kept_name(path, version_of(path), index, source);
@@ -127,15 +229,18 @@ fn keep_picture(path: &Path, deck: &Deck, index: usize, folder: &Path) -> Option
     if file.is_file() {
         return Some(file);
     }
-    let written = source
-        .read(path)
-        .map_err(|failure| failure.to_string())
-        .and_then(|bytes| {
-            std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
-            forget_others(folder, &kept[..17]);
-            std::fs::write(&file, bytes).map_err(|error| error.to_string())
+    let prefix = kept[..17].to_owned();
+    if source.is_slow() && !cfg!(test) {
+        queue_picture(Job {
+            path: path.to_path_buf(),
+            source: source.clone(),
+            folder: folder.to_path_buf(),
+            file,
+            prefix,
         });
-    match written {
+        return None;
+    }
+    match write_picture(path, source, folder, &file, &prefix) {
         Ok(()) => Some(file),
         Err(why) => {
             eprintln!("picture {index} of {} was not kept: {why}", path.display());

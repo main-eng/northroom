@@ -104,7 +104,6 @@ pub enum NrOpenedViewKind {
     /// A live HTML page.
     Html,
     Page,
-    Pdf,
     Table,
     /// A 3D model.
     Model,
@@ -121,7 +120,6 @@ fn view_kind(view: Option<OpenedView>) -> NrOpenedViewKind {
         Some(OpenedView::Terminal) => NrOpenedViewKind::Terminal,
         Some(OpenedView::Html) => NrOpenedViewKind::Html,
         Some(OpenedView::Page) => NrOpenedViewKind::Page,
-        Some(OpenedView::Pdf) => NrOpenedViewKind::Pdf,
         Some(OpenedView::Table) => NrOpenedViewKind::Table,
         Some(OpenedView::Deck) => NrOpenedViewKind::Deck,
         Some(OpenedView::Model) => NrOpenedViewKind::Model,
@@ -136,7 +134,6 @@ fn view_of(kind: NrOpenedViewKind) -> Option<OpenedView> {
         NrOpenedViewKind::Terminal => OpenedView::Terminal,
         NrOpenedViewKind::Html => OpenedView::Html,
         NrOpenedViewKind::Page => OpenedView::Page,
-        NrOpenedViewKind::Pdf => OpenedView::Pdf,
         NrOpenedViewKind::Table => OpenedView::Table,
         NrOpenedViewKind::Deck => OpenedView::Deck,
         NrOpenedViewKind::Model => OpenedView::Model,
@@ -158,8 +155,8 @@ pub struct NrOpenedView {
 #[no_mangle]
 pub extern "C" fn nr_opened_view() -> NrOpenedView {
     use crate::ffi::{
-        nr_opened_model_path, opened_database_path, opened_html_path, opened_is_pdf,
-        opened_text_form, opened_workbook_path,
+        nr_opened_model_path, opened_database_path, opened_html_path, opened_text_form,
+        opened_workbook_path,
     };
     use crate::workspace::TextForm;
     let opened = with_columns(|columns| {
@@ -182,7 +179,6 @@ pub extern "C" fn nr_opened_view() -> NrOpenedView {
         OpenedView::Page => {
             kind == crate::workspace::EntryKind::Page || text_form() == Some(TextForm::PlainPage)
         }
-        OpenedView::Pdf => opened_is_pdf(),
         OpenedView::Table => {
             text_form() == Some(TextForm::Table)
                 || opened_workbook_path().is_some()

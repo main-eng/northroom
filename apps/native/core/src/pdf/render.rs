@@ -1,0 +1,1227 @@
+//! Runs a page's content: the graphics state, paths, colour, text, images, forms, gradients and
+//! annotations' appearances, handing each mark to a `Sink`. The same run plans a page (which
+//! parts it has: drawn layers and the JPEG pictures between them) and renders one of its layers.
+//!
+//! Left out: blend modes and soft masks of the graphics state, knockout and isolated groups,
+//! tiling patterns (not painted), shading types other than axial and radial (painted in their
+//! middle colour), text rendering's clip modes (drawn as fills), and optional content.
+
+use super::colour::{Function, Space};
+use super::font::Font;
+use super::image::{self, Picture};
+use super::object::{Dict, Document, Object, Parser, Ref, Stream, Token};
+use super::raster::{Canvas, Mask, Rgba};
+use crate::deck::Command;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+pub type Matrix = [f64; 6];
+pub const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+/// How deep forms and Type 3 glyphs may nest.
+const DEPTH_MAX: usize = 16;
+/// The most operators one page runs, so a damaged stream can't run for ever.
+const OPERATORS_MAX: usize = 4_000_000;
+/// How many colours a gradient is sampled at.
+const GRADIENT_STEPS: usize = 256;
+
+/// `a`, then `b`.
+pub fn multiply(a: Matrix, b: Matrix) -> Matrix {
+    [
+        a[0] * b[0] + a[1] * b[2],
+        a[0] * b[1] + a[1] * b[3],
+        a[2] * b[0] + a[3] * b[2],
+        a[2] * b[1] + a[3] * b[3],
+        a[4] * b[0] + a[5] * b[2] + b[4],
+        a[4] * b[1] + a[5] * b[3] + b[5],
+    ]
+}
+
+pub fn apply(m: Matrix, (x, y): (f64, f64)) -> (f64, f64) {
+    (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+}
+
+pub fn invert(m: Matrix) -> Option<Matrix> {
+    let determinant = m[0] * m[3] - m[1] * m[2];
+    if determinant.abs() < 1e-12 {
+        return None;
+    }
+    let inverse = [
+        m[3] / determinant,
+        -m[1] / determinant,
+        -m[2] / determinant,
+        m[0] / determinant,
+        0.0,
+        0.0,
+    ];
+    let (e, f) = apply(inverse, (m[4], m[5]));
+    Some([inverse[0], inverse[1], inverse[2], inverse[3], -e, -f])
+}
+
+fn transform(command: Command, m: Matrix) -> Command {
+    match command {
+        Command::Move(x, y) => {
+            let (x, y) = apply(m, (x, y));
+            Command::Move(x, y)
+        }
+        Command::Line(x, y) => {
+            let (x, y) = apply(m, (x, y));
+            Command::Line(x, y)
+        }
+        Command::Quad(a, b, x, y) => {
+            let ((a, b), (x, y)) = (apply(m, (a, b)), apply(m, (x, y)));
+            Command::Quad(a, b, x, y)
+        }
+        Command::Cubic(a, b, c, d, x, y) => {
+            let ((a, b), (c, d), (x, y)) = (apply(m, (a, b)), apply(m, (c, d)), apply(m, (x, y)));
+            Command::Cubic(a, b, c, d, x, y)
+        }
+        Command::Close => Command::Close,
+    }
+}
+
+/// The clip in effect: none, or a coverage mask over the canvas.
+pub type Clip = Option<Rc<Mask>>;
+
+/// A gradient's colour at each point, sampled along its parameter.
+pub struct Gradient {
+    /// From device points to the shading's own space.
+    inverse: Matrix,
+    kind: GradientKind,
+    colours: Vec<Rgba>,
+    extend: [bool; 2],
+}
+
+enum GradientKind {
+    Axial {
+        from: (f64, f64),
+        to: (f64, f64),
+    },
+    Radial {
+        centre: (f64, f64),
+        inner: f64,
+        outer: f64,
+    },
+}
+
+impl Gradient {
+    /// The colour at device point `point`, or `None` outside the gradient.
+    pub fn colour_at(&self, point: (f64, f64)) -> Option<Rgba> {
+        let (x, y) = apply(self.inverse, point);
+        let t = match self.kind {
+            GradientKind::Axial { from, to } => {
+                let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+                let length = dx * dx + dy * dy;
+                if length <= 0.0 {
+                    return None;
+                }
+                ((x - from.0) * dx + (y - from.1) * dy) / length
+            }
+            GradientKind::Radial {
+                centre,
+                inner,
+                outer,
+            } => {
+                let span = outer - inner;
+                if span.abs() < 1e-9 {
+                    return None;
+                }
+                ((x - centre.0).hypot(y - centre.1) - inner) / span
+            }
+        };
+        if (t < 0.0 && !self.extend[0]) || (t > 1.0 && !self.extend[1]) {
+            return None;
+        }
+        let index = (t.clamp(0.0, 1.0) * (self.colours.len() - 1) as f64).round() as usize;
+        self.colours.get(index).copied()
+    }
+}
+
+/// Where a run's marks go.
+pub trait Sink {
+    /// Whether the run should load fonts and decode pictures: a planner needs only to know
+    /// where marks are.
+    fn wants_detail(&self) -> bool;
+    fn fill(&mut self, path: &[Command], colour: Rgba, clip: &Clip);
+    fn stroke(&mut self, path: &[Command], width: f64, colour: Rgba, clip: &Clip);
+    fn gradient(&mut self, gradient: &Gradient, clip: &Clip);
+    fn picture(&mut self, picture: Option<Picture>, matrix: Matrix, alpha: f32, clip: &Clip);
+    /// An encoded picture: a JPEG or JPEG 2000 the system decodes, at `matrix`.
+    fn encoded(&mut self, stream: &Stream, matrix: Matrix);
+    /// The clip `clip` narrowed to `path`.
+    fn clip(&mut self, clip: &Clip, path: &[Command]) -> Clip;
+}
+
+#[derive(Clone)]
+struct TextState {
+    font: Option<Rc<Font>>,
+    size: f64,
+    character_spacing: f64,
+    word_spacing: f64,
+    scale: f64,
+    leading: f64,
+    rise: f64,
+    mode: i64,
+}
+
+#[derive(Clone)]
+struct State {
+    ctm: Matrix,
+    fill_space: Space,
+    fill: Vec<f32>,
+    fill_pattern: Option<String>,
+    stroke_space: Space,
+    stroke: Vec<f32>,
+    line_width: f64,
+    fill_alpha: f32,
+    stroke_alpha: f32,
+    clip: Clip,
+    text: TextState,
+}
+
+impl State {
+    fn new(ctm: Matrix) -> Self {
+        Self {
+            ctm,
+            fill_space: Space::Gray,
+            fill: vec![0.0],
+            fill_pattern: None,
+            stroke_space: Space::Gray,
+            stroke: vec![0.0],
+            line_width: 1.0,
+            fill_alpha: 1.0,
+            stroke_alpha: 1.0,
+            clip: None,
+            text: TextState {
+                font: None,
+                size: 0.0,
+                character_spacing: 0.0,
+                word_spacing: 0.0,
+                scale: 1.0,
+                leading: 0.0,
+                rise: 0.0,
+                mode: 0,
+            },
+        }
+    }
+
+    fn fill_colour(&self) -> Rgba {
+        self.fill_space.rgba(&self.fill, self.fill_alpha)
+    }
+
+    fn stroke_colour(&self) -> Rgba {
+        self.stroke_space.rgba(&self.stroke, self.stroke_alpha)
+    }
+
+    fn device_width(&self) -> f64 {
+        let scale = (self.ctm[0] * self.ctm[3] - self.ctm[1] * self.ctm[2])
+            .abs()
+            .sqrt();
+        self.line_width * scale
+    }
+}
+
+/// Fonts loaded once for a document, by their object.
+#[derive(Default)]
+pub struct Fonts(HashMap<Ref, Rc<Font>>);
+
+/// Runs content on a sink.
+pub struct Interpreter<'a, S: Sink> {
+    document: &'a Document,
+    sink: &'a mut S,
+    fonts: &'a mut Fonts,
+    state: State,
+    saved: Vec<State>,
+    path: Vec<Command>,
+    point: (f64, f64),
+    start: (f64, f64),
+    pending_clip: bool,
+    text_matrix: Matrix,
+    line_matrix: Matrix,
+    operators: usize,
+    /// The page's own matrix, which patterns are placed by.
+    base: Matrix,
+    /// The resources of the content being run.
+    current_resources: Option<Dict>,
+    depth: usize,
+}
+
+fn number(object: &Object) -> f64 {
+    object.as_f64().unwrap_or(0.0)
+}
+
+fn numbers_of(operands: &[Object]) -> Vec<f64> {
+    operands.iter().map(number).collect()
+}
+
+/// The operands of an operator as a matrix, when there are six.
+fn matrix_of(operands: &[Object]) -> Option<Matrix> {
+    numbers_of(operands).try_into().ok()
+}
+
+impl<'a, S: Sink> Interpreter<'a, S> {
+    pub fn new(document: &'a Document, sink: &'a mut S, fonts: &'a mut Fonts, ctm: Matrix) -> Self {
+        Self {
+            document,
+            sink,
+            fonts,
+            state: State::new(ctm),
+            saved: Vec::new(),
+            path: Vec::new(),
+            point: (0.0, 0.0),
+            start: (0.0, 0.0),
+            pending_clip: false,
+            text_matrix: IDENTITY,
+            line_matrix: IDENTITY,
+            operators: 0,
+            base: ctm,
+            current_resources: None,
+            depth: 0,
+        }
+    }
+
+    fn resource(&self, resources: Option<&Dict>, kind: &str, name: &str) -> Object {
+        let Some(resources) = resources else {
+            return Object::Null;
+        };
+        let group = self.document.entry(resources, kind);
+        group
+            .as_dict()
+            .and_then(|group| group.get(name))
+            .map_or(Object::Null, |object| self.document.resolve(object))
+    }
+
+    // --- Paths -----------------------------------------------------------------------------
+
+    fn device(&self, x: f64, y: f64) -> (f64, f64) {
+        apply(self.state.ctm, (x, y))
+    }
+
+    fn move_to(&mut self, x: f64, y: f64) {
+        let point = self.device(x, y);
+        self.path.push(Command::Move(point.0, point.1));
+        self.point = point;
+        self.start = point;
+    }
+
+    fn line_to(&mut self, x: f64, y: f64) {
+        let point = self.device(x, y);
+        self.path.push(Command::Line(point.0, point.1));
+        self.point = point;
+    }
+
+    fn curve_to(&mut self, a: (f64, f64), b: (f64, f64), to: (f64, f64)) {
+        self.path
+            .push(Command::Cubic(a.0, a.1, b.0, b.1, to.0, to.1));
+        self.point = to;
+    }
+
+    fn rectangle(&mut self, values: &[f64]) {
+        let [x, y, width, height] = <[f64; 4]>::try_from(values).unwrap_or([0.0; 4]);
+        self.move_to(x, y);
+        self.line_to(x + width, y);
+        self.line_to(x + width, y + height);
+        self.line_to(x, y + height);
+        self.path.push(Command::Close);
+        self.point = self.start;
+    }
+
+    fn path_operator(&mut self, operator: &[u8], values: &[f64]) {
+        let at = |index: usize| values.get(index).copied().unwrap_or(0.0);
+        match operator {
+            b"m" => self.move_to(at(0), at(1)),
+            b"l" => self.line_to(at(0), at(1)),
+            b"c" => {
+                let (a, b, to) = (
+                    self.device(at(0), at(1)),
+                    self.device(at(2), at(3)),
+                    self.device(at(4), at(5)),
+                );
+                self.curve_to(a, b, to);
+            }
+            b"v" => {
+                let (b, to) = (self.device(at(0), at(1)), self.device(at(2), at(3)));
+                self.curve_to(self.point, b, to);
+            }
+            b"y" => {
+                let (a, to) = (self.device(at(0), at(1)), self.device(at(2), at(3)));
+                self.curve_to(a, to, to);
+            }
+            b"h" => {
+                self.path.push(Command::Close);
+                self.point = self.start;
+            }
+            b"re" => self.rectangle(values),
+            _ => {}
+        }
+    }
+
+    /// Paints the current path as `fill` and `stroke` say, then sets a pending clip.
+    fn paint(&mut self, fill: bool, stroke: bool, close: bool) {
+        if close {
+            self.path.push(Command::Close);
+        }
+        let path = std::mem::take(&mut self.path);
+        if fill {
+            self.fill_path(&path);
+        }
+        if stroke {
+            let width = self.state.device_width();
+            self.sink
+                .stroke(&path, width, self.state.stroke_colour(), &self.state.clip);
+        }
+        if self.pending_clip {
+            self.pending_clip = false;
+            self.state.clip = self.sink.clip(&self.state.clip, &path);
+        }
+    }
+
+    fn fill_path(&mut self, path: &[Command]) {
+        match self.state.fill_pattern.clone() {
+            Some(name) => self.fill_with_pattern(path, &name),
+            None => self
+                .sink
+                .fill(path, self.state.fill_colour(), &self.state.clip),
+        }
+    }
+
+    // --- Colour ----------------------------------------------------------------------------
+
+    fn set_space(&mut self, operand: Option<&Object>, resources: Option<&Dict>, stroke: bool) {
+        let space = operand
+            .and_then(|object| image::named_space(self.document, object, resources))
+            .unwrap_or(Space::Gray);
+        let initial = space.initial();
+        if stroke {
+            self.state.stroke_space = space;
+            self.state.stroke = initial;
+        } else {
+            self.state.fill_space = space;
+            self.state.fill = initial;
+            self.state.fill_pattern = None;
+        }
+    }
+
+    fn set_colour(&mut self, operands: &[Object], stroke: bool) {
+        let values: Vec<f32> = operands
+            .iter()
+            .filter_map(Object::as_f64)
+            .map(|value| value as f32)
+            .collect();
+        let pattern = operands.last().and_then(Object::as_name).map(str::to_owned);
+        if stroke {
+            self.state.stroke = values;
+        } else {
+            self.state.fill = values;
+            self.state.fill_pattern = pattern;
+        }
+    }
+
+    fn set_device(&mut self, space: Space, operands: &[Object], stroke: bool) {
+        let values: Vec<f32> = operands
+            .iter()
+            .filter_map(Object::as_f64)
+            .map(|value| value as f32)
+            .collect();
+        if stroke {
+            self.state.stroke_space = space;
+            self.state.stroke = values;
+        } else {
+            self.state.fill_space = space;
+            self.state.fill = values;
+            self.state.fill_pattern = None;
+        }
+    }
+
+    fn colour_operator(&mut self, operator: &[u8], operands: &[Object], resources: Option<&Dict>) {
+        match operator {
+            b"g" => self.set_device(Space::Gray, operands, false),
+            b"G" => self.set_device(Space::Gray, operands, true),
+            b"rg" => self.set_device(Space::Rgb, operands, false),
+            b"RG" => self.set_device(Space::Rgb, operands, true),
+            b"k" => self.set_device(Space::Cmyk, operands, false),
+            b"K" => self.set_device(Space::Cmyk, operands, true),
+            b"cs" => self.set_space(operands.first(), resources, false),
+            b"CS" => self.set_space(operands.first(), resources, true),
+            b"sc" | b"scn" => self.set_colour(operands, false),
+            b"SC" | b"SCN" => self.set_colour(operands, true),
+            _ => {}
+        }
+    }
+
+    // --- Gradients -------------------------------------------------------------------------
+
+    fn read_gradient(&self, shading: &Object, matrix: Matrix) -> Option<Gradient> {
+        let dict = shading.as_dict()?;
+        let kind = self.document.entry(dict, "ShadingType").as_i64()?;
+        let coords: Vec<f64> = self
+            .document
+            .entry(dict, "Coords")
+            .as_array()
+            .map(numbers_of)?;
+        let space = Space::read(self.document, dict.get("ColorSpace")?, 0)?;
+        let function = Function::read(self.document, dict.get("Function")?, 0)?;
+        let domain: Vec<f64> = self
+            .document
+            .entry(dict, "Domain")
+            .as_array()
+            .map(numbers_of)
+            .unwrap_or_else(|| vec![0.0, 1.0]);
+        let (t0, t1) = (
+            domain.first().copied().unwrap_or(0.0),
+            domain.get(1).copied().unwrap_or(1.0),
+        );
+        let extend: Vec<bool> = self
+            .document
+            .entry(dict, "Extend")
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| matches!(item, Object::Bool(true)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let colours = (0..GRADIENT_STEPS)
+            .map(|step| {
+                let t = t0 + (t1 - t0) * step as f64 / (GRADIENT_STEPS - 1) as f64;
+                space.rgba(&function.evaluate(&[t as f32]), self.state.fill_alpha)
+            })
+            .collect();
+        let kind = match (kind, coords.as_slice()) {
+            (2, [x0, y0, x1, y1, ..]) => GradientKind::Axial {
+                from: (*x0, *y0),
+                to: (*x1, *y1),
+            },
+            (3, [x0, y0, r0, x1, y1, r1, ..]) => {
+                let _ = (x0, y0);
+                GradientKind::Radial {
+                    centre: (*x1, *y1),
+                    inner: *r0,
+                    outer: *r1,
+                }
+            }
+            _ => return None,
+        };
+        Some(Gradient {
+            inverse: invert(matrix)?,
+            kind,
+            colours,
+            extend: [
+                extend.first().copied().unwrap_or(false),
+                extend.get(1).copied().unwrap_or(false),
+            ],
+        })
+    }
+
+    /// `sh`: paints a shading over the clip.
+    fn shade(&mut self, name: &str, resources: Option<&Dict>) {
+        let shading = self.resource(resources, "Shading", name);
+        if let Some(gradient) = self.read_gradient(&shading, self.state.ctm) {
+            self.sink.gradient(&gradient, &self.state.clip);
+        }
+    }
+
+    fn fill_with_pattern(&mut self, path: &[Command], name: &str) {
+        let pattern = self.resource(self.current_resources.as_ref(), "Pattern", name);
+        let Some(dict) = pattern.as_dict() else {
+            return;
+        };
+        if self.document.entry(dict, "PatternType").as_i64() != Some(2) {
+            return;
+        }
+        let matrix: Matrix = self
+            .document
+            .entry(dict, "Matrix")
+            .as_array()
+            .and_then(|items| numbers_of(items).try_into().ok())
+            .unwrap_or(IDENTITY);
+        let shading = self.document.entry(dict, "Shading");
+        let Some(gradient) = self.read_gradient(&shading, multiply(matrix, self.base)) else {
+            return;
+        };
+        let clip = self.sink.clip(&self.state.clip, path);
+        self.sink.gradient(&gradient, &clip);
+    }
+}
+
+// --- Text, pictures, forms and the run ----------------------------------------------------
+
+impl<'a, S: Sink> Interpreter<'a, S> {
+    fn load_font(&mut self, object: &Object) -> Option<Rc<Font>> {
+        let reference = match object {
+            Object::Ref(reference) => Some(*reference),
+            _ => None,
+        };
+        if let Some(known) = reference.and_then(|reference| self.fonts.0.get(&reference)) {
+            return Some(known.clone());
+        }
+        let dict = self.document.resolve(object);
+        let font = Rc::new(Font::load(self.document, dict.as_dict()?));
+        if let Some(reference) = reference {
+            self.fonts.0.insert(reference, font.clone());
+        }
+        Some(font)
+    }
+
+    fn set_font(&mut self, operands: &[Object], resources: Option<&Dict>) {
+        let (Some(name), Some(size)) = (
+            operands.first().and_then(Object::as_name),
+            operands.get(1).and_then(Object::as_f64),
+        ) else {
+            return;
+        };
+        self.state.text.size = size;
+        if !self.sink.wants_detail() {
+            return;
+        }
+        let object = resources
+            .map(|resources| self.document.entry(resources, "Font"))
+            .and_then(|fonts| fonts.as_dict().and_then(|fonts| fonts.get(name)).cloned())
+            .unwrap_or(Object::Null);
+        self.state.text.font = self.load_font(&object);
+    }
+
+    fn move_line(&mut self, x: f64, y: f64) {
+        self.line_matrix = multiply([1.0, 0.0, 0.0, 1.0, x, y], self.line_matrix);
+        self.text_matrix = self.line_matrix;
+    }
+
+    fn next_line(&mut self) {
+        let leading = self.state.text.leading;
+        self.move_line(0.0, -leading);
+    }
+
+    /// Draws one glyph at the text matrix: its outline, or its Type 3 procedure.
+    fn draw_glyph(&mut self, font: &Rc<Font>, code: u32, glyph_matrix: Matrix) {
+        let mode = self.state.text.mode;
+        if mode == 3 || mode == 7 {
+            return;
+        }
+        let device = multiply(glyph_matrix, self.state.ctm);
+        if font.is_type3() {
+            self.draw_type3(font, code, glyph_matrix);
+            return;
+        }
+        let Some(outline) = font.outline(code) else {
+            return;
+        };
+        let path: Vec<Command> = outline
+            .iter()
+            .map(|command| transform(*command, device))
+            .collect();
+        let stroke = matches!(mode, 1 | 2 | 5 | 6);
+        if matches!(mode, 0 | 2 | 4 | 6) {
+            self.sink
+                .fill(&path, self.state.fill_colour(), &self.state.clip);
+        }
+        if stroke {
+            let width = self.state.device_width();
+            self.sink
+                .stroke(&path, width, self.state.stroke_colour(), &self.state.clip);
+        }
+    }
+
+    fn draw_type3(&mut self, font: &Rc<Font>, code: u32, glyph_matrix: Matrix) {
+        let Some(procedure) = font.procedure(self.document, code) else {
+            return;
+        };
+        let Ok(content) = self.document.stream_data(&procedure.stream) else {
+            return;
+        };
+        let resources = procedure
+            .resources
+            .cloned()
+            .or_else(|| self.current_resources.clone());
+        let ctm = multiply(procedure.matrix, multiply(glyph_matrix, self.state.ctm));
+        self.run_nested(&content, resources, ctm);
+    }
+
+    /// Shows a string: each code's glyph, then the pen moved by its width and spacing.
+    fn show(&mut self, bytes: &[u8]) {
+        let text = self.state.text.clone();
+        let Some(font) = text.font.clone() else {
+            // Without its font, the text still counts as drawn for planning.
+            if !self.sink.wants_detail() && !bytes.is_empty() && !matches!(text.mode, 3 | 7) {
+                let point = self.device(0.0, 0.0);
+                self.sink.fill(
+                    &[Command::Move(point.0, point.1)],
+                    [0.0; 4],
+                    &self.state.clip,
+                );
+            }
+            return;
+        };
+        for code in font.codes(bytes) {
+            let glyph_matrix = multiply(
+                [text.size * text.scale, 0.0, 0.0, text.size, 0.0, text.rise],
+                self.text_matrix,
+            );
+            self.draw_glyph(&font, code, glyph_matrix);
+            let spacing = if !font.two_byte && code == 32 {
+                text.word_spacing
+            } else {
+                0.0
+            };
+            let advance =
+                (font.width(code) * text.size + text.character_spacing + spacing) * text.scale;
+            self.text_matrix = multiply([1.0, 0.0, 0.0, 1.0, advance, 0.0], self.text_matrix);
+        }
+    }
+
+    fn show_adjusted(&mut self, items: &[Object]) {
+        for item in items {
+            match item {
+                Object::String(bytes) => self.show(bytes),
+                other => {
+                    let shift =
+                        -number(other) / 1000.0 * self.state.text.size * self.state.text.scale;
+                    self.text_matrix = multiply([1.0, 0.0, 0.0, 1.0, shift, 0.0], self.text_matrix);
+                }
+            }
+        }
+    }
+
+    fn text_operator(&mut self, operator: &[u8], operands: &[Object], resources: Option<&Dict>) {
+        let values = numbers_of(operands);
+        let at = |index: usize| values.get(index).copied().unwrap_or(0.0);
+        let text = &mut self.state.text;
+        match operator {
+            b"BT" => {
+                self.text_matrix = IDENTITY;
+                self.line_matrix = IDENTITY;
+            }
+            b"Tc" => text.character_spacing = at(0),
+            b"Tw" => text.word_spacing = at(0),
+            b"Tz" => text.scale = at(0) / 100.0,
+            b"TL" => text.leading = at(0),
+            b"Ts" => text.rise = at(0),
+            b"Tr" => text.mode = at(0) as i64,
+            b"Tf" => self.set_font(operands, resources),
+            b"Td" => self.move_line(at(0), at(1)),
+            b"TD" => {
+                text.leading = -at(1);
+                self.move_line(at(0), at(1));
+            }
+            b"Tm" => {
+                self.line_matrix = matrix_of(operands).unwrap_or(IDENTITY);
+                self.text_matrix = self.line_matrix;
+            }
+            b"T*" => self.next_line(),
+            _ => self.show_operator(operator, operands),
+        }
+    }
+
+    fn show_operator(&mut self, operator: &[u8], operands: &[Object]) {
+        let last_bytes = operands
+            .last()
+            .and_then(Object::as_bytes)
+            .map(<[u8]>::to_vec)
+            .unwrap_or_default();
+        match operator {
+            b"Tj" => self.show(&last_bytes),
+            b"'" => {
+                self.next_line();
+                self.show(&last_bytes);
+            }
+            b"\"" => {
+                self.state.text.word_spacing = operands.first().map_or(0.0, number);
+                self.state.text.character_spacing = operands.get(1).map_or(0.0, number);
+                self.next_line();
+                self.show(&last_bytes);
+            }
+            b"TJ" => {
+                let items = operands
+                    .first()
+                    .and_then(Object::as_array)
+                    .map(<[Object]>::to_vec)
+                    .unwrap_or_default();
+                self.show_adjusted(&items);
+            }
+            _ => {}
+        }
+    }
+
+    // --- Pictures and forms ----------------------------------------------------------------
+
+    fn draw_picture(&mut self, stream: &Stream) {
+        let matrix = self.state.ctm;
+        if super::filter::codec(stream, Some(self.document)).is_some() {
+            self.sink.encoded(stream, matrix);
+            return;
+        }
+        let picture = if self.sink.wants_detail() {
+            image::read(
+                self.document,
+                stream,
+                self.state.fill_colour(),
+                self.current_resources.as_ref(),
+            )
+        } else {
+            None
+        };
+        self.sink
+            .picture(picture, matrix, self.state.fill_alpha, &self.state.clip);
+    }
+
+    fn draw_form(&mut self, stream: &Stream) {
+        let matrix = self
+            .document
+            .entry(&stream.dict, "Matrix")
+            .as_array()
+            .and_then(|items| numbers_of(items).try_into().ok())
+            .unwrap_or(IDENTITY);
+        let Ok(content) = self.document.stream_data(stream) else {
+            return;
+        };
+        let resources = self
+            .document
+            .entry(&stream.dict, "Resources")
+            .as_dict()
+            .cloned()
+            .or_else(|| self.current_resources.clone());
+        self.run_nested(&content, resources, multiply(matrix, self.state.ctm));
+    }
+
+    fn draw_object(&mut self, name: &str, resources: Option<&Dict>) {
+        let Object::Stream(stream) = self.resource(resources, "XObject", name) else {
+            return;
+        };
+        match self.document.entry(&stream.dict, "Subtype").as_name() {
+            Some("Image") => self.draw_picture(&stream),
+            Some("Form") => self.draw_form(&stream),
+            _ => {}
+        }
+    }
+
+    /// Runs content in its own graphics state with `ctm`, as a form or glyph is.
+    fn run_nested(&mut self, content: &[u8], resources: Option<Dict>, ctm: Matrix) {
+        if self.depth >= DEPTH_MAX {
+            return;
+        }
+        let saved = (
+            self.state.clone(),
+            self.saved.len(),
+            std::mem::take(&mut self.path),
+            self.text_matrix,
+            self.line_matrix,
+        );
+        let outer = std::mem::replace(&mut self.current_resources, resources);
+        self.state.ctm = ctm;
+        self.depth += 1;
+        self.run(content);
+        self.depth -= 1;
+        self.current_resources = outer;
+        self.saved.truncate(saved.1);
+        self.state = saved.0;
+        self.path = saved.2;
+        self.text_matrix = saved.3;
+        self.line_matrix = saved.4;
+    }
+
+    fn graphics_state(&mut self, name: &str, resources: Option<&Dict>) {
+        let state = self.resource(resources, "ExtGState", name);
+        let Some(dict) = state.as_dict() else {
+            return;
+        };
+        let entry = |key: &str| self.document.entry(dict, key);
+        if let Some(width) = entry("LW").as_f64() {
+            self.state.line_width = width;
+        }
+        if let Some(alpha) = entry("ca").as_f64() {
+            self.state.fill_alpha = alpha.clamp(0.0, 1.0) as f32;
+        }
+        if let Some(alpha) = entry("CA").as_f64() {
+            self.state.stroke_alpha = alpha.clamp(0.0, 1.0) as f32;
+        }
+        if let Some(items) = entry("Font").as_array().map(<[Object]>::to_vec) {
+            if let (Some(font), Some(size)) = (items.first(), items.get(1).and_then(Object::as_f64))
+            {
+                self.state.text.size = size;
+                if self.sink.wants_detail() {
+                    self.state.text.font = self.load_font(font);
+                }
+            }
+        }
+    }
+
+    // --- The run ---------------------------------------------------------------------------
+
+    fn state_operator(&mut self, operator: &[u8], operands: &[Object], resources: Option<&Dict>) {
+        match operator {
+            b"q" => {
+                if self.saved.len() < 256 {
+                    self.saved.push(self.state.clone());
+                }
+            }
+            b"Q" => {
+                if let Some(state) = self.saved.pop() {
+                    self.state = state;
+                }
+            }
+            b"cm" => {
+                if let Some(matrix) = matrix_of(operands) {
+                    self.state.ctm = multiply(matrix, self.state.ctm);
+                }
+            }
+            b"w" => self.state.line_width = operands.first().map_or(1.0, number),
+            b"gs" => {
+                if let Some(name) = operands.first().and_then(Object::as_name) {
+                    self.graphics_state(name, resources);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn paint_operator(&mut self, operator: &[u8]) {
+        match operator {
+            b"f" | b"F" | b"f*" => self.paint(true, false, false),
+            b"S" => self.paint(false, true, false),
+            b"s" => self.paint(false, true, true),
+            b"B" | b"B*" => self.paint(true, true, false),
+            b"b" | b"b*" => self.paint(true, true, true),
+            b"n" => self.paint(false, false, false),
+            b"W" | b"W*" => self.pending_clip = true,
+            _ => {}
+        }
+    }
+
+    fn operate(&mut self, operator: &[u8], operands: &[Object]) {
+        let resources = self.current_resources.clone();
+        let resources = resources.as_ref();
+        let name = operands
+            .first()
+            .and_then(Object::as_name)
+            .map(str::to_owned);
+        match operator {
+            b"m" | b"l" | b"c" | b"v" | b"y" | b"h" | b"re" => {
+                self.path_operator(operator, &numbers_of(operands))
+            }
+            b"f" | b"F" | b"f*" | b"S" | b"s" | b"B" | b"B*" | b"b" | b"b*" | b"n" | b"W"
+            | b"W*" => self.paint_operator(operator),
+            b"q" | b"Q" | b"cm" | b"w" | b"gs" => {
+                self.state_operator(operator, operands, resources)
+            }
+            b"g" | b"G" | b"rg" | b"RG" | b"k" | b"K" | b"cs" | b"CS" | b"sc" | b"scn" | b"SC"
+            | b"SCN" => {
+                self.colour_operator(operator, operands, resources);
+            }
+            b"Do" => {
+                if let Some(name) = name {
+                    self.draw_object(&name, resources);
+                }
+            }
+            b"sh" => {
+                if let Some(name) = name {
+                    self.shade(&name, resources);
+                }
+            }
+            b"BT" | b"Tc" | b"Tw" | b"Tz" | b"TL" | b"Ts" | b"Tr" | b"Tf" | b"Td" | b"TD"
+            | b"Tm" | b"T*" | b"Tj" | b"'" | b"\"" | b"TJ" => {
+                self.text_operator(operator, operands, resources);
+            }
+            _ => {}
+        }
+    }
+
+    /// An inline image after `BI`: its entries up to `ID`, then its data up to `EI`.
+    fn inline_image(&mut self, parser: &mut Parser) {
+        let mut dict = Dict::new();
+        loop {
+            match parser.next_token() {
+                Some(Token::Name(key)) => {
+                    if let Some(value) = parser.object(0) {
+                        dict.insert(key, value);
+                    }
+                }
+                Some(Token::Word(word)) if word == b"ID" => break,
+                Some(_) => {}
+                None => return,
+            }
+        }
+        let bytes = parser.lexer.bytes;
+        let start = parser.lexer.at + 1;
+        let end = (start..bytes.len().saturating_sub(2))
+            .find(|&at| {
+                bytes[at] == b'E'
+                    && bytes[at + 1] == b'I'
+                    && super::object::is_white(bytes[at - 1])
+                    && bytes
+                        .get(at + 2)
+                        .is_none_or(|after| super::object::is_white(*after))
+            })
+            .unwrap_or(bytes.len());
+        parser.lexer.at = (end + 2).min(bytes.len());
+        let raw = Rc::new(
+            bytes
+                .get(start..end.saturating_sub(1).max(start))
+                .unwrap_or(&[])
+                .to_vec(),
+        );
+        self.draw_picture(&Stream { dict, raw });
+    }
+
+    /// Runs a content stream.
+    pub fn run(&mut self, content: &[u8]) {
+        let mut parser = Parser::new(content, 0);
+        let mut operands: Vec<Object> = Vec::new();
+        while let Some(token) = parser.next_token() {
+            self.operators += 1;
+            if self.operators > OPERATORS_MAX {
+                return;
+            }
+            let Token::Word(word) = token else {
+                parser.put_back(token);
+                if let Some(operand) = parser.object(0) {
+                    operands.push(operand);
+                }
+                continue;
+            };
+            match word.as_slice() {
+                b"true" => operands.push(Object::Bool(true)),
+                b"false" => operands.push(Object::Bool(false)),
+                b"null" => operands.push(Object::Null),
+                b"BI" => {
+                    self.inline_image(&mut parser);
+                    operands.clear();
+                }
+                operator => {
+                    self.operate(operator, &operands);
+                    operands.clear();
+                }
+            }
+        }
+    }
+
+    /// Runs a page's content with its resources.
+    pub fn run_page(&mut self, content: &[u8], resources: Option<Dict>) {
+        self.current_resources = resources;
+        self.run(content);
+    }
+
+    /// Draws an annotation's normal appearance in its rectangle.
+    pub fn run_appearance(&mut self, stream: &Stream, rectangle: [f64; 4]) {
+        let matrix: Matrix = self
+            .document
+            .entry(&stream.dict, "Matrix")
+            .as_array()
+            .and_then(|items| numbers_of(items).try_into().ok())
+            .unwrap_or(IDENTITY);
+        let bbox: Vec<f64> = self
+            .document
+            .entry(&stream.dict, "BBox")
+            .as_array()
+            .map(numbers_of)
+            .unwrap_or_default();
+        let [x0, y0, x1, y1] =
+            <[f64; 4]>::try_from(bbox.as_slice()).unwrap_or([0.0, 0.0, 1.0, 1.0]);
+        let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|point| apply(matrix, point));
+        let (left, bottom) = corners.iter().fold((f64::MAX, f64::MAX), |(x, y), point| {
+            (x.min(point.0), y.min(point.1))
+        });
+        let (right, top) = corners.iter().fold((f64::MIN, f64::MIN), |(x, y), point| {
+            (x.max(point.0), y.max(point.1))
+        });
+        let (width, height) = ((right - left).max(1e-9), (top - bottom).max(1e-9));
+        let [rx0, ry0, rx1, ry1] = rectangle;
+        let fit = [
+            (rx1 - rx0) / width,
+            0.0,
+            0.0,
+            (ry1 - ry0) / height,
+            rx0 - left * (rx1 - rx0) / width,
+            ry0 - bottom * (ry1 - ry0) / height,
+        ];
+        let Ok(content) = self.document.stream_data(stream) else {
+            return;
+        };
+        let resources = self
+            .document
+            .entry(&stream.dict, "Resources")
+            .as_dict()
+            .cloned();
+        self.run_nested(
+            &content,
+            resources,
+            multiply(multiply(matrix, fit), self.base),
+        );
+    }
+}
+
+// --- Planning and rendering ----------------------------------------------------------------
+
+/// A part of a page: a layer of drawn marks, or an encoded picture with its frame in page
+/// points (left, top, width, height).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Part {
+    Layer,
+    Encoded {
+        extension: &'static str,
+        frame: [f64; 4],
+    },
+}
+
+/// The frame a unit square covers under `matrix`, as left, top, width, height.
+pub fn frame_of(matrix: Matrix) -> [f64; 4] {
+    let corners =
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)].map(|point| apply(matrix, point));
+    let left = corners.iter().map(|point| point.0).fold(f64::MAX, f64::min);
+    let top = corners.iter().map(|point| point.1).fold(f64::MAX, f64::min);
+    let right = corners.iter().map(|point| point.0).fold(f64::MIN, f64::max);
+    let bottom = corners.iter().map(|point| point.1).fold(f64::MIN, f64::max);
+    [left, top, right - left, bottom - top]
+}
+
+/// Finds a page's parts without drawing: marks only say which layer they fall in.
+#[derive(Default)]
+pub struct Planner {
+    pub parts: Vec<Part>,
+    marked: bool,
+}
+
+impl Planner {
+    pub fn finish(mut self) -> Vec<Part> {
+        if self.marked {
+            self.parts.push(Part::Layer);
+        }
+        self.parts
+    }
+}
+
+impl Sink for Planner {
+    fn wants_detail(&self) -> bool {
+        false
+    }
+    fn fill(&mut self, _: &[Command], _: Rgba, _: &Clip) {
+        self.marked = true;
+    }
+    fn stroke(&mut self, _: &[Command], _: f64, _: Rgba, _: &Clip) {
+        self.marked = true;
+    }
+    fn gradient(&mut self, _: &Gradient, _: &Clip) {
+        self.marked = true;
+    }
+    fn picture(&mut self, _: Option<Picture>, _: Matrix, _: f32, _: &Clip) {
+        self.marked = true;
+    }
+    fn encoded(&mut self, stream: &Stream, matrix: Matrix) {
+        if std::mem::take(&mut self.marked) {
+            self.parts.push(Part::Layer);
+        }
+        let extension = super::filter::codec(stream, None).unwrap_or("jpeg");
+        self.parts.push(Part::Encoded {
+            extension,
+            frame: frame_of(matrix),
+        });
+    }
+    fn clip(&mut self, _: &Clip, _: &[Command]) -> Clip {
+        None
+    }
+}
+
+/// Draws one layer of a page into a canvas, counting layers as the planner does.
+pub struct Renderer {
+    pub canvas: Canvas,
+    target: usize,
+    layer: usize,
+    marked: bool,
+}
+
+impl Renderer {
+    pub fn new(width: usize, height: usize, target: usize) -> Self {
+        Self {
+            canvas: Canvas::new(width, height),
+            target,
+            layer: 0,
+            marked: false,
+        }
+    }
+
+    fn mark(&mut self) -> bool {
+        self.marked = true;
+        self.layer == self.target
+    }
+}
+
+impl Sink for Renderer {
+    fn wants_detail(&self) -> bool {
+        self.layer <= self.target
+    }
+    fn fill(&mut self, path: &[Command], colour: Rgba, clip: &Clip) {
+        if self.mark() {
+            self.canvas.fill(path, colour, clip.as_deref());
+        }
+    }
+    fn stroke(&mut self, path: &[Command], width: f64, colour: Rgba, clip: &Clip) {
+        if self.mark() {
+            self.canvas.stroke(path, width, colour, clip.as_deref());
+        }
+    }
+    fn gradient(&mut self, gradient: &Gradient, clip: &Clip) {
+        if self.mark() {
+            self.canvas
+                .shade(|point| gradient.colour_at(point), clip.as_deref());
+        }
+    }
+    fn picture(&mut self, picture: Option<Picture>, matrix: Matrix, alpha: f32, clip: &Clip) {
+        if !self.mark() {
+            return;
+        }
+        if let Some(Picture::Pixels {
+            rgba,
+            width,
+            height,
+        }) = picture
+        {
+            self.canvas
+                .image(&rgba, (width, height), matrix, alpha, clip.as_deref());
+        }
+    }
+    fn encoded(&mut self, _: &Stream, _: Matrix) {
+        if std::mem::take(&mut self.marked) {
+            self.layer += 1;
+        }
+    }
+    fn clip(&mut self, clip: &Clip, path: &[Command]) -> Clip {
+        if self.layer > self.target {
+            return clip.clone();
+        }
+        Some(Rc::new(self.canvas.clip_mask(path, clip.as_deref())))
+    }
+}
+
+/// Finds a page's encoded pictures in order, keeping the bytes of picture `wanted`.
+pub struct Extractor {
+    wanted: usize,
+    seen: usize,
+    pub found: Option<Vec<u8>>,
+}
+
+impl Extractor {
+    pub fn new(wanted: usize) -> Self {
+        Self {
+            wanted,
+            seen: 0,
+            found: None,
+        }
+    }
+}
+
+impl Sink for Extractor {
+    fn wants_detail(&self) -> bool {
+        false
+    }
+    fn fill(&mut self, _: &[Command], _: Rgba, _: &Clip) {}
+    fn stroke(&mut self, _: &[Command], _: f64, _: Rgba, _: &Clip) {}
+    fn gradient(&mut self, _: &Gradient, _: &Clip) {}
+    fn picture(&mut self, _: Option<Picture>, _: Matrix, _: f32, _: &Clip) {}
+    fn encoded(&mut self, stream: &Stream, _: Matrix) {
+        if self.seen == self.wanted {
+            self.found = super::filter::decode(stream, None).ok();
+        }
+        self.seen += 1;
+    }
+    fn clip(&mut self, _: &Clip, _: &[Command]) -> Clip {
+        None
+    }
+}
