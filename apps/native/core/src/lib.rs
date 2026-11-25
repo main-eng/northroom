@@ -33,6 +33,7 @@ pub mod page;
 pub mod paths;
 pub mod pdf;
 pub mod preview;
+pub mod remote;
 pub mod script;
 pub mod scroll;
 pub mod sessions;

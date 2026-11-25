@@ -140,6 +140,7 @@ jobs:
             apps/native/gpui -> target
             apps/native/core -> target
             apps/native/crates/northroom-media -> target
+            apps/native/crates/northroom-link -> target
 
       - name: Test kit and the shell
         working-directory: apps/native/gpui
@@ -171,3 +172,4 @@ jobs:
             cargo test --release --locked -j 4 --lib media:: -- --include-ignored
           fi
           cargo test --release --locked -j 4 --manifest-path ../crates/northroom-media/Cargo.toml --lib
+          cargo test --release --locked -j 4 --manifest-path ../crates/northroom-link/Cargo.toml --lib

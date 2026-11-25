@@ -1,0 +1,28 @@
+[package]
+name = "northroom-link"
+version = "0.1.0"
+edition = "2021"
+description = "Northroom's link to a paired phone: encrypted messages between two devices that know each other by key, wherever they are"
+
+[dependencies]
+# Connections dialled by public key: direct where the two networks allow it and through a relay
+# where they don't, encrypted end to end either way (MIT or Apache-2.0). Getting through home
+# routers and carrier networks, and the encryption, are years of work to get right and a
+# security hole when wrong. Without `metrics` and `portmapper`: nothing is counted, and no
+# router is asked to open a port. Only this crate names it, so the core never sees its types.
+iroh = { version = "1.5", default-features = false, features = ["tls-ring", "fast-apple-datapath"] }
+# iroh's runtime (already in the GPUI shell's tree). One thread of it runs a link; the rest of
+# the app stays on ordinary threads and channels.
+tokio = { version = "1.44", features = ["rt", "sync", "time", "macros"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = 1
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"

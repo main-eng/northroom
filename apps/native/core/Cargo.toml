@@ -10,6 +10,9 @@ description = "Northroom's native core as one library a platform shell links (AD
 # What a stream's colour tags mean, pixel buffers, and frames shared with the GPU. Media files
 # are read through the platform (`src/media`).
 northroom-media = { path = "../crates/northroom-media" }
+# The link to a paired phone (`remote`): the networking library stays behind this crate, as the
+# emulator stays behind `terminal::engine`.
+northroom-link = { path = "../crates/northroom-link" }
 wgpu = { version = "30.0.1", default-features = false, features = ["wgsl"] }
 libc = "0.2"
 alacritty_terminal = "0.26"

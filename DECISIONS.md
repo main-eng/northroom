@@ -174,6 +174,23 @@ reason it was rejected.
   - A bundled PDF library (PDFium, MuPDF): a C dependency to build on three systems, and MuPDF's AGPL licence.
   - A bundled office suite: its size, its licence and its release cycle.
 
+## ADR-0016: A paired phone reaches the sessions over a link that needs no server of ours
+
+- A phone, or any device, pairs with this computer by reading a QR code off its screen, then lists the running sessions, watches one terminal and types into it. The terminals, the files and the agents stay on this computer; the phone is a second screen and keyboard. The person still brings their own agent (ADR-0005), and nothing is stored anywhere else (ADR-0007).
+- No account (ADR-0008): each side is known by a key it made itself. The pairing code works once, for five minutes. The computer's key and its paired devices are one file in the app's folder that only the person can read.
+- The connection is the `northroom-link` crate, the one place that names the networking library (iroh), as `terminal::engine` is for the emulator. The messages are JSON and written down for other people's devices and hosts (`docs/phone-link.md`); the rules are the core's (`remote`), checked without a network.
+- A watched terminal is fitted to the phone's grid, so its program lays its screen out for the phone, and takes its own size back when the phone leaves.
+- The phone app is its own shell in Swift, in this repository. It is a device speaking the messages, not a second home for the core's rules, so ADR-0001's one shell for the three desktop systems stands.
+- **Why:** sessions wait for the person while they are away from the computer. A link by key needs no sign-in and no database, and an open message set lets others build devices and hosts that work with Northroom.
+- **Measured (2026-11-25, iroh 1.5):** two devices that knew only each other's key connected in 0.7 s through a public relay. The link adds 153 crates to the app's tree and changes no existing version; built alone it took 31 s and 15 MB.
+- **Rejected:**
+  - Our own relay protocol with everything passing through our server: every byte paid for, slower, and encryption of our own to get right.
+  - Writing the direct connection (hole punching) ourselves: years of router and carrier cases.
+  - Tailscale or a VPN the person installs: a second product to set up before the first use.
+  - Syncing files to the phone: the sessions need this computer's terminals, not copies of its files.
+  - A chat view built on one vendor's SDK: only that vendor's agent would work (ADR-0005).
+  - Addresses published to a lookup service: a third party would learn which keys are online. The pairing link carries the address.
+
 ## Design rules
 
 - Monochrome chrome: accents use the text colour. Hue only comes from the person's choice. Red means loss.
@@ -186,5 +203,6 @@ reason it was rejected.
 
 ## Open
 
+- **Phone link (ADR-0016), not yet in the app.** Built and checked: the connection, pairing, the messages and the rules, with a test phone over a real connection. Still to build: starting the link from the app and showing the pairing QR code, the list of paired devices with Forget, the relay setting, and the phone app. To decide: which relays ship as the default. iroh's public relays are not meant for production, and a relay of our own is a server (ADR-0006).
 - **Cloud cleanup.** Done on 2026-11-21 except the download Worker (`northroom-server`), its container and its one secret, which go once GitHub releases serve downloads. Then apply `northroom-infra`; its first apply turns on the www redirect, firewall and rate limit.
 - **Decide what makes Northroom 10x better** before the next release.

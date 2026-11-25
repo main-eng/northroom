@@ -6,7 +6,8 @@ The Rust core and the GPUI shell for Mac, Windows and Linux (ADR-0001).
 core/      every rule, state, layout and word, behind a typed boundary
 gpui/      shell/ (the app, its icon and entitlements), kit/ (components),
            webhost/ (live HTML pages and 3D stills), mac-tools/ (helpers for the checks)
-crates/    libraries only the core uses
+crates/    libraries only the core uses: northroom-media, and northroom-link (a paired phone's
+           connection, ADR-0016)
 scripts/   build, package, release and checks
 ```
 

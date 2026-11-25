@@ -99,6 +99,10 @@ struct State {
     /// program.
     cell: CellMetrics,
     grid: GridSize,
+    /// The grid that fills the view here, kept while a phone holds the grid at its own size.
+    own_grid: GridSize,
+    /// The grid a watching phone fits (`hold_grid`); the view's own when no phone watches.
+    held_grid: Option<GridSize>,
     /// Where the cursor was last drawn, in the view's pixels from its top left.
     cursor_rect: [f32; 4],
     /// The theme's colours, which change while the session runs.
@@ -164,6 +168,8 @@ impl Shared {
                 composing: String::new(),
                 cell: view.cell,
                 grid: grid_size(view),
+                own_grid: grid_size(view),
+                held_grid: None,
                 cursor_rect: [0.0; 4],
                 palette,
                 told: false,
@@ -405,9 +411,11 @@ impl Terminal {
     /// Fits the grid to `view`. The emulator and the process hear of it only when the grid or
     /// its cell changed, so a drag that keeps the grid sends nothing.
     pub fn resize(&self, view: ViewSize) {
-        let grid = grid_size(view);
+        let own = grid_size(view);
         let area = {
             let mut state = self.shared.state.relock();
+            state.own_grid = own;
+            let grid = state.held_grid.unwrap_or(own);
             if state.grid == grid && state.cell == view.cell {
                 return;
             }
@@ -419,6 +427,39 @@ impl Terminal {
             engine.resize(area);
         }
         self.shared.changed();
+    }
+
+    /// Holds the grid at `held` while a paired phone watches the session, so its program lays
+    /// its screen out for the phone, or with `None` gives the grid back to the view here. The
+    /// view keeps drawing the held grid from its top left.
+    pub fn hold_grid(&self, held: Option<GridSize>) {
+        let area = {
+            let mut state = self.shared.state.relock();
+            state.held_grid = held;
+            let grid = held.unwrap_or(state.own_grid);
+            if state.grid == grid {
+                return;
+            }
+            state.grid = grid;
+            state.text_area()
+        };
+        if let Some(engine) = self.shared.engine() {
+            engine.resize(area);
+        }
+        self.shared.changed();
+    }
+
+    /// What the session shows now, as a paired phone draws it. `None` once the session stopped.
+    pub fn remote_screen(&self) -> Option<crate::remote::screen::Screen> {
+        let engine = self.shared.engine()?;
+        let (palette, grid) = {
+            let state = self.shared.state.relock();
+            (state.palette, state.grid)
+        };
+        Some(
+            engine
+                .read(|cells, cursor| crate::remote::screen::build(cells, cursor, grid, &palette)),
+        )
     }
 
     /// The frame to draw now, and when to draw again for the cursor's blink. Taking it lets
@@ -921,6 +962,42 @@ mod tests {
             b"echo \"[$env:LC_NORTHROOM_PROBE][$env:NORTHROOM_TERMINAL]\"\r",
             "[kept][1]",
         );
+        terminal.stop();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_phone_sees_the_screen_and_holds_the_grid_at_its_own_size() {
+        let (terminal, _) = session_answering(b"echo northroom-phone\r", "northroom-phone");
+        let view = ViewSize {
+            width: 800,
+            height: 240,
+            cell: CELL,
+        };
+        let screen = terminal
+            .remote_screen()
+            .expect("a running session has a screen");
+        assert_eq!((screen.columns, screen.lines), (50, 8));
+        let shows = |text: &str| {
+            let screen = terminal.remote_screen().expect("a screen");
+            let mut rows = screen.rows.iter();
+            rows.any(|row| row.iter().any(|run| run.text.contains(text)))
+        };
+        assert!(shows("northroom-phone"));
+
+        let phone = GridSize {
+            columns: 30,
+            lines: 6,
+        };
+        terminal.hold_grid(Some(phone));
+        // The window being resized meanwhile does not take the grid back.
+        terminal.resize(view);
+        let held = terminal.remote_screen().expect("a screen");
+        assert_eq!((held.columns, held.lines), (30, 6));
+
+        terminal.hold_grid(None);
+        let own = terminal.remote_screen().expect("a screen");
+        assert_eq!((own.columns, own.lines), (50, 8));
         terminal.stop();
     }
 }

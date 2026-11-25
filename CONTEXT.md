@@ -26,6 +26,7 @@ format (ADR-0003), no account (ADR-0008) and no backend (ADR-0006).
 | Drawing, input and platform calls        | GPUI shell, `apps/native/gpui`                          |
 | Live HTML pages and 3D stills            | Core `page/host/` with the shell's `webhost`            |
 | Updates                                  | GitHub releases, checked and verified in core `update/` |
+| A paired phone's link (ADR-0016)         | Core `remote/` with `crates/northroom-link`             |
 | Marketing, FAQ, download and legal pages | The `main-eng/northroom-web` repository                 |
 
 ## Rules of thumb
