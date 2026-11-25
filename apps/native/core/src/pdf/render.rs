@@ -9,6 +9,7 @@
 use super::colour::{Function, Space};
 use super::font::Font;
 use super::image::{self, Picture};
+use super::layers::Layers;
 use super::object::{Dict, Document, Object, Parser, Ref, Stream, Token};
 use super::raster::{Canvas, Mask, Rgba};
 use super::stroke::Pen;
@@ -334,6 +335,10 @@ pub struct Interpreter<'a, S: Sink> {
     /// The resources of the content being run.
     current_resources: Option<Dict>,
     depth: usize,
+    /// The document's hidden layers.
+    layers: Layers,
+    /// Open marked content, each whether it hides what it marks (`BMC`, `BDC`, `EMC`).
+    marked: Vec<bool>,
 }
 
 fn number(object: &Object) -> f64 {
@@ -367,7 +372,52 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             base: ctm,
             current_resources: None,
             depth: 0,
+            layers: Layers::of(document),
+            marked: Vec::new(),
         }
+    }
+
+    /// Whether `object`, a layer or group of layers, is hidden.
+    pub fn hides(&self, object: &Object) -> bool {
+        self.layers.hides(self.document, object)
+    }
+
+    /// Whether the content being run is in a hidden layer: it changes the graphics state and
+    /// clips but draws nothing.
+    fn hidden(&self) -> bool {
+        self.marked.contains(&true)
+    }
+
+    /// `BMC`, `BDC` and `EMC`: marked content opens and closes, hiding what it marks when it
+    /// names a hidden layer.
+    fn marked_content(&mut self, operator: &[u8], operands: &[Object], resources: Option<&Dict>) {
+        match operator {
+            b"EMC" => {
+                self.marked.pop();
+            }
+            b"BDC" if operands.first().and_then(Object::as_name) == Some("OC") => {
+                let hides = match operands.get(1) {
+                    Some(Object::Name(_)) => self.hides_named(operands.get(1), resources),
+                    Some(inline) => self.hides(inline),
+                    None => false,
+                };
+                self.marked.push(hides);
+            }
+            _ => self.marked.push(false),
+        }
+    }
+
+    /// Whether a layer named in resources hides, by its reference there, as layers are known
+    /// by reference.
+    fn hides_named(&self, name: Option<&Object>, resources: Option<&Dict>) -> bool {
+        let (Some(name), Some(resources)) = (name.and_then(Object::as_name), resources) else {
+            return false;
+        };
+        let properties = self.document.entry(resources, "Properties");
+        properties
+            .as_dict()
+            .and_then(|properties| properties.get(name))
+            .is_some_and(|layer| self.hides(layer))
     }
 
     fn resource(&self, resources: Option<&Dict>, kind: &str, name: &str) -> Object {
@@ -452,10 +502,11 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             self.path.push(Command::Close);
         }
         let path = std::mem::take(&mut self.path);
-        if fill {
+        let shown = !self.hidden();
+        if fill && shown {
             self.fill_path(&path);
         }
-        if stroke {
+        if stroke && shown {
             let pen = self.state.device_pen();
             self.sink
                 .stroke(&path, &pen, self.state.stroke_colour(), &self.state.clip);
@@ -607,6 +658,9 @@ impl<'a, S: Sink> Interpreter<'a, S> {
 
     /// `sh`: paints a shading over the clip.
     fn shade(&mut self, name: &str, resources: Option<&Dict>) {
+        if self.hidden() {
+            return;
+        }
         let shading = self.resource(resources, "Shading", name);
         if let Some(gradient) = self.read_gradient(&shading, self.state.ctm) {
             self.sink.gradient(&gradient, &self.state.clip);
@@ -686,7 +740,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
     /// Draws one glyph at the text matrix: its outline, or its Type 3 procedure.
     fn draw_glyph(&mut self, font: &Rc<Font>, code: u32, glyph_matrix: Matrix) {
         let mode = self.state.text.mode;
-        if mode == 3 || mode == 7 {
+        if mode == 3 || mode == 7 || self.hidden() {
             return;
         }
         let device = multiply(glyph_matrix, self.state.ctm);
@@ -725,7 +779,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             .cloned()
             .or_else(|| self.current_resources.clone());
         let ctm = multiply(procedure.matrix, multiply(glyph_matrix, self.state.ctm));
-        self.run_nested(&content, resources, ctm);
+        self.run_nested(&content, resources, ctm, None);
     }
 
     /// Shows a string: each code's glyph, then the pen moved by its width and spacing.
@@ -858,6 +912,9 @@ impl<'a, S: Sink> Interpreter<'a, S> {
     }
 
     fn draw_picture(&mut self, stream: &Stream) {
+        if self.hidden() {
+            return;
+        }
         let matrix = self.state.ctm;
         match self.placement(stream) {
             Placement::Hidden => return,
@@ -897,13 +954,37 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             .as_dict()
             .cloned()
             .or_else(|| self.current_resources.clone());
-        self.run_nested(&content, resources, multiply(matrix, self.state.ctm));
+        let bbox = self
+            .document
+            .entry(&stream.dict, "BBox")
+            .as_array()
+            .map(numbers_of);
+        let ctm = multiply(matrix, self.state.ctm);
+        self.run_nested(&content, resources, ctm, bbox.as_deref());
+    }
+
+    /// Narrows the clip to a form's bounding box, given in its own space.
+    fn clip_to_box(&mut self, bbox: &[f64]) {
+        let [x0, y0, x1, y1] = <[f64; 4]>::try_from(bbox).unwrap_or([0.0; 4]);
+        if x0 == x1 || y0 == y1 {
+            return;
+        }
+        let corners =
+            [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|point| self.device(point.0, point.1));
+        let mut path: Vec<Command> = corners.iter().map(|&(x, y)| Command::Line(x, y)).collect();
+        path[0] = Command::Move(corners[0].0, corners[0].1);
+        path.push(Command::Close);
+        self.state.clip = self.sink.clip(&self.state.clip, &path);
+        self.state.clip_area = self.state.clip_area.narrowed(&path);
     }
 
     fn draw_object(&mut self, name: &str, resources: Option<&Dict>) {
         let Object::Stream(stream) = self.resource(resources, "XObject", name) else {
             return;
         };
+        if self.hidden() || stream.dict.get("OC").is_some_and(|layer| self.hides(layer)) {
+            return;
+        }
         match self.document.entry(&stream.dict, "Subtype").as_name() {
             Some("Image") => self.draw_picture(&stream),
             Some("Form") => self.draw_form(&stream),
@@ -912,7 +993,14 @@ impl<'a, S: Sink> Interpreter<'a, S> {
     }
 
     /// Runs content in its own graphics state with `ctm`, as a form or glyph is.
-    fn run_nested(&mut self, content: &[u8], resources: Option<Dict>, ctm: Matrix) {
+    /// A form's content is clipped to its `bbox`.
+    fn run_nested(
+        &mut self,
+        content: &[u8],
+        resources: Option<Dict>,
+        ctm: Matrix,
+        bbox: Option<&[f64]>,
+    ) {
         if self.depth >= DEPTH_MAX {
             return;
         }
@@ -925,9 +1013,15 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         );
         let outer = std::mem::replace(&mut self.current_resources, resources);
         self.state.ctm = ctm;
+        if let Some(bbox) = bbox {
+            self.clip_to_box(bbox);
+        }
+        let marked = self.marked.len();
         self.depth += 1;
         self.run(content);
         self.depth -= 1;
+        // Marked content a form leaves open ends with it.
+        self.marked.truncate(marked);
         self.current_resources = outer;
         self.saved.truncate(saved.1);
         self.state = saved.0;
@@ -1055,6 +1149,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             | b"SCN" => {
                 self.colour_operator(operator, operands, resources);
             }
+            b"BMC" | b"BDC" | b"EMC" => self.marked_content(operator, operands, resources),
             b"Do" => {
                 if let Some(name) = name {
                     self.draw_object(&name, resources);
@@ -1193,6 +1288,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             &content,
             resources,
             multiply(multiply(matrix, fit), self.base),
+            None,
         );
     }
 }

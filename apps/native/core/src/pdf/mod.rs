@@ -18,6 +18,7 @@ pub mod encoding;
 pub mod filter;
 pub mod font;
 pub mod image;
+pub mod layers;
 pub mod object;
 pub mod raster;
 pub mod render;
@@ -230,7 +231,8 @@ fn run_page<S: render::Sink>(document: &Document, page: &Page, sink: &mut S, sca
         let Some(dict) = annotation.as_dict() else {
             continue;
         };
-        if document.entry(dict, "F").as_i64().unwrap_or(0) & HIDDEN != 0 {
+        let in_hidden_layer = dict.get("OC").is_some_and(|layer| interpreter.hides(layer));
+        if document.entry(dict, "F").as_i64().unwrap_or(0) & HIDDEN != 0 || in_hidden_layer {
             continue;
         }
         let Some(rectangle) = dict.get("Rect").and_then(|rect| read_box(document, rect)) else {
@@ -605,6 +607,41 @@ mod tests {
         assert_eq!(canvas.pixel(10, 10)[3], 255);
         assert_eq!(canvas.pixel(6, 10)[3], 0);
         assert_eq!(canvas.pixel(14, 10)[3], 0);
+    }
+
+    #[test]
+    fn a_hidden_layer_draws_nothing_and_a_form_stays_in_its_box() {
+        let form = "0 0 40 20 re f";
+        let bytes = pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [5 0 R 6 0 R] \
+             /D << /OFF [5 0 R] >> >> >>"
+                .into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 40 20] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << \
+             /Properties << /Off 5 0 R /On 6 0 R >> /XObject << /Box 7 0 R >> >> >>"
+                .into(),
+            stream(
+                "/OC /Off BDC 0 0 10 10 re f EMC /OC /On BDC 10 0 10 10 re f EMC \
+                 q 1 0 0 1 20 0 cm /Box Do Q",
+            ),
+            "<< /Type /OCG /Name (Off) >>".into(),
+            "<< /Type /OCG /Name (On) >>".into(),
+            format!(
+                "<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Length {} >>\n\
+                 stream\n{form}\nendstream",
+                form.len()
+            ),
+        ]);
+        let document = Document::open(bytes).expect("open");
+        let pages = pages_of(&document);
+        let mut renderer = render::Renderer::new(40, 20, 0);
+        run_page(&document, &pages[0], &mut renderer, 1.0);
+        let canvas = renderer.canvas;
+        // Bottom row of the page is pixel row 19.
+        assert_eq!(canvas.pixel(5, 15)[3], 0, "the hidden layer");
+        assert_eq!(canvas.pixel(15, 15)[3], 255, "the shown layer");
+        assert_eq!(canvas.pixel(25, 15)[3], 255, "the form in its box");
+        assert_eq!(canvas.pixel(35, 15)[3], 0, "the form past its box");
     }
 
     #[test]
