@@ -232,7 +232,6 @@ impl Engine {
     }
 
     /// The whole session's text, scrollback included, read without selecting.
-    #[cfg(test)]
     pub(super) fn everything_shown(&self) -> String {
         let term = self.term.lock();
         let (top, bottom) = (term.grid().topmost_line(), term.grid().bottommost_line());

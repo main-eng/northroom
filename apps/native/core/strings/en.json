@@ -220,6 +220,7 @@
   "terminal_activity_working": "Working",
   "terminal_exit_ended": "Terminal ended. Press Return to start it again.",
   "terminal_not_running": "Not running",
+  "terminal_restored": "Restored from your last session",
   "terminal_shell_label": "Terminal",
   "title_bar_close_tab": "Close tab",
   "title_bar_reopen_closed_tab": "Reopen closed tab",

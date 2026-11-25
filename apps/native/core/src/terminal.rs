@@ -17,6 +17,7 @@ pub mod input;
 pub mod launch;
 pub mod palette;
 pub(crate) mod screen;
+pub mod transcript;
 
 use crate::terminal::cells::{GridSize, Modes, Rgb, Scroll};
 use crate::terminal::engine::Engine;
@@ -309,17 +310,22 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    /// Starts a new session of `launch` on screen in `view`.
-    /// Its turns are reported through `turns`.
+    /// Starts a new session of `launch` on screen in `view`, showing `shown_first` before the
+    /// shell's own output (`transcript::shown`; empty for nothing). Its turns are reported
+    /// through `turns`.
     pub fn start(
         view: ViewSize,
         launch: Launch,
         palette: Palette,
         turns: crate::changes::turns::TurnTap,
+        shown_first: &[u8],
     ) -> Self {
         let shared = Arc::new(Shared::new(launch, palette, view, turns));
         let engine = Arc::new(Engine::new(&shared, grid_size(view)));
         *shared.engine.relock() = Some(Arc::clone(&engine));
+        if !shown_first.is_empty() {
+            engine.feed(shown_first);
+        }
         let area = shared.text_area();
         if let Err(error) = engine.spawn(&shared, &shared.launch, area) {
             eprintln!("terminal\tthe shell did not start: {error}");
@@ -622,6 +628,14 @@ impl Terminal {
         }
     }
 
+    /// The whole session's text, scrollback included, as the app quits (`transcript::keep`).
+    pub fn transcript(&self) -> String {
+        self.shared
+            .engine()
+            .map(|engine| engine.everything_shown())
+            .unwrap_or_default()
+    }
+
     /// The selected text, or an empty string.
     pub fn copy(&self) -> String {
         self.shared
@@ -760,6 +774,7 @@ mod tests {
             launch,
             palette,
             crate::changes::turns::TurnTap::default(),
+            &[],
         );
         let started = Instant::now();
         let mut typed = false;

@@ -137,6 +137,42 @@ struct ClosedTab {
 /// How many closed tabs Reopen Closed Tab can go back through.
 const CLOSED_TABS_KEPT: usize = 20;
 
+/// The open tabs, kept as the app quits so the next launch opens them again (`keep_tabs`).
+const TABS_FILE: &str = "tabs.json";
+
+/// The open tabs as kept for the next launch, and which was active. Places are paths, which
+/// outlast a file replaced by a save; they are found again by path at launch.
+#[derive(Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+struct KeptTabs {
+    tabs: Vec<KeptTab>,
+    active: usize,
+}
+
+/// Writes `value` as `name` in `directory`, whole or not at all: staged beside it, then moved
+/// over it.
+fn write_kept(
+    directory: &std::path::Path,
+    name: &str,
+    value: &impl serde::Serialize,
+) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
+    std::fs::create_dir_all(directory)?;
+    let staged = directory.join(format!("{name}.writing"));
+    std::fs::write(&staged, text)?;
+    std::fs::rename(staged, directory.join(name))
+}
+
+/// One kept tab: what a closed tab keeps (`ClosedTab`), by path.
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct KeptTab {
+    /// The folder shown; `None` for the drive's root.
+    folder: Option<std::path::PathBuf>,
+    /// The open file, and whether it filled the tab.
+    opened: Option<(std::path::PathBuf, bool)>,
+    /// The root a Changes tab showed.
+    changes: Option<std::path::PathBuf>,
+}
+
 /// A tab's id, unique among the tabs a drive has opened. It stays the same whatever the tab
 /// shows and wherever it moves in the row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -476,9 +512,76 @@ impl Columns {
         // kept view shows a column that needs it.
         let wanted = columns.wants_index();
         columns.workspace.set_index_wanted(wanted);
-        let first = columns.new_tab(&Location::ROOT)?;
-        columns.tabs.push(first);
+        // The tabs open at the last quit come back; with none, the drive's root opens.
+        let kept: Option<KeptTabs> =
+            std::fs::read_to_string(columns.workspace.metadata_directory().join(TABS_FILE))
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok());
+        columns.restore_tabs(kept.unwrap_or_default());
+        if columns.tabs.is_empty() {
+            let first = columns.new_tab(&Location::ROOT)?;
+            columns.tabs.push(first);
+            columns.active = 0;
+        }
         Ok(columns)
+    }
+
+    /// Opens `kept`'s tabs again in their order, each at its folder with its file open, and
+    /// makes the kept one active. A tab whose folder is gone shows the drive's root; one whose
+    /// file is gone, its folder.
+    fn restore_tabs(&mut self, kept: KeptTabs) {
+        for tab in kept.tabs {
+            // A folder that is gone shows the drive's root.
+            let location = tab
+                .folder
+                .and_then(|path| self.workspace.location_at(&path).ok())
+                .unwrap_or(Location::ROOT);
+            let opened = tab.opened.and_then(|(path, filling)| {
+                self.workspace.id_at(&path).ok().map(|id| (id, filling))
+            });
+            let closed = ClosedTab {
+                at: self.tabs.len(),
+                location,
+                opened,
+                changes: tab.changes,
+            };
+            if let Err(error) = self.place_tab(closed) {
+                eprintln!("a kept tab did not open again: {error}");
+            }
+        }
+        self.active = kept.active.min(self.tabs.len().saturating_sub(1));
+    }
+
+    /// Keeps the open tabs for the next launch (`restore_tabs`). A failure to write is only
+    /// reported: the next launch then opens the drive's root.
+    pub fn keep_tabs(&mut self) {
+        let tabs: Vec<KeptTab> = (0..self.tabs.len()).map(|tab| self.kept_tab(tab)).collect();
+        let kept = KeptTabs {
+            tabs,
+            active: self.active,
+        };
+        let directory = self.workspace.metadata_directory().to_path_buf();
+        if let Err(error) = write_kept(&directory, TABS_FILE, &kept) {
+            eprintln!("the tabs were not kept: {error}");
+        }
+    }
+
+    /// Tab `index` by path: its folder, open file and Changes root.
+    fn kept_tab(&mut self, index: usize) -> KeptTab {
+        let tab = &self.tabs[index];
+        let folder = tab.location().folder_id;
+        let opened = tab
+            .opened
+            .as_ref()
+            .map(|opened| (opened.id.clone(), tab.filling));
+        let changes = tab.changes.clone();
+        KeptTab {
+            folder: folder.and_then(|id| self.workspace.path_of(&id).ok()),
+            opened: opened.and_then(|(id, filling)| {
+                self.workspace.path_of(&id).ok().map(|path| (path, filling))
+            }),
+            changes,
+        }
     }
 
     /// Keeps how the drive looks, so it opens the same way next time. A failure to write is
@@ -505,15 +608,7 @@ impl Columns {
             board_columns: Some(self.board_columns),
         };
         let directory = self.workspace.metadata_directory();
-        let written = serde_json::to_string_pretty(&choices)
-            .map_err(std::io::Error::other)
-            .and_then(|text| {
-                std::fs::create_dir_all(directory)?;
-                let staged = directory.join(format!("{VIEW_CHOICES_FILE}.writing"));
-                std::fs::write(&staged, text)?;
-                std::fs::rename(staged, directory.join(VIEW_CHOICES_FILE))
-            });
-        if let Err(error) = written {
+        if let Err(error) = write_kept(directory, VIEW_CHOICES_FILE, &choices) {
             eprintln!("the view was not kept: {error}");
         }
     }
@@ -889,6 +984,39 @@ impl Columns {
         self.open_in_folder(&id)
     }
 
+    /// Opens `path` for another program or an agent (`open -a Northroom <path>`): by switching
+    /// to the tab that already shows it, else in a new tab beside the active one, so the tab in
+    /// use is left as it was. Refused, with no tab added, when `go_to_path` refuses it.
+    pub fn open_from_outside(&mut self, path: &std::path::Path) -> DriveResult<()> {
+        if let Some(index) = self.tab_showing(path) {
+            self.select_tab(index);
+            return Ok(());
+        }
+        let before = self.active;
+        self.open_tab()?;
+        let opened = self.go_to_path(path);
+        if opened.is_err() {
+            self.tabs.remove(self.active);
+            self.active = before;
+            self.revision += 1;
+        }
+        opened
+    }
+
+    /// The tab that shows `path`: open in it, or its folder shown with no file open.
+    fn tab_showing(&mut self, path: &std::path::Path) -> Option<usize> {
+        if path.is_dir() {
+            let folder = self.workspace.location_at(path).ok()?;
+            return self.tabs.iter().position(|tab| {
+                tab.opened.is_none() && tab.changes.is_none() && tab.location() == folder
+            });
+        }
+        let id = self.workspace.id_at(path).ok()?;
+        self.tabs
+            .iter()
+            .position(|tab| tab.opened.as_ref().is_some_and(|opened| opened.id == id))
+    }
+
     /// Shows the folder at `location` as a visit: Back returns to the folder shown before.
     fn visit(&mut self, location: &Location) -> DriveResult<()> {
         let before = self.tab().location();
@@ -1250,9 +1378,16 @@ impl Columns {
     /// it active. A terminal comes back live, since closing its tab never ends its session. If
     /// the folder is gone the tab shows the drive's root; if the file is gone, its folder.
     pub fn reopen_closed_tab(&mut self) -> DriveResult<()> {
-        let Some(closed) = self.closed.pop() else {
-            return Ok(());
-        };
+        match self.closed.pop() {
+            Some(closed) => self.place_tab(closed),
+            None => Ok(()),
+        }
+    }
+
+    /// Opens `closed` again at its place among the tabs with its folder and open file, and
+    /// makes it active. If the folder is gone the tab shows the drive's root; if the file is
+    /// gone, its folder.
+    fn place_tab(&mut self, closed: ClosedTab) -> DriveResult<()> {
         let tab = match self.new_tab(&closed.location) {
             Ok(tab) => tab,
             Err(_) => self.new_tab(&Location::ROOT)?,
@@ -2589,6 +2724,52 @@ mod tests {
     }
 
     #[test]
+    fn the_open_tabs_come_back_at_the_next_launch() {
+        let (root, metadata, mut columns) = columns();
+        // The first tab shows Films with its clip beside it; the second is filled by AGENTS.
+        columns.select(0, 2).expect("Films");
+        columns.select(1, 1).expect("the clip");
+        columns.open_tab().expect("a tab");
+        columns.open_row(0, 0).expect("AGENTS");
+        columns.select_tab(0);
+        columns.keep_tabs();
+        let reopen = || {
+            let workspace = Workspace::open(root.path(), metadata.path()).expect("open");
+            Columns::open(workspace).expect("columns")
+        };
+
+        let mut again = reopen();
+        assert_eq!((again.tab_count(), again.active_tab()), (2, 0));
+        assert_eq!(
+            titles(again.columns().last().expect("Films")),
+            ["Shots", "cut.mp4"]
+        );
+        assert_eq!(
+            again.opened().map(|opened| opened.title.as_str()),
+            Some("cut.mp4")
+        );
+        again.select_tab(1);
+        assert_eq!(
+            again.opened().map(|opened| opened.title.as_str()),
+            Some("AGENTS")
+        );
+
+        // A tab whose folder is gone opens at the drive's root, with nothing open.
+        again.select_tab(0);
+        again.keep_tabs();
+        fs::remove_dir_all(root.path().join("Films")).expect("gone");
+        let mut gone = reopen();
+        assert_eq!(gone.tab_count(), 2);
+        assert_eq!(gone.columns().len(), 1);
+        assert_eq!(gone.opened(), None);
+        gone.select_tab(1);
+        assert_eq!(
+            gone.opened().map(|opened| opened.title.as_str()),
+            Some("AGENTS")
+        );
+    }
+
+    #[test]
     fn a_folder_opens_the_next_column_and_a_file_fills_the_window() {
         let (_root, _metadata, mut columns) = columns();
         assert_eq!(
@@ -3064,6 +3245,42 @@ mod tests {
                 ("Inner".to_owned(), 1, false),
             ]
         );
+    }
+
+    #[test]
+    fn a_path_another_program_opens_gets_its_own_tab_once() {
+        let (root, _metadata, mut columns) = columns();
+        let page = root.path().join("AGENTS.md");
+        // The tab in use stays as it was; the file opens in a new tab beside it.
+        columns.select(0, 2).expect("Films");
+        columns.open_from_outside(&page).expect("a file");
+        assert_eq!((columns.tab_count(), columns.active_tab()), (2, 1));
+        assert_eq!(columns.opened().expect("opened").title, "AGENTS");
+        columns.select_tab(0);
+        assert_eq!(
+            titles(columns.columns().last().expect("Films")),
+            ["Shots", "cut.mp4"]
+        );
+
+        // Asked again, it switches to that tab instead of opening another. Films is the first
+        // tab's folder, with nothing open, so asking for it switches there too.
+        columns.open_from_outside(&page).expect("again");
+        assert_eq!((columns.tab_count(), columns.active_tab()), (2, 1));
+        columns
+            .open_from_outside(&root.path().join("Films"))
+            .expect("a folder");
+        assert_eq!((columns.tab_count(), columns.active_tab()), (2, 0));
+        // A folder no tab shows gets its own.
+        columns
+            .open_from_outside(&root.path().join("Films").join("Shots"))
+            .expect("another folder");
+        assert_eq!((columns.tab_count(), columns.active_tab()), (3, 1));
+
+        // A refused path adds no tab and leaves the active one.
+        assert!(columns
+            .open_from_outside(&root.path().join("missing"))
+            .is_err());
+        assert_eq!((columns.tab_count(), columns.active_tab()), (3, 1));
     }
 
     #[test]

@@ -557,7 +557,14 @@ fn show_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> u64 {
     let environment: Vec<(String, String)> = std::env::vars().collect();
     let palette = terminal_palette();
     // Read before the sessions' lock, which the columns' lock never waits under.
-    let drive = with_columns(|columns| columns.workspace().root().to_path_buf());
+    let (drive, metadata) = with_columns(|columns| {
+        let workspace = columns.workspace();
+        (
+            workspace.root().to_path_buf(),
+            workspace.metadata_directory().to_path_buf(),
+        )
+    })
+    .unzip();
     // The terminal file decides the folder; the person decides what runs (ADR-0005).
     let mut sessions = app.sessions.relock();
     match sessions.get(id) {
@@ -581,7 +588,14 @@ fn show_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> u64 {
             let launch = build_launch(&directory, &environment, &shell, &session);
             let turns =
                 crate::changes::ffi::follow_terminal(id, path, &directory, drive.as_deref());
-            sessions.insert(id.to_owned(), Terminal::start(view, launch, palette, turns));
+            // The terminal's output from before the last quit shows above the new shell, once.
+            let restored = metadata
+                .as_deref()
+                .and_then(|metadata| crate::terminal::transcript::take(metadata, id))
+                .map(|text| crate::terminal::transcript::shown(&text, interface_language()))
+                .unwrap_or_default();
+            let started = Terminal::start(view, launch, palette, turns, &restored);
+            sessions.insert(id.to_owned(), started);
         }
     }
     app.shown_terminals.relock().show(id)
@@ -1286,9 +1300,9 @@ pub unsafe extern "C" fn nr_selection_choose(
 /// A path asked for before the drive opened, as when the request launched the app.
 static WAITING_PATH: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
-/// Goes to `path` in the drive, as `Columns::go_to_path` does: what another program asks the
-/// app to open (`open -a Northroom <path>` on a Mac, `northroom <path>` elsewhere). Before the
-/// drive is open the path waits for it. Returns why not, or an empty text; the window draws
+/// Opens `path` in the drive in its own tab, as `Columns::open_from_outside` does: what another
+/// program or an agent asks the app to open (`open -a Northroom <path>` on a Mac,
+/// `northroom <path>` elsewhere). Before the drive is open the path waits for it. Returns why not, or an empty text; the window draws
 /// again either way.
 ///
 /// # Safety
@@ -1301,7 +1315,7 @@ pub unsafe extern "C" fn nr_open_path(path: *const c_char) -> NrText {
         *WAITING_PATH.relock() = Some(path);
         return lend(String::new());
     }
-    let refusal = file_operation(|columns| columns.go_to_path(&path));
+    let refusal = file_operation(|columns| columns.open_from_outside(&path));
     crate::notify_changed();
     refusal
 }
@@ -1311,7 +1325,7 @@ fn open_waiting_path() {
     let Some(path) = WAITING_PATH.relock().take() else {
         return;
     };
-    let _ = file_operation(|columns| columns.go_to_path(&path));
+    let _ = file_operation(|columns| columns.open_from_outside(&path));
 }
 
 /// Runs a file operation and reports a refusal. Returns the refusal's words, or an empty text
@@ -4710,19 +4724,26 @@ pub(crate) fn end_session(id: &str) {
 }
 
 /// Moves the terminal file `id` to the Trash when it is a throwaway
-/// (`Columns::is_throwaway_terminal`): its session has ended, and nothing kept it.
-fn trash_if_throwaway(id: &str) {
+/// (`Columns::is_throwaway_terminal`): its session has ended, and nothing kept it. Returns
+/// whether it went.
+fn trash_if_throwaway(id: &str) -> bool {
     let label = crate::strings::text(
         interface_language(),
         crate::strings::key::TERMINAL_SHELL_LABEL,
     );
     with_columns(|columns| {
-        if columns.is_throwaway_terminal(id, label) {
-            if let Err(error) = columns.trash(&[id.to_owned()]) {
+        if !columns.is_throwaway_terminal(id, label) {
+            return false;
+        }
+        match columns.trash(&[id.to_owned()]) {
+            Ok(_) => true,
+            Err(error) => {
                 eprintln!("the throwaway terminal was not moved to the Trash: {error}");
+                false
             }
         }
-    });
+    })
+    .unwrap_or(false)
 }
 
 /// Whether the session of the terminal file `id` runs nothing but its shell at the prompt, or
@@ -4740,21 +4761,46 @@ fn session_at_rest(id: &str) -> bool {
     })
 }
 
-/// Ends every terminal session. Call when the app quits.
+/// Keeps the open tabs for the next launch (`Columns::keep_tabs`). Call when the app quits,
+/// before `nr_terminals_quit` moves throwaway terminals to the Trash.
+#[no_mangle]
+pub extern "C" fn nr_tabs_keep() {
+    with_columns(Columns::keep_tabs);
+}
+
+/// Ends every terminal session, keeping each one's output to show above its next session
+/// (`terminal::transcript`). Call when the app quits.
 #[no_mangle]
 pub extern "C" fn nr_terminals_quit() {
     let app = app();
+    // Read before the sessions' lock, which the columns' lock never waits under.
+    let metadata = with_columns(|columns| columns.workspace().metadata_directory().to_path_buf());
     app.shown_terminals.relock().clear();
     let sessions: Vec<(String, Terminal)> = app.sessions.relock().drain().collect();
     let ended: Vec<String> = sessions.iter().map(|(id, _)| id.clone()).collect();
-    for (_, session) in sessions {
+    for (id, session) in sessions {
+        if let Some(metadata) = &metadata {
+            keep_transcript(metadata, &id, &session.transcript());
+        }
         session.stop();
     }
     for id in ended {
         crate::changes::ffi::unfollow_terminal(&id);
-        trash_if_throwaway(&id);
+        // A throwaway terminal goes to the Trash, and its output with it.
+        if trash_if_throwaway(&id) {
+            if let Some(metadata) = &metadata {
+                keep_transcript(metadata, &id, "");
+            }
+        }
     }
     crate::changes::ffi::save_now();
+}
+
+/// Keeps terminal `id`'s `text` (`transcript::keep`); a failure is only reported.
+fn keep_transcript(metadata: &Path, id: &str, text: &str) {
+    if let Err(error) = crate::terminal::transcript::keep(metadata, id, text) {
+        eprintln!("the terminal's output was not kept: {error}");
+    }
 }
 
 /// Whether a press that has travelled (`dx`, `dy`) points on a screen of `scale` pixels a

@@ -208,7 +208,9 @@ fn start(attendance: Attendance, cx: &mut App) {
     updates::start(cx);
     cx.on_app_quit(|_| {
         updates::install_on_quit();
-        // End every session and trash throwaway terminals, however the app quits.
+        // Keep the open tabs for the next launch, then end every session, keeping its output,
+        // and trash throwaway terminals, however the app quits.
+        nr_tabs_keep();
         nr_terminals_quit();
         async {}
     })
