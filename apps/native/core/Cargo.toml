@@ -51,6 +51,12 @@ sha2 = { version = "0.10", default-features = false }
 # drawn into the page (`pdf::image`): MIT, Apache-2.0 or Zlib; in the GPUI shell's tree, at this
 # version, through GPUI's `image`.
 zune-jpeg = "0.5"
+# Scanned pages in PDFs (`pdf::image`): CCITT fax (MIT; in the shell's tree, at this version,
+# through `tiff`), and JBIG2 and JPEG 2000 from the hayro PDF project (Apache-2.0 or MIT, pure
+# Rust). Each is a format of its own; writing their decoders ourselves would be weeks each.
+fax = "0.2"
+hayro-jbig2 = { version = "0.4", default-features = false, features = ["std", "simd"] }
+hayro-jpeg2000 = { version = "0.5", default-features = false, features = ["std", "simd"] }
 harfrust = "0.12"
 # Where a line may break (`typeset`): ICU4X's rules, the Unicode rules Core Text breaks lines
 # by (Unicode-3.0; in the GPUI shell's tree).

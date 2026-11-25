@@ -11,6 +11,7 @@
 //! Left out: text selection and search, links and forms' interaction, page zoom beyond the
 //! page view's, and what `render`, `image`, `font` and `raster` say they leave out.
 
+pub mod ccitt;
 pub mod colour;
 pub mod crypt;
 pub mod encoding;

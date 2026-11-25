@@ -5,8 +5,11 @@
 //! A JPEG is decoded here only when it can't be left to the system (`render::Interpreter::
 //! placement`): when it is see-through, masked, turned or clipped to a shape.
 //!
-//! Left out: CCITT fax and JBIG2 images (common in scanned black-and-white pages), colour-key
-//! masks, and decoding JPEG 2000, which the system draws without transparency or a shaped clip.
+//! CCITT fax and JBIG2 images, common in scanned pages, come out of their filters as 1-bit
+//! samples (`filter`); JPEG 2000 is decoded here and always drawn into the page, as only some
+//! systems can decode it.
+//!
+//! Left out: colour-key masks, and two-dimensional Group 3 fax (`K` above 0).
 
 use super::colour::Space;
 use super::filter;
@@ -78,7 +81,7 @@ pub fn read(
 ) -> Option<Picture> {
     let mut picture = match filter::codec(stream, Some(document)) {
         Some("jpeg") => decode_jpeg(&filter::decode(stream, Some(document)).ok()?)?,
-        Some(_) => return None,
+        Some(_) => decode_jpx(&filter::decode(stream, Some(document)).ok()?)?,
         None => read_samples(document, stream, fill, resources)?,
     };
     apply_masks(document, &stream.dict, &mut picture);
@@ -96,6 +99,48 @@ fn decode_jpeg(bytes: &[u8]) -> Option<Picture> {
     let info = decoder.info()?;
     let (width, height) = (usize::from(info.width), usize::from(info.height));
     (width * height * 4 == rgba.len() && width * height <= PIXELS_MAX).then_some(Picture {
+        rgba,
+        width,
+        height,
+    })
+}
+
+/// A JPEG 2000's pixels, from gray, RGB or CMYK, with its own alpha when it has one.
+fn decode_jpx(bytes: &[u8]) -> Option<Picture> {
+    let settings = hayro_jpeg2000::DecodeSettings::default();
+    let image = hayro_jpeg2000::Image::new(bytes, &settings).ok()?;
+    let (width, height) = (image.width() as usize, image.height() as usize);
+    if width.saturating_mul(height) > PIXELS_MAX {
+        return None;
+    }
+    let space = match image.color_space() {
+        hayro_jpeg2000::ColorSpace::Gray => Space::Gray,
+        hayro_jpeg2000::ColorSpace::CMYK => Space::Cmyk,
+        other if other.num_channels() == 1 => Space::Gray,
+        other if other.num_channels() == 4 => Space::Cmyk,
+        _ => Space::Rgb,
+    };
+    let alpha = image.has_alpha();
+    let mut context = hayro_jpeg2000::DecoderContext::default();
+    let data = image.decode(&mut context).ok()?.data_u8();
+    let channels = space.components() + usize::from(alpha);
+    if data.len() < width * height * channels {
+        return None;
+    }
+    let rgba = data
+        .chunks_exact(channels)
+        .take(width * height)
+        .flat_map(|pixel| {
+            let values: Vec<f32> = pixel[..space.components()]
+                .iter()
+                .map(|value| f32::from(*value) / 255.0)
+                .collect();
+            let [r, g, b] = space.rgb(&values);
+            let a = if alpha { pixel[channels - 1] } else { 255 };
+            [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8, a]
+        })
+        .collect();
+    Some(Picture {
         rgba,
         width,
         height,
@@ -331,5 +376,17 @@ mod tests {
         assert_eq!(pixels, [255, 0, 0, 255, 0, 0, 255, 255]);
         let rgba = stencil(&[0b0100_0000], 2, 1, [1.0, 0.0, 0.0, 1.0], false).rgba;
         assert_eq!(rgba, [255, 0, 0, 255, 255, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_jpeg_2000_decodes_to_its_colours() {
+        let picture =
+            decode_jpx(include_bytes!("../../tests/fixtures/pdf/blue.jp2")).expect("pixels");
+        assert_eq!((picture.width, picture.height), (16, 16));
+        let middle = &picture.rgba[(8 * 16 + 8) * 4..][..4];
+        assert!(
+            middle[0] < 16 && middle[1] < 16 && middle[2] > 235 && middle[3] == 255,
+            "{middle:?}"
+        );
     }
 }

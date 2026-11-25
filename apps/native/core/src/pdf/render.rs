@@ -836,7 +836,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
     // --- Pictures and forms ----------------------------------------------------------------
 
     /// Whether a picture can be left to the system: a JPEG drawn upright, opaque, unmasked and
-    /// clipped at most to a rectangle. A JPEG 2000 always is, as the core has no decoder for it.
+    /// clipped at most to a rectangle. A JPEG 2000 never is, as only some systems decode it.
     fn placement(&self, stream: &Stream) -> Placement {
         let matrix = self.state.ctm;
         let codec = super::filter::codec(stream, Some(self.document));
@@ -852,8 +852,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             && !masked
             && self.state.clip_area != ClipArea::Shaped;
         match codec {
-            Some("jpx") => system_placement(matrix, self.state.clip_area),
-            Some(_) if plain => system_placement(matrix, self.state.clip_area),
+            Some("jpeg") if plain => system_placement(matrix, self.state.clip_area),
             _ => Placement::Drawn,
         }
     }
