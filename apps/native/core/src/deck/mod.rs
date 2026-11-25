@@ -22,6 +22,7 @@ pub mod picture;
 pub mod ppt;
 pub mod pptx;
 pub mod rtf;
+pub mod text;
 
 use crate::geometry::Rect;
 use crate::package::PackageError;

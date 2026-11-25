@@ -88,6 +88,66 @@ pub fn opened_locked() -> Option<PathBuf> {
     (known.path == path && known.locked).then_some(path)
 }
 
+/// The text of the open PDF's pages read so far: its path and version, and each page's glyphs.
+struct Texts {
+    path: PathBuf,
+    version: Version,
+    pages: std::collections::HashMap<usize, Arc<Vec<crate::pdf::TextGlyph>>>,
+}
+
+static TEXT: Mutex<Option<Texts>> = Mutex::new(None);
+
+/// Page `slide`'s glyphs in the open PDF, read once a version; empty for other files.
+fn page_glyphs(slide: usize) -> Arc<Vec<crate::pdf::TextGlyph>> {
+    let Some((path, Kind::Pdf)) = opened_path() else {
+        return Arc::default();
+    };
+    let version = version_of(&path);
+    let mut text = TEXT.relock();
+    if text
+        .as_ref()
+        .is_none_or(|known| known.path != path || known.version != version)
+    {
+        *text = Some(Texts {
+            path: path.clone(),
+            version,
+            pages: std::collections::HashMap::new(),
+        });
+    }
+    let pages = &mut text.as_mut().expect("just set").pages;
+    pages
+        .entry(slide)
+        .or_insert_with(|| {
+            let read = super::read_bytes(&path).ok().and_then(|bytes| {
+                crate::pdf::page_text(bytes, crate::pdf::passwords::of(&path).as_deref(), slide)
+                    .ok()
+            });
+            Arc::new(read.unwrap_or_default())
+        })
+        .clone()
+}
+
+/// The text of slide `slide` of the open deck, placed in a view of it at `frame`, as the
+/// view's marks are (`layout::marks`). Only a PDF's pages have text to select.
+pub fn deck_text(slide: usize, frame: Rect) -> Vec<super::text::Glyph> {
+    let Some(deck) = opened_deck() else {
+        return Vec::new();
+    };
+    let zoom = frame.width / deck.width;
+    page_glyphs(slide)
+        .iter()
+        .map(|glyph| super::text::Glyph {
+            text: glyph.text.clone(),
+            frame: Rect::new(
+                frame.x + glyph.frame.x * zoom,
+                frame.y + glyph.frame.y * zoom,
+                glyph.frame.width * zoom,
+                glyph.frame.height * zoom,
+            ),
+        })
+        .collect()
+}
+
 /// Forgets the file last read, so the next ask reads it again, as after a password is typed.
 pub fn forget_read() {
     *READ.relock() = None;

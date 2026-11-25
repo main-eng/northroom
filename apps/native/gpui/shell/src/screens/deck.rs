@@ -23,8 +23,9 @@ use kit::nr::*;
 use kit::text::draw_line;
 use kit::theme::{Face, Token, color};
 use northroom_core::board::card::Font;
-use northroom_core::deck::ffi::{deck_marks, deck_page, deck_picture, opened_deck};
+use northroom_core::deck::ffi::{deck_marks, deck_page, deck_picture, deck_text, opened_deck};
 use northroom_core::deck::layout::{Mark, Page, Words};
+use northroom_core::deck::text::{glyph_at, text_between};
 use northroom_core::deck::{Colour, Command, Deck as Read, Form, Stroke};
 use northroom_core::geometry::Rect;
 use std::sync::Arc;
@@ -40,6 +41,32 @@ pub struct Deck {
     /// Where its slides sit for the view's size.
     page: Option<Page>,
     down: Scroller,
+    /// Selected text: the slide, and the glyph the drag began on and the one it reached.
+    selection: Option<(usize, usize, usize)>,
+    /// Whether a drag is selecting text.
+    selecting: bool,
+}
+
+/// The key context of a deck view, where ⌘C copies the selected text and ⌘A selects a page's.
+const KEYS: &str = "deck";
+
+pub fn bindings() -> Vec<gpui::KeyBinding> {
+    use kit::controls::input::{Copy, SelectAll};
+    vec![
+        gpui::KeyBinding::new("cmd-c", Copy, Some(KEYS)),
+        gpui::KeyBinding::new("cmd-a", SelectAll, Some(KEYS)),
+    ]
+}
+
+/// Where slide `index` of `page` sits in the view, scrolled by `scrolled` (view points).
+fn slide_frame(page: &Page, index: usize, scrolled: f64) -> Option<Rect> {
+    let slide = page.slides.get(index)?;
+    Some(Rect::new(
+        slide.x,
+        slide.y - scrolled,
+        slide.width,
+        slide.height,
+    ))
 }
 
 fn hsla(colour: Colour) -> Hsla {
@@ -176,6 +203,8 @@ impl Deck {
             shown: None,
             page: None,
             down: Scroller::default(),
+            selection: None,
+            selecting: false,
         };
         nr_unlock_forget_asked();
         deck.reload(window, cx);
@@ -191,21 +220,132 @@ impl Deck {
 
     // MARK: Pointer
 
-    fn mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+    fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
         if self.down.press(event.position, self.frame, now()) {
             cx.notify();
+            return;
         }
+        // A press on a page starts selecting its text from the glyph under it.
+        self.selection = self
+            .glyph_under(event.position)
+            .map(|(slide, glyph)| (slide, glyph, glyph));
+        self.selecting = self.selection.is_some();
+        cx.notify();
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.selecting {
+            if let Some((slide, anchor, _)) = self.selection {
+                let reached = self.glyph_on(slide, event.position);
+                if let Some(glyph) = reached {
+                    self.selection = Some((slide, anchor, glyph));
+                    cx.notify();
+                }
+            }
+            return;
+        }
         if self.down.pointer(event.position, self.frame, now()) || self.down.is_held() {
             cx.notify();
         }
     }
 
     fn mouse_up(&mut self, cx: &mut Context<Self>) {
+        self.selecting = false;
         if self.down.release(now()) {
             cx.notify();
+        }
+    }
+
+    /// The view point `at` in the view's own points.
+    fn local(&self, at: Point<Pixels>) -> (f64, f64) {
+        (
+            f64::from(at.x - self.frame.origin.x),
+            f64::from(at.y - self.frame.origin.y),
+        )
+    }
+
+    /// The slide under window point `at`, and the glyph of its text there.
+    fn glyph_under(&self, at: Point<Pixels>) -> Option<(usize, usize)> {
+        let page = self.page.as_ref()?;
+        let (x, y) = self.local(at);
+        let scrolled = f64::from(self.down.offset());
+        let slide = (0..page.slides.len()).find(|&index| {
+            slide_frame(page, index, scrolled).is_some_and(|frame| {
+                x >= frame.x
+                    && x <= frame.x + frame.width
+                    && y >= frame.y
+                    && y <= frame.y + frame.height
+            })
+        })?;
+        Some((slide, self.glyph_on(slide, at)?))
+    }
+
+    /// The glyph of slide `slide`'s text nearest window point `at`.
+    fn glyph_on(&self, slide: usize, at: Point<Pixels>) -> Option<usize> {
+        let frame = slide_frame(self.page.as_ref()?, slide, f64::from(self.down.offset()))?;
+        glyph_at(&deck_text(slide, frame), self.local(at))
+    }
+
+    /// The selected text, as it reads.
+    fn selected_text(&self) -> Option<String> {
+        let (slide, anchor, reached) = self.selection?;
+        let frame = slide_frame(self.page.as_ref()?, slide, 0.0)?;
+        Some(text_between(&deck_text(slide, frame), anchor, reached))
+    }
+
+    fn copy(&mut self, _: &kit::controls::input::Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.selected_text().filter(|text| !text.is_empty()) {
+            kit::platform::write_clipboard(&text, cx);
+        }
+    }
+
+    /// Selects the whole text of the page most in view.
+    fn select_all(
+        &mut self,
+        _: &kit::controls::input::SelectAll,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(page) = self.page.as_ref() else {
+            return;
+        };
+        let middle = f64::from(self.down.offset()) + f64::from(self.frame.size.height) / 2.0;
+        let slide = (0..page.slides.len()).min_by(|&a, &b| {
+            let distance = |index: usize| {
+                (page.slides[index].y + page.slides[index].height / 2.0 - middle).abs()
+            };
+            distance(a).total_cmp(&distance(b))
+        });
+        let Some(slide) = slide else {
+            return;
+        };
+        let count = slide_frame(page, slide, 0.0).map_or(0, |frame| deck_text(slide, frame).len());
+        if count > 0 {
+            self.selection = Some((slide, 0, count - 1));
+            cx.notify();
+        }
+    }
+
+    /// Paints the selection's glyphs on slide `index`, placed at `slide`.
+    fn paint_selection(&self, index: usize, slide: Rect, window: &mut Window) {
+        let Some((selected, anchor, reached)) =
+            self.selection.filter(|selection| selection.0 == index)
+        else {
+            return;
+        };
+        let _ = selected;
+        let tint = Hsla {
+            a: 0.3,
+            ..color(Token::Accent)
+        };
+        let glyphs = deck_text(index, slide);
+        for glyph in glyphs
+            .iter()
+            .skip(anchor.min(reached))
+            .take(anchor.max(reached) + 1 - anchor.min(reached))
+        {
+            fill(window, glyph.frame.at(self.frame.origin), tint);
         }
     }
 
@@ -245,6 +385,7 @@ impl Deck {
                     }
                 }
             }
+            self.paint_selection(index, slide, window);
         });
     }
 
@@ -279,9 +420,9 @@ impl Deck {
     fn listen(&self, hitbox: &Hitbox, window: &mut Window, cx: &mut Context<Self>) {
         let entity = cx.entity();
         let deck = entity.clone();
-        on_bubble_over(window, hitbox, move |event: &MouseDownEvent, _, cx| {
+        on_bubble_over(window, hitbox, move |event: &MouseDownEvent, window, cx| {
             if event.button == MouseButton::Left {
-                deck.update(cx, |deck, cx| deck.mouse_down(event, cx));
+                deck.update(cx, |deck, cx| deck.mouse_down(event, window, cx));
             }
         });
         let deck = entity.clone();
@@ -362,6 +503,9 @@ impl Render for Deck {
         let deck = cx.entity();
         placed("deck", cx.entity_id(), self.frame)
             .track_focus(&self.focus)
+            .key_context(KEYS)
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::select_all))
             .child(
                 canvas(
                     |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),

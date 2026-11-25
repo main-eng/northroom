@@ -182,6 +182,12 @@ pub trait Sink {
     fn clip(&mut self, clip: &Clip, path: &[Command]) -> Clip;
     /// Paints from here on mix with what is under them in `blend`.
     fn set_blend(&mut self, _blend: Blend) {}
+    /// Whether the run should read the text shown (`glyph`), loading fonts for it.
+    fn wants_text(&self) -> bool {
+        false
+    }
+    /// A glyph shown, its text and its box (left, top, right, bottom in device space).
+    fn glyph(&mut self, _text: &str, _bounds: [f64; 4]) {}
     /// Where both clips cover.
     fn combine(&mut self, a: &Clip, _b: &Clip) -> Clip {
         a.clone()
@@ -854,7 +860,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             return;
         };
         self.state.text.size = size;
-        if !self.sink.wants_detail() {
+        if !self.sink.wants_detail() && !self.sink.wants_text() {
             return;
         }
         let object = resources
@@ -950,21 +956,55 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             return;
         };
         for shown in font.codes(bytes) {
-            let code = shown.code;
-            let glyph_matrix = multiply(
-                [text.size * text.scale, 0.0, 0.0, text.size, 0.0, text.rise],
-                self.text_matrix,
-            );
-            self.draw_glyph(&font, code, glyph_matrix);
-            let spacing = if shown.is_space {
-                text.word_spacing
-            } else {
-                0.0
-            };
-            let advance =
-                (font.width(code) * text.size + text.character_spacing + spacing) * text.scale;
-            self.text_matrix = multiply([1.0, 0.0, 0.0, 1.0, advance, 0.0], self.text_matrix);
+            self.show_code(&font, shown, &text);
         }
+    }
+
+    /// Shows one code: its glyph drawn (or its text read), then the pen moved by its width and
+    /// spacing.
+    fn show_code(&mut self, font: &Rc<Font>, shown: super::font::Shown, text: &TextState) {
+        let code = shown.code;
+        let glyph_matrix = multiply(
+            [text.size * text.scale, 0.0, 0.0, text.size, 0.0, text.rise],
+            self.text_matrix,
+        );
+        if self.sink.wants_text() {
+            self.note_glyph(font, code, glyph_matrix);
+        } else {
+            self.draw_glyph(font, code, glyph_matrix);
+        }
+        let spacing = if shown.is_space {
+            text.word_spacing
+        } else {
+            0.0
+        };
+        let advance =
+            (font.width(code) * text.size + text.character_spacing + spacing) * text.scale;
+        self.text_matrix = multiply([1.0, 0.0, 0.0, 1.0, advance, 0.0], self.text_matrix);
+    }
+
+    /// Hands the sink a glyph's text and box: its advance across, and from a fifth of an em
+    /// below the baseline to four fifths above.
+    fn note_glyph(&mut self, font: &Font, code: u32, glyph_matrix: Matrix) {
+        let Some(text) = font.text_of(code) else {
+            return;
+        };
+        if self.state.text.mode == 7 || self.hidden() {
+            return;
+        }
+        let device = multiply(glyph_matrix, self.state.ctm);
+        let width = font.width(code).max(0.1);
+        let corners = [(0.0, -0.2), (width, -0.2), (width, 0.8), (0.0, 0.8)]
+            .map(|point| apply(device, point));
+        let xs = corners.map(|point| point.0);
+        let ys = corners.map(|point| point.1);
+        let bounds = [
+            xs.iter().copied().fold(f64::MAX, f64::min),
+            ys.iter().copied().fold(f64::MAX, f64::min),
+            xs.iter().copied().fold(f64::MIN, f64::max),
+            ys.iter().copied().fold(f64::MIN, f64::max),
+        ];
+        self.sink.glyph(&text, bounds);
     }
 
     fn show_adjusted(&mut self, items: &[Object]) {
@@ -1363,7 +1403,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             if let (Some(font), Some(size)) = (items.first(), items.get(1).and_then(Object::as_f64))
             {
                 self.state.text.size = size;
-                if self.sink.wants_detail() {
+                if self.sink.wants_detail() || self.sink.wants_text() {
                     self.state.text.font = self.load_font(font);
                 }
             }

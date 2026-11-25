@@ -207,6 +207,8 @@ pub struct Font {
     cid_to_gid: Option<Vec<u16>>,
     /// A composite font's CMap: how its bytes split into codes, and each code's CID.
     cmap: Option<CMap>,
+    /// What `ToUnicode` says each code (CID in a composite font) is, ligatures whole.
+    unicode: HashMap<u32, String>,
     outlines: RefCell<HashMap<u32, Option<Rc<Vec<Command>>>>>,
 }
 
@@ -451,11 +453,13 @@ impl Font {
             .filter_map(|(code, name)| Some((*code, char_of_name(name)?)))
             .collect();
         // What `ToUnicode` says fills in codes the names don't.
+        let mut unicode = HashMap::new();
         if let Some(text) = to_unicode(document, dict) {
             for (code, text) in text.texts() {
                 if let Some(character) = text.chars().next() {
                     chars.entry(code).or_insert(character);
                 }
+                unicode.insert(code, text.to_owned());
             }
         }
         let missing =
@@ -470,6 +474,7 @@ impl Font {
             symbolic,
             cid_to_gid: None,
             cmap: None,
+            unicode,
             outlines: RefCell::default(),
         }
     }
@@ -503,14 +508,19 @@ impl Font {
             _ => None,
         };
         let cmap = composite_cmap(document, dict);
-        // Text by CID, for drawing in the app's own face when the font isn't embedded.
-        let chars = to_unicode(document, dict)
+        // Text by CID, for drawing in the app's own face when the font isn't embedded, and
+        // for reading.
+        let unicode: HashMap<u32, String> = to_unicode(document, dict)
             .map(|text| {
                 text.texts()
-                    .filter_map(|(code, text)| Some((cmap.cid(code), text.chars().next()?)))
+                    .map(|(code, text)| (cmap.cid(code), text.to_owned()))
                     .collect()
             })
             .unwrap_or_default();
+        let chars = unicode
+            .iter()
+            .filter_map(|(cid, text)| Some((*cid, text.chars().next()?)))
+            .collect();
         Font {
             program,
             two_byte: true,
@@ -524,6 +534,7 @@ impl Font {
             symbolic: false,
             cid_to_gid,
             cmap: Some(cmap),
+            unicode,
             outlines: RefCell::default(),
         }
     }
@@ -556,6 +567,7 @@ impl Font {
             symbolic: true,
             cid_to_gid: None,
             cmap: None,
+            unicode: HashMap::new(),
             outlines: RefCell::default(),
         }
     }
@@ -655,6 +667,14 @@ impl Font {
         let made = self.make_outline(code).map(Rc::new);
         self.outlines.borrow_mut().insert(code, made.clone());
         made
+    }
+
+    /// The text `code` stands for: as `ToUnicode` says, else its glyph name's character.
+    pub fn text_of(&self, code: u32) -> Option<String> {
+        if let Some(text) = self.unicode.get(&code) {
+            return Some(text.clone());
+        }
+        self.chars.get(&code).map(char::to_string)
     }
 
     /// How far `code` moves the pen, in text space.

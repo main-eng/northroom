@@ -30,6 +30,7 @@ pub mod shading;
 pub mod stroke;
 pub mod type1;
 
+use crate::deck::Command;
 use crate::deck::{Colour, Deck, Fit, Item, Placed, Slide, Source};
 use crate::geometry::Rect;
 use object::{Dict, Document, Object};
@@ -462,6 +463,53 @@ pub fn render_layer(
     Ok(renderer.canvas.png())
 }
 
+/// A glyph of a page's text: what it says and where it is, in page points from the top left.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextGlyph {
+    pub text: String,
+    pub frame: Rect,
+}
+
+/// Reads a page's text without drawing.
+#[derive(Default)]
+struct Reader {
+    glyphs: Vec<TextGlyph>,
+}
+
+impl render::Sink for Reader {
+    fn wants_detail(&self) -> bool {
+        false
+    }
+    fn wants_text(&self) -> bool {
+        true
+    }
+    fn glyph(&mut self, text: &str, [left, top, right, bottom]: [f64; 4]) {
+        self.glyphs.push(TextGlyph {
+            text: text.to_owned(),
+            frame: Rect::new(left, top, right - left, bottom - top),
+        });
+    }
+    fn fill(&mut self, _: &[Command], _: raster::Rgba, _: &render::Clip) {}
+    fn stroke(&mut self, _: &[Command], _: &stroke::Pen, _: raster::Rgba, _: &render::Clip) {}
+    fn shade(&mut self, _: &dyn shading::Paint, _: &render::Clip) {}
+    fn picture(&mut self, _: Option<image::Picture>, _: render::Matrix, _: f32, _: &render::Clip) {}
+    fn encoded(&mut self, _: &object::Stream, _: [f64; 4], _: [f64; 4]) {}
+    fn clip(&mut self, _: &render::Clip, _: &[Command]) -> render::Clip {
+        None
+    }
+}
+
+/// Page `number`'s text, glyph by glyph in the order the page shows them.
+pub fn page_text(bytes: Vec<u8>, password: Option<&[u8]>, number: usize) -> Result<Vec<TextGlyph>> {
+    let (document, pages) = open_pages(bytes, password)?;
+    let page = pages
+        .get(number)
+        .ok_or_else(|| PdfError::Damaged("The PDF has no such page.".into()))?;
+    let mut reader = Reader::default();
+    run_page(&document, page, &mut reader, 1.0);
+    Ok(reader.glyphs)
+}
+
 /// The bytes of encoded picture `picture` on page `number`.
 pub fn extract_picture(
     bytes: Vec<u8>,
@@ -834,6 +882,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_pages_text_reads_glyph_by_glyph_where_it_shows() {
+        let glyphs = page_text(sample(), None, 0).expect("text");
+        let text: String = glyphs.iter().map(|glyph| glyph.text.as_str()).collect();
+        assert_eq!(text, "Hi");
+        // 24-point text from x 80 at a baseline 40 points up a 100-point page.
+        let first = &glyphs[0].frame;
+        assert!((first.x - 80.0).abs() < 0.01, "{first:?}");
+        assert!(first.y < 60.0 && first.y + first.height > 55.0, "{first:?}");
     }
 
     #[test]

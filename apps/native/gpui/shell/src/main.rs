@@ -238,6 +238,7 @@ fn install_text_and_keys(cx: &mut App) {
     cx.bind_keys(kit::controls::input::bindings());
     cx.bind_keys(kit::lists::bindings());
     cx.bind_keys(crate::screens::page::bindings());
+    cx.bind_keys(crate::screens::deck::bindings());
 }
 
 /// Tells the core the system appearance at launch.
