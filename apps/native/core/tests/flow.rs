@@ -2,7 +2,7 @@
 //! in `fixtures/flow`, with the script that made it where a script did.
 
 use northroom_core::deck::flow::{self, Block, Flow};
-use northroom_core::deck::{docx, odt, rtf, Align, Colour, Fit, Paragraph, Source, Spacing};
+use northroom_core::deck::{doc, docx, odt, rtf, Align, Colour, Fit, Paragraph, Source, Spacing};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> PathBuf {
@@ -251,4 +251,42 @@ fn the_sample_rich_text_letters_read_like_their_word_twin() {
         package.blocks[0],
         Block::Picture { picture: 0, .. }
     ));
+}
+
+#[test]
+fn the_sample_word_97_letter_reads_like_its_word_twin() {
+    let word = docx::read(&fixture("Wholesale letter.docx")).expect("read");
+    let old = doc::read(&fixture("Wholesale letter.doc")).expect("read");
+    let words = |flow: &Flow| -> Vec<String> {
+        paragraphs(flow)
+            .into_iter()
+            .map(|paragraph| {
+                text(paragraph)
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .filter(|line| !line.is_empty())
+            .collect()
+    };
+    assert_eq!(words(&old), words(&word));
+    let written = paragraphs(&old);
+    let heading = &written[1].runs[0];
+    assert_eq!(
+        (
+            heading.text.as_str(),
+            heading.size,
+            heading.bold,
+            heading.colour
+        ),
+        ("HARBOR COFFEE", 29.0, true, hex("1b5e3a"))
+    );
+    // Spacing and runs from the paragraph's and characters' formatting.
+    assert_eq!(written[2].after, Spacing::Points(37.3));
+    let coffee = &written[8];
+    assert_eq!(
+        (coffee.runs[0].text.as_str(), coffee.runs[0].bold),
+        ("Morning Tide", true)
+    );
+    assert!(!coffee.runs[1].bold);
 }

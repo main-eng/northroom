@@ -8,6 +8,7 @@
 //! and are left out when they hold none, and rotation, shadows, gradients (drawn as their
 //! first colour), charts, animations and transitions are not drawn.
 
+pub mod doc;
 pub mod docx;
 pub mod ffi;
 pub mod flow;
@@ -70,6 +71,8 @@ pub enum Kind {
     Presentation,
     /// Word: `.docx` and its macro and template forms.
     WordDocument,
+    /// Word 97–2003: `.doc` and its template form.
+    LegacyWordDocument,
     /// OpenDocument text: `.odt` and its template form.
     OpenDocumentText,
     /// OpenDocument presentation: `.odp` and its template form.
@@ -98,6 +101,7 @@ impl Kind {
             Kind::AppleDocument => iwork::is_document(path),
             Kind::Presentation
             | Kind::WordDocument
+            | Kind::LegacyWordDocument
             | Kind::OpenDocumentText
             | Kind::OpenDocumentPresentation
             | Kind::RichText
@@ -112,6 +116,7 @@ impl Kind {
             Kind::Photoshop | Kind::RawPhoto | Kind::AppleDocument => PICTURE_MAX_BYTES,
             Kind::Presentation
             | Kind::WordDocument
+            | Kind::LegacyWordDocument
             | Kind::OpenDocumentText
             | Kind::OpenDocumentPresentation
             | Kind::RichText => DOCUMENT_MAX_BYTES,
@@ -127,6 +132,7 @@ impl Kind {
         Some(match extension.as_str() {
             "pptx" | "pptm" | "ppsx" | "ppsm" | "potx" | "potm" => Kind::Presentation,
             "docx" | "docm" | "dotx" | "dotm" => Kind::WordDocument,
+            "doc" | "dot" => Kind::LegacyWordDocument,
             "odt" | "ott" => Kind::OpenDocumentText,
             "odp" | "otp" => Kind::OpenDocumentPresentation,
             "rtf" | "rtfd" => Kind::RichText,
@@ -145,6 +151,7 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
     match kind {
         Kind::Presentation => pptx::read(path),
         Kind::WordDocument => Ok(flow::paginate(docx::read(path)?, measure)),
+        Kind::LegacyWordDocument => Ok(flow::paginate(doc::read(path)?, measure)),
         Kind::OpenDocumentText => Ok(flow::paginate(odt::read(path)?, measure)),
         Kind::OpenDocumentPresentation => odp::read(path),
         Kind::RichText => Ok(flow::paginate(rtf::read(path)?, measure)),
