@@ -145,8 +145,10 @@ pub trait Sink {
     fn stroke(&mut self, path: &[Command], width: f64, colour: Rgba, clip: &Clip);
     fn gradient(&mut self, gradient: &Gradient, clip: &Clip);
     fn picture(&mut self, picture: Option<Picture>, matrix: Matrix, alpha: f32, clip: &Clip);
-    /// An encoded picture: a JPEG or JPEG 2000 the system decodes, at `matrix`.
-    fn encoded(&mut self, stream: &Stream, matrix: Matrix);
+    /// An encoded picture the system decodes and draws on its own: a JPEG or JPEG 2000 shown
+    /// in `frame` (left, top, width, height), with `crop` of each edge (left, top, right,
+    /// bottom, as shares of the picture) cut off by a rectangular clip.
+    fn encoded(&mut self, stream: &Stream, frame: [f64; 4], crop: [f64; 4]);
     /// The clip `clip` narrowed to `path`.
     fn clip(&mut self, clip: &Clip, path: &[Command]) -> Clip;
 }
@@ -175,7 +177,80 @@ struct State {
     fill_alpha: f32,
     stroke_alpha: f32,
     clip: Clip,
+    /// The clip's shape, which decides whether a JPEG can be left to the system.
+    clip_area: ClipArea,
     text: TextState,
+}
+
+/// The shape of the clip in effect, in device space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ClipArea {
+    Whole,
+    /// An upright rectangle: left, top, right, bottom.
+    Rectangle([f64; 4]),
+    Shaped,
+}
+
+impl ClipArea {
+    /// The clip narrowed to `path`.
+    fn narrowed(self, path: &[Command]) -> Self {
+        match (self, rectangle_of(path)) {
+            (ClipArea::Whole, Some(rectangle)) => ClipArea::Rectangle(rectangle),
+            (ClipArea::Rectangle(area), Some(rectangle)) => {
+                ClipArea::Rectangle(overlap(area, rectangle))
+            }
+            _ => ClipArea::Shaped,
+        }
+    }
+}
+
+/// Where two rectangles (left, top, right, bottom) overlap; empty when they don't.
+fn overlap(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+    let (left, top) = (a[0].max(b[0]), a[1].max(b[1]));
+    [left, top, a[2].min(b[2]).max(left), a[3].min(b[3]).max(top)]
+}
+
+/// The upright rectangle a path outlines (left, top, right, bottom), if it is one: a single
+/// outline of four straight sides, each level or plumb.
+fn rectangle_of(path: &[Command]) -> Option<[f64; 4]> {
+    let mut points = Vec::new();
+    for (index, command) in path.iter().enumerate() {
+        match (index, *command) {
+            (0, Command::Move(x, y)) | (1.., Command::Line(x, y)) => points.push((x, y)),
+            (1.., Command::Close) => {}
+            _ => return None,
+        }
+    }
+    if points.len() == 5 && points[4] == points[0] {
+        points.pop();
+    }
+    if points.len() != 4 {
+        return None;
+    }
+    let level_or_plumb = (0..4).all(|index| {
+        let (from, to) = (points[index], points[(index + 1) % 4]);
+        (from.0 - to.0).abs() < 1e-6 || (from.1 - to.1).abs() < 1e-6
+    });
+    let xs = points.iter().map(|point| point.0);
+    let ys = points.iter().map(|point| point.1);
+    level_or_plumb.then(|| {
+        [
+            xs.clone().fold(f64::MAX, f64::min),
+            ys.clone().fold(f64::MAX, f64::min),
+            xs.fold(f64::MIN, f64::max),
+            ys.fold(f64::MIN, f64::max),
+        ]
+    })
+}
+
+/// How a picture is shown.
+enum Placement {
+    /// Clipped away entirely.
+    Hidden,
+    /// Left to the system's decoder, in `frame` with `crop` cut off (`Sink::encoded`).
+    System { frame: [f64; 4], crop: [f64; 4] },
+    /// Decoded here and drawn into the layer, with its transparency, masks and clip.
+    Drawn,
 }
 
 impl State {
@@ -191,6 +266,7 @@ impl State {
             fill_alpha: 1.0,
             stroke_alpha: 1.0,
             clip: None,
+            clip_area: ClipArea::Whole,
             text: TextState {
                 font: None,
                 size: 0.0,
@@ -372,6 +448,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
         if self.pending_clip {
             self.pending_clip = false;
             self.state.clip = self.sink.clip(&self.state.clip, &path);
+            self.state.clip_area = self.state.clip_area.narrowed(&path);
         }
     }
 
@@ -743,11 +820,38 @@ impl<'a, S: Sink> Interpreter<'a, S> {
 
     // --- Pictures and forms ----------------------------------------------------------------
 
+    /// Whether a picture can be left to the system: a JPEG drawn upright, opaque, unmasked and
+    /// clipped at most to a rectangle. A JPEG 2000 always is, as the core has no decoder for it.
+    fn placement(&self, stream: &Stream) -> Placement {
+        let matrix = self.state.ctm;
+        let codec = super::filter::codec(stream, Some(self.document));
+        let masked = ["SMask", "Mask"]
+            .iter()
+            .any(|key| !matches!(self.document.entry(&stream.dict, key), Object::Null));
+        let upright = matrix[1].abs() <= 1e-9 * matrix[0].abs()
+            && matrix[2].abs() <= 1e-9 * matrix[3].abs()
+            && matrix[0] > 0.0
+            && matrix[3] < 0.0;
+        let plain = upright
+            && self.state.fill_alpha >= 1.0
+            && !masked
+            && self.state.clip_area != ClipArea::Shaped;
+        match codec {
+            Some("jpx") => system_placement(matrix, self.state.clip_area),
+            Some(_) if plain => system_placement(matrix, self.state.clip_area),
+            _ => Placement::Drawn,
+        }
+    }
+
     fn draw_picture(&mut self, stream: &Stream) {
         let matrix = self.state.ctm;
-        if super::filter::codec(stream, Some(self.document)).is_some() {
-            self.sink.encoded(stream, matrix);
-            return;
+        match self.placement(stream) {
+            Placement::Hidden => return,
+            Placement::System { frame, crop } => {
+                self.sink.encoded(stream, frame, crop);
+                return;
+            }
+            Placement::Drawn => {}
         }
         let picture = if self.sink.wants_detail() {
             image::read(
@@ -1051,14 +1155,38 @@ impl<'a, S: Sink> Interpreter<'a, S> {
 // --- Planning and rendering ----------------------------------------------------------------
 
 /// A part of a page: a layer of drawn marks, or an encoded picture with its frame in page
-/// points (left, top, width, height).
+/// points (left, top, width, height) and the shares of each edge a clip cuts off.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Part {
     Layer,
     Encoded {
         extension: &'static str,
         frame: [f64; 4],
+        crop: [f64; 4],
     },
+}
+
+/// Where a picture the system draws shows: its frame cut to the clip's rectangle, and the
+/// shares of each edge cut off.
+fn system_placement(matrix: Matrix, clip: ClipArea) -> Placement {
+    let [left, top, width, height] = frame_of(matrix);
+    let whole = [left, top, left + width, top + height];
+    let shown = match clip {
+        ClipArea::Rectangle(area) => overlap(whole, area),
+        ClipArea::Whole | ClipArea::Shaped => whole,
+    };
+    if shown[2] <= shown[0] || shown[3] <= shown[1] || width <= 0.0 || height <= 0.0 {
+        return Placement::Hidden;
+    }
+    Placement::System {
+        frame: [shown[0], shown[1], shown[2] - shown[0], shown[3] - shown[1]],
+        crop: [
+            (shown[0] - whole[0]) / width,
+            (shown[1] - whole[1]) / height,
+            (whole[2] - shown[2]) / width,
+            (whole[3] - shown[3]) / height,
+        ],
+    }
 }
 
 /// The frame a unit square covers under `matrix`, as left, top, width, height.
@@ -1104,14 +1232,15 @@ impl Sink for Planner {
     fn picture(&mut self, _: Option<Picture>, _: Matrix, _: f32, _: &Clip) {
         self.marked = true;
     }
-    fn encoded(&mut self, stream: &Stream, matrix: Matrix) {
+    fn encoded(&mut self, stream: &Stream, frame: [f64; 4], crop: [f64; 4]) {
         if std::mem::take(&mut self.marked) {
             self.parts.push(Part::Layer);
         }
         let extension = super::filter::codec(stream, None).unwrap_or("jpeg");
         self.parts.push(Part::Encoded {
             extension,
-            frame: frame_of(matrix),
+            frame,
+            crop,
         });
     }
     fn clip(&mut self, _: &Clip, _: &[Command]) -> Clip {
@@ -1167,7 +1296,7 @@ impl Sink for Renderer {
         if !self.mark() {
             return;
         }
-        if let Some(Picture::Pixels {
+        if let Some(Picture {
             rgba,
             width,
             height,
@@ -1177,7 +1306,7 @@ impl Sink for Renderer {
                 .image(&rgba, (width, height), matrix, alpha, clip.as_deref());
         }
     }
-    fn encoded(&mut self, _: &Stream, _: Matrix) {
+    fn encoded(&mut self, _: &Stream, _: [f64; 4], _: [f64; 4]) {
         if std::mem::take(&mut self.marked) {
             self.layer += 1;
         }
@@ -1215,7 +1344,7 @@ impl Sink for Extractor {
     fn stroke(&mut self, _: &[Command], _: f64, _: Rgba, _: &Clip) {}
     fn gradient(&mut self, _: &Gradient, _: &Clip) {}
     fn picture(&mut self, _: Option<Picture>, _: Matrix, _: f32, _: &Clip) {}
-    fn encoded(&mut self, stream: &Stream, _: Matrix) {
+    fn encoded(&mut self, stream: &Stream, _: [f64; 4], _: [f64; 4]) {
         if self.seen == self.wanted {
             self.found = super::filter::decode(stream, None).ok();
         }

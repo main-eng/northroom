@@ -2,10 +2,11 @@
 //! system.
 //!
 //! A PDF opens as a deck of pages. Each page is planned when the file opens (`render::Planner`):
-//! its drawn marks fall into layers, and each JPEG or JPEG 2000 picture sits between them, since
-//! those pictures are decoded by the system (ADR-0004). A layer is drawn by the core's own
-//! rasterizer into a picture when a view first shows it (`render_layer`), and kept in the app's
-//! caches like any deck picture.
+//! its drawn marks fall into layers, and each plain JPEG or JPEG 2000 picture sits between them,
+//! decoded by the system (ADR-0004) and cut to a rectangular clip. A JPEG that is see-through,
+//! masked, turned or clipped to a shape is drawn into its layer instead. A layer is drawn by
+//! the core's own rasterizer into a picture when a view first shows it (`render_layer`), and
+//! kept in the app's caches like any deck picture.
 //!
 //! Left out: text selection and search, links and forms' interaction, page zoom beyond the
 //! page view's, and what `render`, `image`, `font` and `raster` say they leave out.
@@ -279,7 +280,7 @@ fn slide_of(document: &Document, page: &Page, number: usize, pictures: &mut Vec<
     let (mut layers, mut encoded) = (0, 0);
     let mut items = Vec::new();
     for part in planner.finish() {
-        let (source, frame) = match part {
+        let (source, frame, crop) = match part {
             Part::Layer => {
                 layers += 1;
                 (
@@ -288,9 +289,14 @@ fn slide_of(document: &Document, page: &Page, number: usize, pictures: &mut Vec<
                         layer: layers - 1,
                     },
                     [0.0, 0.0, width, height],
+                    [0.0; 4],
                 )
             }
-            Part::Encoded { extension, frame } => {
+            Part::Encoded {
+                extension,
+                frame,
+                crop,
+            } => {
                 encoded += 1;
                 (
                     Source::PdfPicture {
@@ -299,6 +305,7 @@ fn slide_of(document: &Document, page: &Page, number: usize, pictures: &mut Vec<
                         extension,
                     },
                     frame,
+                    crop,
                 )
             }
         };
@@ -306,7 +313,7 @@ fn slide_of(document: &Document, page: &Page, number: usize, pictures: &mut Vec<
         items.push(Item::Picture(Placed {
             frame: Rect::new(frame[0], frame[1], frame[2], frame[3]),
             picture: pictures.len() - 1,
-            crop: [0.0; 4],
+            crop,
         }));
     }
     Slide {
@@ -477,6 +484,105 @@ mod tests {
         // Turned a quarter clockwise, the bottom-left corner shows at the top left.
         assert_eq!(pixel(&renderer.canvas, 5, 5), [0, 0, 0, 255]);
         assert_eq!(pixel(&renderer.canvas, 5, 195)[3], 0);
+    }
+
+    /// A 16-pixel blue JPEG as an image stream, written in hex so the PDF stays text, with
+    /// `extra` entries.
+    fn blue_jpeg(extra: &str) -> String {
+        let hex: String = include_bytes!("../../tests/fixtures/pdf/blue.jpg")
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<String>()
+            + ">";
+        format!(
+            "<< /Type /XObject /Subtype /Image /Width 16 /Height 16 /ColorSpace /DeviceRGB \
+             /BitsPerComponent 8 /Filter [/ASCIIHexDecode /DCTDecode] {extra} /Length {} >>\n\
+             stream\n{hex}\nendstream",
+            hex.len()
+        )
+    }
+
+    /// Four pages of the same JPEG: plain and cut by a rectangle, half see-through, clipped to
+    /// a triangle, and under a soft mask clear on its left half.
+    fn pictures() -> Vec<u8> {
+        pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R] /Count 4 /MediaBox [0 0 200 100] \
+             /Resources << /XObject << /Im0 11 0 R /Im1 12 0 R >> /ExtGState << /Half 14 0 R >> >> >>"
+                .into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 7 0 R >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 8 0 R >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 9 0 R >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 10 0 R >>".into(),
+            stream("q 0 0 100 100 re W n 200 0 0 100 0 0 cm /Im0 Do Q"),
+            stream("q /Half gs 100 0 0 100 0 0 cm /Im0 Do Q"),
+            stream("q 0 0 m 100 0 l 0 100 l h W n 100 0 0 100 0 0 cm /Im0 Do Q"),
+            stream("q 100 0 0 100 0 0 cm /Im1 Do Q"),
+            blue_jpeg(""),
+            blue_jpeg("/SMask 13 0 R"),
+            "<< /Type /XObject /Subtype /Image /Width 2 /Height 1 /ColorSpace /DeviceGray \
+             /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 5 >>\nstream\n00FF>\nendstream"
+                .into(),
+            "<< /Type /ExtGState /ca 0.5 >>".into(),
+        ])
+    }
+
+    fn drawn(page: usize) -> raster::Canvas {
+        let document = Document::open(pictures()).expect("open");
+        let pages = pages_of(&document);
+        let mut renderer = render::Renderer::new(200, 100, 0);
+        run_page(&document, &pages[page], &mut renderer, 1.0);
+        renderer.canvas
+    }
+
+    fn is_blue(pixel: [u8; 4]) -> bool {
+        pixel[0] < 16 && pixel[1] < 16 && pixel[2] > 235 && pixel[3] == 255
+    }
+
+    #[test]
+    fn a_plain_jpeg_is_left_to_the_system_cut_by_its_rectangular_clip() {
+        let deck = parse(pictures()).expect("a deck");
+        let [Item::Picture(placed)] = deck.slides[0].items.as_slice() else {
+            panic!("one picture: {:?}", deck.slides[0].items);
+        };
+        assert_eq!(
+            deck.pictures[placed.picture],
+            Source::PdfPicture {
+                page: 0,
+                picture: 0,
+                extension: "jpeg"
+            }
+        );
+        assert_eq!(placed.frame, Rect::new(0.0, 0.0, 100.0, 100.0));
+        assert_eq!(placed.crop, [0.0, 0.0, 0.5, 0.0]);
+    }
+
+    #[test]
+    fn a_see_through_masked_or_shaped_jpeg_is_drawn_into_its_page() {
+        let deck = parse(pictures()).expect("a deck");
+        for slide in &deck.slides[1..] {
+            let [Item::Picture(placed)] = slide.items.as_slice() else {
+                panic!("one layer: {:?}", slide.items);
+            };
+            assert!(matches!(
+                deck.pictures[placed.picture],
+                Source::PdfLayer { .. }
+            ));
+        }
+        // Half see-through: premultiplied blue at half alpha.
+        let half = drawn(1).pixel(50, 50);
+        assert!(
+            (120..=136).contains(&half[3]) && half[2].abs_diff(half[3]) < 8,
+            "{half:?}"
+        );
+        // Clipped to the triangle below the diagonal from top left to bottom right.
+        let triangle = drawn(2);
+        assert!(is_blue(triangle.pixel(10, 90)));
+        assert_eq!(triangle.pixel(90, 10)[3], 0);
+        // The soft mask hides the left half.
+        let masked = drawn(3);
+        assert_eq!(masked.pixel(25, 50)[3], 0);
+        assert!(is_blue(masked.pixel(75, 50)));
     }
 
     #[test]

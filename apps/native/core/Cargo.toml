@@ -47,6 +47,10 @@ skrifa = { version = "0.44", default-features = false, features = ["std"] }
 md-5 = { version = "0.10", default-features = false }
 aes = "0.8"
 sha2 = { version = "0.10", default-features = false }
+# Decodes a JPEG on a PDF page that is see-through, masked or clipped to a shape, so it is
+# drawn into the page (`pdf::image`): MIT, Apache-2.0 or Zlib; in the GPUI shell's tree, at this
+# version, through GPUI's `image`.
+zune-jpeg = "0.5"
 harfrust = "0.12"
 # Where a line may break (`typeset`): ICU4X's rules, the Unicode rules Core Text breaks lines
 # by (Unicode-3.0; in the GPUI shell's tree).
