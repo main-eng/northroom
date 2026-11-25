@@ -7,12 +7,15 @@
 //! narrower or wider than the app's, so a line may end a little short of or past the frame.
 
 use super::{
-    Align, Anchor, Body, Colour, Deck, Form, Item, Paragraph, Run, Shape, Spacing, Stroke,
+    Align, Anchor, Body, Colour, Deck, Fit, Form, Item, Paragraph, Run, Shape, Spacing, Stroke,
 };
 use crate::board::card::Font;
 use crate::dialog::layout::Measure;
 use crate::geometry::Rect;
 
+/// The largest a document's page is drawn, as a share of its own size: across a wide view it
+/// stops growing, so its text stays at reading size.
+const PAGE_ZOOM_MAX: f64 = 1.5;
 /// The space around the slides and between two of them.
 pub const MARGIN: f64 = 24.0;
 pub const GAP: f64 = 16.0;
@@ -37,7 +40,10 @@ pub fn page(deck: &Deck, width: f64, height: f64) -> Page {
         (width - 2.0 * MARGIN).max(1.0),
         (height - 2.0 * MARGIN).max(1.0),
     );
-    let zoom = (room.0 / deck.width).min(room.1 / deck.height);
+    let zoom = match deck.fit {
+        Fit::Whole => (room.0 / deck.width).min(room.1 / deck.height),
+        Fit::Width => (room.0 / deck.width).min(PAGE_ZOOM_MAX),
+    };
     let (slide_width, slide_height) = (deck.width * zoom, deck.height * zoom);
     let left = ((width - slide_width) / 2.0).max(0.0);
     let slides: Vec<Rect> = (0..deck.slides.len())
@@ -381,6 +387,19 @@ impl Setting<'_> {
     }
 }
 
+/// How tall `body`'s text is when set `width` wide, its insets included: what a document is cut
+/// into pages by (`flow`).
+pub(crate) fn body_height(body: &Body, width: f64, measure: &mut Measure) -> f64 {
+    let [left, top, right, bottom] = body.insets;
+    let inner = (width - left - right).max(0.0);
+    let text: f64 = body
+        .paragraphs
+        .iter()
+        .map(|paragraph| set_paragraph(paragraph, body, inner, measure).height(body))
+        .sum();
+    top + text + bottom
+}
+
 /// Sets a shape's text inside `frame` on the slide.
 fn set_body(body: &Body, frame: Rect, stage: Stage, measure: &mut Measure, marks: &mut Vec<Mark>) {
     let [left, top, right, bottom] = body.insets;
@@ -507,6 +526,7 @@ mod tests {
                     text: Some(body),
                 })],
             }],
+            fit: Fit::Whole,
             pictures: Vec::new(),
         }
     }

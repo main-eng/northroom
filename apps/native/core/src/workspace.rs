@@ -619,8 +619,8 @@ pub fn is_system_preview_file(path: &Path) -> bool {
 const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
     // Presentations the deck cannot read: legacy PowerPoint, Keynote and OpenDocument.
     "ppt", "pps", "pot", "key", "odp",
-    // Documents: Word, rich text, Pages and OpenDocument.
-    "docx", "docm", "doc", "dotx", "rtf", "rtfd", "pages", "odt",
+    // Documents the page view cannot read: legacy Word, rich text, Pages and OpenDocument.
+    "doc", "rtf", "rtfd", "pages", "odt",
     // Spreadsheets the table cannot read: legacy Excel and Numbers.
     "xls", "numbers",
     // Fonts.
@@ -653,7 +653,8 @@ pub enum FileRead {
     /// An Excel or OpenDocument workbook up to `workbook::FILE_MAX_BYTES`, by name: a table
     /// when opened.
     Workbook,
-    /// A PowerPoint presentation up to `pptx::FILE_MAX_BYTES`, by name: slides when opened.
+    /// A file drawn as pages (`deck::Kind`) up to `deck::FILE_MAX_BYTES`, by name: its pages
+    /// when opened.
     Deck,
     /// A SQLite database, by contents (`database::is_database`): tables when opened. The
     /// string is the top of its first table for the card (empty when there is no table or it is
@@ -750,8 +751,8 @@ fn read_by_name(path: &Path, length_bytes: u64) -> Option<FileRead> {
 /// show, else as a file with only its details. `None` for any other name.
 fn read_document(path: &Path, length_bytes: u64) -> Option<FileRead> {
     let name = path.file_name()?.to_string_lossy();
-    let (shown, max_bytes) = if crate::deck::pptx::is_presentation_name(&name) {
-        (FileRead::Deck, crate::deck::pptx::FILE_MAX_BYTES)
+    let (shown, max_bytes) = if crate::deck::Kind::of_name(&name).is_some() {
+        (FileRead::Deck, crate::deck::FILE_MAX_BYTES)
     } else if crate::sheets::workbook::is_workbook_name(&name) {
         (FileRead::Workbook, crate::sheets::workbook::FILE_MAX_BYTES)
     } else {
@@ -2651,7 +2652,7 @@ mod tests {
         for name in [
             "Pitch.ppt",
             "Pitch.key",
-            "Letter.docx",
+            "Letter.doc",
             "Brand.otf",
             "Cup.usdz",
             "Bag.obj",

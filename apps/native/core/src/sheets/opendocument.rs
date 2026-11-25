@@ -9,10 +9,10 @@
 //! empty runs are skipped without being built and the cells built are counted against
 //! `CELL_LIMIT`.
 
+use crate::package::{read_part, Piece, XmlElement, ZipArchive};
 use crate::sheets::spreadsheet::{self, Alignment, Cell, Sheet, Workbook};
 use crate::sheets::workbook::{
-    fail, js_number, js_to_string, place_at, read_part, Piece, Result, WorkbookError, XmlElement,
-    ZipArchive, COLUMN_LIMIT, ROW_LIMIT,
+    fail, js_number, js_to_string, place_at, Result, WorkbookError, COLUMN_LIMIT, ROW_LIMIT,
 };
 use std::collections::HashMap;
 
@@ -504,7 +504,7 @@ pub fn parse(archive: &ZipArchive) -> Result<Workbook> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sheets::workbook::parse_xml;
+    use crate::package::parse_xml;
 
     const OPEN: &str = r#"<office:document-content xmlns:office="o" xmlns:table="t" xmlns:text="x" xmlns:style="s" xmlns:fo="f" xmlns:calcext="c">"#;
 

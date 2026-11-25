@@ -25,6 +25,7 @@ mod media;
 pub mod menus;
 pub mod model_still;
 pub mod motion;
+pub mod package;
 pub mod page;
 pub mod paths;
 pub mod preview;

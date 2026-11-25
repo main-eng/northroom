@@ -13,50 +13,13 @@
 //! one: a header in accent 1 over banded rows), and numbered lists in anything but "1.".
 
 use super::{
-    Align, Anchor, Body, Colour, Deck, Form, Item, Paragraph, Placed, Run, Shape, Slide, Spacing,
-    Stroke,
+    read_bytes, Align, Anchor, Body, Colour, Deck, Fit, Form, Item, Paragraph, Placed, ReadError,
+    Result, Run, Shape, Slide, Source, Spacing, Stroke,
 };
 use crate::geometry::Rect;
-use crate::sheets::workbook::{
-    find_relationship, read_relationships, require_part, WorkbookError, XmlElement, ZipArchive,
-    PART_MAX_BYTES,
-};
+use crate::package::{find_relationship, read_relationships, require_part, XmlElement, ZipArchive};
 use std::collections::HashMap;
 use std::rc::Rc;
-
-/// Why a file is not shown as a deck. The view only says it could not be read; the words are
-/// for logs and tests.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DeckError {
-    /// The zip or one of its XML parts is damaged or missing.
-    Package(String),
-    /// The file is a readable package, but not a presentation.
-    NotAPresentation,
-    /// A slide names no layout, or a layout no master.
-    NoTemplate(String),
-}
-
-impl std::fmt::Display for DeckError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeckError::Package(why) => formatter.write_str(why),
-            DeckError::NotAPresentation => formatter.write_str("The file is not a presentation."),
-            DeckError::NoTemplate(part) => write!(formatter, "\"{part}\" names no template."),
-        }
-    }
-}
-
-impl From<WorkbookError> for DeckError {
-    fn from(error: WorkbookError) -> Self {
-        DeckError::Package(error.0)
-    }
-}
-
-type Result<T> = std::result::Result<T, DeckError>;
-
-/// The largest presentation read; a larger one shows its details. The file is read whole when
-/// it opens, on the thread that draws.
-pub const FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 /// English Metric Units, the file's unit of length, in a point.
 const EMU_PER_POINT: f64 = 12_700.0;
@@ -83,18 +46,6 @@ const PLAIN_BULLET: &str = "•";
 const BAND_TINTS: (f64, f64) = (0.6, 0.8);
 /// The thickness of the lines between a styled table's cells.
 const TABLE_STROKE_POINTS: f64 = 1.0;
-
-/// Whether a file name is a PowerPoint presentation, template or show.
-pub fn is_presentation_name(name: &str) -> bool {
-    let extension = std::path::Path::new(name)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase);
-    matches!(
-        extension.as_deref(),
-        Some("pptx" | "pptm" | "ppsx" | "ppsm" | "potx" | "potm")
-    )
-}
 
 // --- Numbers and parts -----------------------------------------------------------------------
 
@@ -634,7 +585,7 @@ impl Templates<'_> {
         let part = Part::open(self.archive, path)?;
         let master_path = part
             .related("/slideMaster")
-            .ok_or_else(|| DeckError::NoTemplate(path.to_owned()))?
+            .ok_or_else(|| ReadError::Missing(path.to_owned()))?
             .to_owned();
         let master = self.master(&master_path)?;
         let layout = Rc::new(Layout {
@@ -1342,7 +1293,7 @@ fn read_slide(
     let part = Part::open(archive, path)?;
     let layout_path = part
         .related("/slideLayout")
-        .ok_or_else(|| DeckError::NoTemplate(path.to_owned()))?
+        .ok_or_else(|| ReadError::Missing(path.to_owned()))?
         .to_owned();
     let layout = templates.layout(&layout_path)?;
     let master = &layout.master;
@@ -1379,10 +1330,10 @@ fn read_slide(
 pub fn parse(bytes: &[u8]) -> Result<Deck> {
     let archive = ZipArchive::open(bytes)?;
     let package = read_relationships(&archive, "")?;
-    let path = find_relationship(&package, "/officeDocument").ok_or(DeckError::NotAPresentation)?;
+    let path = find_relationship(&package, "/officeDocument").ok_or(ReadError::NotItsKind)?;
     let presentation = Part::open(&archive, path)?;
     if presentation.root.name != "presentation" {
-        return Err(DeckError::NotAPresentation);
+        return Err(ReadError::NotItsKind);
     }
     let (width, height) = presentation
         .root
@@ -1421,13 +1372,9 @@ pub fn parse(bytes: &[u8]) -> Result<Deck> {
         width,
         height,
         slides,
-        pictures: pictures.0,
+        fit: Fit::Whole,
+        pictures: pictures.0.into_iter().map(Source::Entry).collect(),
     })
-}
-
-fn read_bytes(path: &std::path::Path) -> Result<Vec<u8>> {
-    std::fs::read(path)
-        .map_err(|error| DeckError::Package(format!("The file could not be read ({error})")))
 }
 
 /// Reads the presentation at `path`.
@@ -1435,19 +1382,10 @@ pub fn read(path: &std::path::Path) -> Result<Deck> {
     parse(&read_bytes(path)?)
 }
 
-/// The bytes of the picture named `name` (`Deck::pictures`) in the presentation at `path`.
-pub fn read_picture(path: &std::path::Path, name: &str) -> Result<Vec<u8>> {
-    let bytes = read_bytes(path)?;
-    let archive = ZipArchive::open(&bytes)?;
-    archive
-        .read_entry(name, PART_MAX_BYTES)?
-        .ok_or_else(|| DeckError::Package(format!("The file has no \"{name}\".")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sheets::workbook::parse_xml;
+    use crate::package::parse_xml;
 
     fn element(source: &str) -> XmlElement {
         parse_xml(source).expect("XML")
@@ -1600,13 +1538,5 @@ mod tests {
         let empty =
             element(r#"<p:txBody><a:bodyPr/><a:p><a:r><a:t> </a:t></a:r></a:p></p:txBody>"#);
         assert_eq!(read_body(&empty, &[&fallback], &[], &palette), None);
-    }
-
-    #[test]
-    fn a_name_says_whether_it_is_a_presentation() {
-        assert!(is_presentation_name("Pitch deck.PPTX"));
-        assert!(is_presentation_name("show.ppsx"));
-        assert!(!is_presentation_name("old.ppt"));
-        assert!(!is_presentation_name("pptx"));
     }
 }

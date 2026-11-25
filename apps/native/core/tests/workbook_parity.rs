@@ -2,6 +2,7 @@
 //! (`fixtures/workbook.json`) of every workbook in `fixtures/workbooks` and of a table of values
 //! under format codes.
 
+use northroom_core::package;
 use northroom_core::sheets::spreadsheet::{Alignment, Workbook};
 use northroom_core::sheets::workbook::{self, DateSystem};
 use serde_json::{json, Value};
@@ -172,7 +173,7 @@ fn crc32(bytes: &[u8]) -> u32 {
 
 /// Inflates every raw deflate stream in the cases archive and checks that each is refused one
 /// byte under its size. Returns how many there were.
-fn inflate_every_stream(archive: &workbook::ZipArchive) -> usize {
+fn inflate_every_stream(archive: &package::ZipArchive) -> usize {
     let names: Vec<String> = archive.entry_names().map(str::to_owned).collect();
     let mut streams = 0;
     for name in names.iter().filter(|name| name.ends_with(".deflate")) {
@@ -183,14 +184,14 @@ fn inflate_every_stream(archive: &workbook::ZipArchive) -> usize {
             .unwrap();
         let (_, stream) = archive.raw_entry(name).unwrap().unwrap();
         assert_eq!(
-            workbook::inflate(stream, usize::MAX).unwrap(),
+            package::inflate(stream, usize::MAX).unwrap(),
             plain,
             "{name}"
         );
         // One byte under its size is refused, not truncated.
         if !plain.is_empty() {
             assert!(
-                workbook::inflate(stream, plain.len() - 1).is_err(),
+                package::inflate(stream, plain.len() - 1).is_err(),
                 "{name} past its limit"
             );
         }
@@ -223,7 +224,7 @@ fn recorded_crc(bytes: &[u8], name: &str) -> u32 {
 /// Returns how many matched.
 fn check_workbook_parts(path: &std::path::Path) -> usize {
     let bytes = std::fs::read(path).unwrap();
-    let Ok(archive) = workbook::ZipArchive::open(&bytes) else {
+    let Ok(archive) = package::ZipArchive::open(&bytes) else {
         return 0;
     };
     let names: Vec<String> = archive.entry_names().map(str::to_owned).collect();
@@ -254,7 +255,7 @@ fn check_workbook_parts(path: &std::path::Path) -> usize {
 #[test]
 fn inflates_what_python_and_zlib_write() {
     let bytes = std::fs::read(fixtures().join("workbooks/inflate-cases.zip")).unwrap();
-    let archive = workbook::ZipArchive::open(&bytes).unwrap();
+    let archive = package::ZipArchive::open(&bytes).unwrap();
     assert_eq!(inflate_every_stream(&archive), 5 * 11);
     let mut parts = 0;
     for entry in std::fs::read_dir(fixtures().join("workbooks")).unwrap() {

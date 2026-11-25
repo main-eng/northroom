@@ -1,18 +1,155 @@
-//! A presentation read for display (ADR-0015): its slides as shapes, text and pictures in
-//! points from each slide's top-left. `pptx` reads a PowerPoint file into these types, and
-//! `layout` places them for a view. Nothing here is PowerPoint's: another format's reader makes
-//! the same deck.
+//! Files drawn as pages (ADR-0015): a deck is fixed-size pages of shapes, text and pictures in
+//! points from each page's top-left. A presentation's slides are a deck as they are; a flowing
+//! document (Word, OpenDocument text, rich text) is laid out into pages first (`flow`). Each
+//! format's reader makes the same types, and `layout` places them for a view.
 //!
 //! A deck reads right, not exactly: text is set in the app's own face whatever face the file
 //! names, shapes other than boxes, ovals and straight lines draw as boxes when they hold text
 //! and are left out when they hold none, and rotation, shadows, gradients (drawn as their
 //! first colour), charts, animations and transitions are not drawn.
 
+pub mod docx;
 pub mod ffi;
+pub mod flow;
 pub mod layout;
 pub mod pptx;
 
 use crate::geometry::Rect;
+use crate::package::PackageError;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+/// Why a file is not drawn. The view only says it could not be read; the words are for logs
+/// and tests.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReadError {
+    /// The file, its package or one of its parts is damaged, missing or unreadable.
+    Damaged(String),
+    /// The file is readable, but not the kind its name says.
+    NotItsKind,
+    /// A part names another that is not there: a slide with no layout, a layout with no master.
+    Missing(String),
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadError::Damaged(why) => formatter.write_str(why),
+            ReadError::NotItsKind => formatter.write_str("The file is not the kind its name says."),
+            ReadError::Missing(part) => {
+                write!(formatter, "\"{part}\" names a part that is missing.")
+            }
+        }
+    }
+}
+
+impl From<PackageError> for ReadError {
+    fn from(error: PackageError) -> Self {
+        ReadError::Damaged(error.0)
+    }
+}
+
+pub type Result<T> = std::result::Result<T, ReadError>;
+
+/// Reads a whole file, saying why when it cannot.
+pub fn read_bytes(path: &Path) -> Result<Vec<u8>> {
+    std::fs::read(path)
+        .map_err(|error| ReadError::Damaged(format!("The file could not be read ({error})")))
+}
+
+/// The kinds of file drawn as pages, by name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// PowerPoint: `.pptx` and its macro, show and template forms.
+    Presentation,
+    /// Word: `.docx` and its macro and template forms.
+    WordDocument,
+}
+
+/// The largest file drawn; a larger one shows its details. A file is read whole when it opens,
+/// on the thread that draws.
+pub const FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+impl Kind {
+    /// The kind a file name says, by its extension in any case.
+    pub fn of_name(name: &str) -> Option<Self> {
+        let extension = Path::new(name)
+            .extension()
+            .and_then(|extension| extension.to_str())?
+            .to_ascii_lowercase();
+        Some(match extension.as_str() {
+            "pptx" | "pptm" | "ppsx" | "ppsm" | "potx" | "potm" => Kind::Presentation,
+            "docx" | "docm" | "dotx" | "dotm" => Kind::WordDocument,
+            _ => return None,
+        })
+    }
+}
+
+/// Reads the file at `path` as `kind`. `measure` sets text where a document is laid out into
+/// pages.
+pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measure) -> Result<Deck> {
+    match kind {
+        Kind::Presentation => pptx::read(path),
+        Kind::WordDocument => Ok(flow::paginate(docx::read(path)?, measure)),
+    }
+}
+
+/// The extension kept for a picture whose name has none; the system decoder reads its bytes.
+const UNKNOWN_EXTENSION: &str = "bin";
+
+/// Where a picture's bytes are.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Source {
+    /// An entry of the zip the file is, by its name, which ends in its format's extension.
+    Entry(String),
+    /// A file of its own, such as a picture in a rich-text package.
+    File(PathBuf),
+    /// Bytes the reader took out of the file, in the format `extension` names.
+    Bytes {
+        bytes: Arc<Vec<u8>>,
+        extension: &'static str,
+    },
+}
+
+impl Source {
+    /// The extension that says how the picture is decoded.
+    pub fn extension(&self) -> String {
+        let named = |name: &Path| {
+            name.extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or(UNKNOWN_EXTENSION)
+                .to_ascii_lowercase()
+        };
+        match self {
+            Source::Entry(name) => named(Path::new(name)),
+            Source::File(path) => named(path),
+            Source::Bytes { extension, .. } => (*extension).to_owned(),
+        }
+    }
+
+    /// The picture's bytes, `file` being the file the deck was read from.
+    pub fn read(&self, file: &Path) -> Result<Vec<u8>> {
+        match self {
+            Source::Entry(name) => {
+                let bytes = read_bytes(file)?;
+                let archive = crate::package::ZipArchive::open(&bytes)?;
+                archive
+                    .read_entry(name, crate::package::PART_MAX_BYTES)?
+                    .ok_or_else(|| ReadError::Missing(name.clone()))
+            }
+            Source::File(path) => read_bytes(path),
+            Source::Bytes { bytes, .. } => Ok(bytes.as_ref().clone()),
+        }
+    }
+}
+
+/// How a deck's pages fit a view: slides whole, each as large as the view holds; a document's
+/// pages across the view's width, read by scrolling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    Whole,
+    Width,
+}
 
 /// A colour as a file gives it, with its opacity from 0 to 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -61,15 +198,15 @@ impl Colour {
     }
 }
 
-/// A presentation: the size every slide has, its slides in order, and the pictures they show.
+/// A deck: the size every page has, how its pages fit a view, its pages in order, and where the
+/// pictures they show are. A picture's bytes are read only when a view draws it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Deck {
     pub width: f64,
     pub height: f64,
+    pub fit: Fit,
     pub slides: Vec<Slide>,
-    /// Each picture's name in the file, which ends in its format's extension. Its bytes stay
-    /// in the file until a view draws it (`pptx::read_picture`).
-    pub pictures: Vec<String>,
+    pub pictures: Vec<Source>,
 }
 
 /// One slide: its background and what is on it, back to front.
@@ -193,6 +330,14 @@ pub struct Run {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_says_whether_it_is_drawn_as_pages() {
+        assert_eq!(Kind::of_name("Pitch deck.PPTX"), Some(Kind::Presentation));
+        assert_eq!(Kind::of_name("show.ppsx"), Some(Kind::Presentation));
+        assert_eq!(Kind::of_name("old.ppt"), None);
+        assert_eq!(Kind::of_name("pptx"), None);
+    }
 
     #[test]
     fn a_colour_reads_from_hex_and_mixes_toward_another() {

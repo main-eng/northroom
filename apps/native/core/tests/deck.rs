@@ -3,7 +3,9 @@
 //! (`fixtures/deck/make.py`), and `fixtures/deck/Pitch deck.pptx`, the sample deck the
 //! sample-files script writes.
 
-use northroom_core::deck::{pptx, Align, Anchor, Colour, Deck, Form, Item, Shape, Slide};
+use northroom_core::deck::{
+    pptx, Align, Anchor, Colour, Deck, Form, Item, ReadError, Shape, Slide, Source,
+};
 use northroom_core::geometry::Rect;
 use std::path::PathBuf;
 
@@ -178,11 +180,15 @@ fn the_sample_deck_reads_with_its_pictures_backgrounds_and_text() {
             "ppt/media/image2.jpeg",
             "ppt/media/image3.png"
         ]
+        .map(|name| Source::Entry(name.to_owned()))
     );
     // The third is a PNG, read out of the file by its name.
-    let badge = pptx::read_picture(&fixture("Pitch deck.pptx"), &deck.pictures[2]).expect("bytes");
+    let badge = deck.pictures[2]
+        .read(&fixture("Pitch deck.pptx"))
+        .expect("bytes");
     assert!(badge.starts_with(b"\x89PNG"));
-    assert!(pptx::read_picture(&fixture("Pitch deck.pptx"), "ppt/media/none.png").is_err());
+    let missing = Source::Entry("ppt/media/none.png".to_owned());
+    assert!(missing.read(&fixture("Pitch deck.pptx")).is_err());
 
     let cover = &deck.slides[0];
     assert_eq!(cover.ground, hex("1F6F4A"));
@@ -212,15 +218,9 @@ fn a_file_that_is_not_a_presentation_says_so() {
     let folder = tempfile::tempdir().expect("a folder");
     let path = folder.path().join("deck.pptx");
     std::fs::write(&path, b"not a zip").expect("write");
-    assert!(matches!(
-        pptx::read(&path),
-        Err(pptx::DeckError::Package(_))
-    ));
+    assert!(matches!(pptx::read(&path), Err(ReadError::Damaged(_))));
     // A workbook is a readable package of another kind.
     let workbook =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/workbooks/Budget.xlsx");
-    assert_eq!(
-        pptx::read(&workbook),
-        Err(pptx::DeckError::NotAPresentation)
-    );
+    assert_eq!(pptx::read(&workbook), Err(ReadError::NotItsKind));
 }
