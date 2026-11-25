@@ -618,9 +618,8 @@ pub fn is_system_preview_file(path: &Path) -> bool {
 // One kind of file per line, under its comment.
 #[rustfmt::skip]
 const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
-    // 3D scenes the app does not read: USD's binary form, a package usually holding it, and
-    // Alembic.
-    "usdz", "usd", "usdc", "abc",
+    // 3D scenes the app does not read: Alembic.
+    "abc",
 ];
 
 /// Document packages: folders on disk that Finder and the app list as one file.
@@ -2667,9 +2666,7 @@ mod tests {
         } else {
             FileRead::External
         };
-        for name in ["Cup.usdz", "Scene.abc"] {
-            assert_eq!(read_file(&write(name, b"text")), previewed, "{name}");
-        }
+        assert_eq!(read_file(&write("Scene.abc", b"text")), previewed);
         assert_eq!(read_text_file(&root.path().join("Scene.abc")), None);
         assert_eq!(
             read_file(&write("Bag.obj", b"v 0 0 0")),

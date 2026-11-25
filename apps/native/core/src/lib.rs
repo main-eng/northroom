@@ -43,6 +43,7 @@ pub mod theme;
 mod threads;
 pub mod transport;
 pub mod update;
+pub mod usdc;
 pub mod window;
 pub mod workspace;
 

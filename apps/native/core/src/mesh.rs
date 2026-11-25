@@ -1,15 +1,14 @@
 //! 3D files other than `.glb`, read as triangle meshes and written as `.glb` so the still
 //! renderer (`model_still`) draws them like any model (ADR-0015): OBJ, STL (binary and text),
-//! PLY (text and binary) and USD as text (`.usda`).
+//! PLY (text and binary) and USD (`.usda` as text, `.usdc` binary through `usdc`, `.usd` either,
+//! and a `.usdz` package holding either).
 //!
 //! A mesh keeps its triangles, a colour for each corner when the file gives one (turned from
 //! sRGB to the linear light glTF expects, except USD's, which are linear already), and smooth
 //! normals worked out from its faces. STL is turned from Z-up to the Y-up glTF expects, as CAD
 //! programs write it; USD is turned when it says it is Z-up.
 //!
-//! Left out: textures, materials beyond one colour each, transforms in USD, USD's binary form
-//! (`.usdc`, and `.usdz`, which usually holds it) and Alembic. A `.usdz` can't be told apart
-//! from its name, so it stays with the system's previewer.
+//! Left out: textures, materials beyond one colour each, transforms in USD, and Alembic.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -560,6 +559,56 @@ pub fn read_usda(text: &str) -> Mesh {
     }
 }
 
+/// USD in either form, told apart by its first bytes.
+fn read_usd(bytes: &[u8]) -> Option<Mesh> {
+    if !bytes.starts_with(b"PXR-USDC") {
+        return Some(read_usda(&String::from_utf8_lossy(bytes)));
+    }
+    let (shapes, z_up) = crate::usdc::read_shapes(bytes)
+        .map_err(|error| eprintln!("the USD file was not read: {}", error.0))
+        .ok()?;
+    let mut mesh = Mesh::default();
+    for shape in shapes {
+        let mut part = Mesh {
+            positions: shape.points,
+            ..Mesh::default()
+        };
+        let mut at = 0;
+        for count in shape.counts {
+            let count = usize::try_from(count).unwrap_or(0);
+            let corners: Vec<u32> = shape
+                .corners
+                .iter()
+                .skip(at)
+                .take(count)
+                .map(|corner| *corner as u32)
+                .collect();
+            fan(&corners, &mut part.triangles);
+            at += count;
+        }
+        if let Some(colour) = shape.colour {
+            part.colours = Some(vec![colour; part.positions.len()]);
+        }
+        mesh.add(part.checked());
+    }
+    Some(if z_up { mesh.y_up() } else { mesh })
+}
+
+/// The root layer of a `.usdz` package: its first USD file.
+fn usdz_layer(bytes: &[u8]) -> Option<Vec<u8>> {
+    let archive = crate::package::ZipArchive::open(bytes).ok()?;
+    let name = archive
+        .entry_names()
+        .find(|name| {
+            let lower = name.to_ascii_lowercase();
+            lower.ends_with(".usdc") || lower.ends_with(".usda") || lower.ends_with(".usd")
+        })?
+        .to_owned();
+    archive
+        .read_entry(&name, crate::package::PART_MAX_BYTES)
+        .ok()?
+}
+
 // --- glTF ----------------------------------------------------------------------------------
 
 fn bounds(positions: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
@@ -666,7 +715,10 @@ pub fn write_glb(mesh: &Mesh) -> Vec<u8> {
 
 /// Whether a file extension is one read here.
 pub fn is_mesh_extension(extension: &str) -> bool {
-    matches!(extension, "obj" | "stl" | "ply" | "usda")
+    matches!(
+        extension,
+        "obj" | "stl" | "ply" | "usda" | "usdc" | "usd" | "usdz"
+    )
 }
 
 /// The mesh the file at `path` holds; `None` when it holds none this reader draws.
@@ -677,7 +729,8 @@ pub fn read(path: &Path) -> Option<Mesh> {
         "stl" => read_stl(&bytes),
         "obj" => read_obj(&String::from_utf8_lossy(&bytes)),
         "ply" => read_ply(&bytes),
-        "usda" => read_usda(&String::from_utf8_lossy(&bytes)),
+        "usda" | "usdc" | "usd" => read_usd(&bytes)?,
+        "usdz" => read_usd(&usdz_layer(&bytes)?)?,
         _ => return None,
     };
     (!mesh.triangles.is_empty()).then_some(mesh)

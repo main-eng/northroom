@@ -35,3 +35,14 @@ fn the_sample_meshes_read_with_their_triangles_and_colours() {
         );
     }
 }
+
+#[test]
+fn binary_usd_and_a_usdz_package_read_like_their_text_twin() {
+    let text = read("Coffee bag.usda");
+    for name in ["Coffee bag.usdc", "Coffee bag.usdz"] {
+        let binary = read(name);
+        assert_eq!(binary.triangles, text.triangles, "{name}");
+        assert_eq!(binary.positions, text.positions, "{name}");
+        assert_eq!(binary.colours, text.colours, "{name}");
+    }
+}
