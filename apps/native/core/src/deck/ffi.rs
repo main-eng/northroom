@@ -88,43 +88,59 @@ pub fn opened_locked() -> Option<PathBuf> {
     (known.path == path && known.locked).then_some(path)
 }
 
-/// The text of the open PDF's pages read so far: its path and version, and each page's glyphs.
-struct Texts {
+/// What has been read from the open PDF's pages (their text, their links), by page, for one
+/// version of it.
+struct PageCache<T> {
     path: PathBuf,
     version: Version,
-    pages: std::collections::HashMap<usize, Arc<Vec<crate::pdf::TextGlyph>>>,
+    pages: std::collections::HashMap<usize, Arc<Vec<T>>>,
 }
 
-static TEXT: Mutex<Option<Texts>> = Mutex::new(None);
+type PageReader<T> = fn(Vec<u8>, Option<&[u8]>, usize) -> crate::pdf::Result<Vec<T>>;
 
-/// Page `slide`'s glyphs in the open PDF, read once a version; empty for other files.
-fn page_glyphs(slide: usize) -> Arc<Vec<crate::pdf::TextGlyph>> {
+/// Page `slide` of the open PDF as `read` reads it, once a version; empty for other files.
+fn cached<T>(
+    cache: &Mutex<Option<PageCache<T>>>,
+    slide: usize,
+    read: PageReader<T>,
+) -> Arc<Vec<T>> {
     let Some((path, Kind::Pdf)) = opened_path() else {
-        return Arc::default();
+        return Arc::new(Vec::new());
     };
     let version = version_of(&path);
-    let mut text = TEXT.relock();
-    if text
+    let mut known = cache.relock();
+    if known
         .as_ref()
         .is_none_or(|known| known.path != path || known.version != version)
     {
-        *text = Some(Texts {
+        *known = Some(PageCache {
             path: path.clone(),
             version,
             pages: std::collections::HashMap::new(),
         });
     }
-    let pages = &mut text.as_mut().expect("just set").pages;
+    let pages = &mut known.as_mut().expect("just set").pages;
     pages
         .entry(slide)
         .or_insert_with(|| {
-            let read = super::read_bytes(&path).ok().and_then(|bytes| {
-                crate::pdf::page_text(bytes, crate::pdf::passwords::of(&path).as_deref(), slide)
-                    .ok()
-            });
-            Arc::new(read.unwrap_or_default())
+            let password = crate::pdf::passwords::of(&path);
+            let found = super::read_bytes(&path)
+                .ok()
+                .and_then(|bytes| read(bytes, password.as_deref(), slide).ok());
+            Arc::new(found.unwrap_or_default())
         })
         .clone()
+}
+
+static TEXT: Mutex<Option<PageCache<crate::pdf::TextGlyph>>> = Mutex::new(None);
+static LINKS: Mutex<Option<PageCache<crate::pdf::Link>>> = Mutex::new(None);
+
+fn page_glyphs(slide: usize) -> Arc<Vec<crate::pdf::TextGlyph>> {
+    cached(&TEXT, slide, crate::pdf::page_text)
+}
+
+fn page_links(slide: usize) -> Arc<Vec<crate::pdf::Link>> {
+    cached(&LINKS, slide, crate::pdf::page_links)
 }
 
 /// The text of slide `slide` of the open deck, placed in a view of it at `frame`, as the
@@ -146,6 +162,20 @@ pub fn deck_text(slide: usize, frame: Rect) -> Vec<super::text::Glyph> {
             ),
         })
         .collect()
+}
+
+/// Where the link at view point (`x`, `y`) on slide `slide`, shown at `frame`, leads.
+pub fn link_at(slide: usize, frame: Rect, (x, y): (f64, f64)) -> Option<crate::pdf::links::Target> {
+    let deck = opened_deck()?;
+    let zoom = frame.width / deck.width;
+    let (px, py) = ((x - frame.x) / zoom, (y - frame.y) / zoom);
+    page_links(slide)
+        .iter()
+        .find(|link| {
+            let box_ = &link.frame;
+            px >= box_.x && px <= box_.x + box_.width && py >= box_.y && py <= box_.y + box_.height
+        })
+        .map(|link| link.target.clone())
 }
 
 /// The find field's placeholder, in the interface language.

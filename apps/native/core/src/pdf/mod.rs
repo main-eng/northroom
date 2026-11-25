@@ -22,6 +22,7 @@ pub mod filter;
 pub mod font;
 pub mod image;
 pub mod layers;
+pub mod links;
 pub mod object;
 pub mod passwords;
 pub mod raster;
@@ -63,7 +64,7 @@ impl From<PdfError> for crate::deck::ReadError {
     }
 }
 
-type Result<T> = std::result::Result<T, PdfError>;
+pub type Result<T> = std::result::Result<T, PdfError>;
 
 /// A page's layers are drawn this many pixels to a point, so they stay sharp at the page view's
 /// largest size on a high-density display.
@@ -79,6 +80,8 @@ const HIDDEN: i64 = 2 | 32;
 
 /// A page as drawing needs it: its box, its turn, its resources and content.
 struct Page {
+    /// The page's own object, which links name it by.
+    reference: Option<object::Ref>,
     crop: [f64; 4],
     rotate: i64,
     resources: Option<Dict>,
@@ -167,6 +170,10 @@ fn collect_pages(
     depth: usize,
     pages: &mut Vec<Page>,
 ) {
+    let reference = match node {
+        Object::Ref(reference) => Some(*reference),
+        _ => None,
+    };
     if depth > TREE_DEPTH_MAX {
         return;
     }
@@ -184,6 +191,7 @@ fn collect_pages(
         _ => {
             let media = inherited.media.unwrap_or(LETTER);
             pages.push(Page {
+                reference,
                 crop: inherited.crop.map_or(media, |crop| intersect(crop, media)),
                 rotate: inherited.rotate.unwrap_or(0).rem_euclid(360) / 90 * 90,
                 resources: inherited.resources,
@@ -508,6 +516,55 @@ pub fn page_text(bytes: Vec<u8>, password: Option<&[u8]>, number: usize) -> Resu
     let mut reader = Reader::default();
     run_page(&document, page, &mut reader, 1.0);
     Ok(reader.glyphs)
+}
+
+/// A link on a page: where it sits, in page points from the top left, and where it leads.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Link {
+    pub frame: Rect,
+    pub target: links::Target,
+}
+
+/// Page `number`'s links.
+pub fn page_links(bytes: Vec<u8>, password: Option<&[u8]>, number: usize) -> Result<Vec<Link>> {
+    let (document, pages) = open_pages(bytes, password)?;
+    let page = pages
+        .get(number)
+        .ok_or_else(|| PdfError::Damaged("The PDF has no such page.".into()))?;
+    let numbers: std::collections::HashMap<object::Ref, usize> = pages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, page)| Some((page.reference?, index)))
+        .collect();
+    let matrix = page.matrix(1.0);
+    let links = page
+        .annotations
+        .as_array()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|annotation| {
+            let annotation = document.resolve(annotation);
+            let dict = annotation.as_dict()?;
+            if document.entry(dict, "Subtype").as_name() != Some("Link") {
+                return None;
+            }
+            let [x0, y0, x1, y1] = read_box(&document, dict.get("Rect")?)?;
+            let corners = [(x0, y0), (x1, y1)].map(|point| render::apply(matrix, point));
+            let (left, right) = (
+                corners[0].0.min(corners[1].0),
+                corners[0].0.max(corners[1].0),
+            );
+            let (top, bottom) = (
+                corners[0].1.min(corners[1].1),
+                corners[0].1.max(corners[1].1),
+            );
+            Some(Link {
+                frame: Rect::new(left, top, right - left, bottom - top),
+                target: links::target_of(&document, dict, &numbers)?,
+            })
+        })
+        .collect();
+    Ok(links)
 }
 
 /// The bytes of encoded picture `picture` on page `number`.
@@ -893,6 +950,32 @@ mod tests {
         let first = &glyphs[0].frame;
         assert!((first.x - 80.0).abs() < 0.01, "{first:?}");
         assert!(first.y < 60.0 && first.y + first.height > 55.0, "{first:?}");
+    }
+
+    #[test]
+    fn a_pages_links_lead_to_safe_addresses_and_other_pages() {
+        let bytes = pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 200 100] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 5 0 R /Annots [6 0 R 7 0 R 8 0 R] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>".into(),
+            stream(""),
+            "<< /Type /Annot /Subtype /Link /Rect [10 10 50 30] \
+             /A << /S /URI /URI (https://example.org/) >> >>"
+                .into(),
+            "<< /Type /Annot /Subtype /Link /Rect [60 10 100 30] /Dest [4 0 R /Fit] >>".into(),
+            "<< /Type /Annot /Subtype /Link /Rect [110 10 150 30] \
+             /A << /S /URI /URI (javascript:alert(1)) >> >>"
+                .into(),
+        ]);
+        let links = page_links(bytes, None, 0).expect("links");
+        assert_eq!(links.len(), 2, "the script link stays shut: {links:?}");
+        assert_eq!(
+            links[0].target,
+            links::Target::Address("https://example.org/".into())
+        );
+        assert_eq!(links[0].frame, Rect::new(10.0, 70.0, 40.0, 20.0));
+        assert_eq!(links[1].target, links::Target::Page(1));
     }
 
     #[test]

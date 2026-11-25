@@ -29,6 +29,7 @@ use northroom_core::deck::layout::{Mark, Page, Words};
 use northroom_core::deck::text::{glyph_at, text_between};
 use northroom_core::deck::{Colour, Command, Deck as Read, Form, Stroke};
 use northroom_core::geometry::Rect;
+use northroom_core::pdf::links::Target;
 use std::sync::Arc;
 
 /// The most pixels a slide's picture is loaded at, along its longer side.
@@ -46,6 +47,9 @@ pub struct Deck {
     selection: Option<(usize, usize, usize)>,
     /// Whether a drag is selecting text.
     selecting: bool,
+    /// Where the left button went down on a page, until it comes up, for following a link
+    /// when the press didn't drag.
+    pressed_at: Option<Point<Pixels>>,
     finder: Option<Finder>,
 }
 
@@ -226,6 +230,7 @@ impl Deck {
             down: Scroller::default(),
             selection: None,
             selecting: false,
+            pressed_at: None,
             finder: None,
         };
         nr_unlock_forget_asked();
@@ -248,6 +253,7 @@ impl Deck {
             cx.notify();
             return;
         }
+        self.pressed_at = Some(event.position);
         // A press on a page starts selecting its text from the glyph under it.
         self.selection = self
             .glyph_under(event.position)
@@ -272,10 +278,42 @@ impl Deck {
         }
     }
 
-    fn mouse_up(&mut self, cx: &mut Context<Self>) {
+    fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
         self.selecting = false;
+        // A press that didn't drag follows the link under it.
+        let pressed = self.pressed_at.take();
+        if pressed.is_some_and(|at| {
+            (at.x - event.position.x).abs() < px(4.0) && (at.y - event.position.y).abs() < px(4.0)
+        }) {
+            self.follow_link(event.position, cx);
+        }
         if self.down.release(now()) {
             cx.notify();
+        }
+    }
+
+    /// Follows the link at window point `at`: a web or mail address opens in the browser, a
+    /// page of the document scrolls into view.
+    fn follow_link(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(page) = self.page.as_ref() else {
+            return;
+        };
+        let scrolled = f64::from(self.down.offset());
+        let (x, y) = self.local(at);
+        let hit = (0..page.slides.len()).find_map(|index| {
+            let frame = slide_frame(page, index, scrolled)?;
+            northroom_core::deck::ffi::link_at(index, frame, (x, y))
+        });
+        match hit {
+            Some(Target::Address(address)) => cx.open_url(&address),
+            Some(Target::Page(number)) => {
+                if let Some(slide) = page.slides.get(number) {
+                    self.down.scroll_to(slide.y as f32);
+                    self.selection = None;
+                    cx.notify();
+                }
+            }
+            None => {}
         }
     }
 
@@ -578,7 +616,7 @@ impl Deck {
         let deck = entity.clone();
         on_bubble(window, move |event: &MouseUpEvent, _, cx| {
             if event.button == MouseButton::Left {
-                deck.update(cx, |deck, cx| deck.mouse_up(cx));
+                deck.update(cx, |deck, cx| deck.mouse_up(event, cx));
             }
         });
         let deck = entity;
