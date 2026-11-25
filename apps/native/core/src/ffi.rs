@@ -2871,15 +2871,18 @@ pub extern "C" fn nr_table_choose_sheet(sheet: usize) {
     *TABLE_SHEET.relock() = opened_id().map(|id| (id, sheet));
 }
 
-/// The open file's path when it is a 3D model shown as a still (a `.glb`, by its name); empty
-/// otherwise.
+/// The open file's path when it is a 3D model shown as a still (a `.glb`, or a mesh `mesh`
+/// reads, by its name); empty otherwise.
 #[no_mangle]
 pub extern "C" fn nr_opened_model_path() -> NrText {
     let path = with_columns(|columns| {
         let opened = columns.opened()?.clone();
-        let model = std::path::Path::new(&opened.title)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("glb"));
+        let model = crate::workspace::media_of_extension(
+            &std::path::Path::new(&opened.title)
+                .extension()
+                .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default(),
+        ) == Some(crate::workspace::Media::Model);
         if opened.kind != EntryKind::File || !model {
             return None;
         }

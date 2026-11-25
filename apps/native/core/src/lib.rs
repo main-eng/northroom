@@ -24,6 +24,7 @@ pub mod launch;
 pub mod list;
 mod media;
 pub mod menus;
+pub mod mesh;
 pub mod model_still;
 pub mod motion;
 pub mod package;

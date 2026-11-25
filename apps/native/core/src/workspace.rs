@@ -387,6 +387,7 @@ pub fn media_of_extension(extension: &str) -> Option<Media> {
             Some(Media::Audio)
         }
         "glb" => Some(Media::Model),
+        mesh if crate::mesh::is_mesh_extension(mesh) => Some(Media::Model),
         _ => None,
     }
 }
@@ -613,12 +614,13 @@ pub fn is_system_preview_file(path: &Path) -> bool {
 }
 
 /// Formats Quick Look previews that Northroom has no view for. Formats the app draws itself
-/// (pages, text, tables, decks, PDFs, decodable pictures, media, `.glb`) are excluded.
+/// (pages, text, tables, decks, PDFs, decodable pictures, media, 3D meshes) are excluded.
 // One kind of file per line, under its comment.
 #[rustfmt::skip]
 const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
-    // 3D scenes Model I/O reads.
-    "usdz", "usd", "usda", "usdc", "obj", "stl", "ply", "abc",
+    // 3D scenes the app does not read: USD's binary form, a package usually holding it, and
+    // Alembic.
+    "usdz", "usd", "usdc", "abc",
 ];
 
 /// Document packages: folders on disk that Finder and the app list as one file.
@@ -2665,10 +2667,14 @@ mod tests {
         } else {
             FileRead::External
         };
-        for name in ["Cup.usdz", "Bag.obj"] {
+        for name in ["Cup.usdz", "Scene.abc"] {
             assert_eq!(read_file(&write(name, b"text")), previewed, "{name}");
         }
-        assert_eq!(read_text_file(&root.path().join("Bag.obj")), None);
+        assert_eq!(read_text_file(&root.path().join("Scene.abc")), None);
+        assert_eq!(
+            read_file(&write("Bag.obj", b"v 0 0 0")),
+            FileRead::Media(Media::Model)
+        );
         // A Keynote file is a zip; a private key with the same extension is text.
         assert_eq!(
             read_file(&write("Pitch.key", b"PK\x03\x04")),

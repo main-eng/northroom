@@ -321,10 +321,12 @@ pub fn start(poke: fn()) -> bool {
         .is_ok()
 }
 
-/// The PNG still of the model at `path` (`Stills::picture`). Cheap enough to call on every
-/// paint.
+/// The PNG still of the model at `path` (`Stills::picture`): of the file itself when it is a
+/// `.glb`, else of the `.glb` it converts to (`mesh::glb_for`). Cheap enough to call on every
+/// paint once converted.
 pub fn picture(path: &Path) -> Option<PathBuf> {
-    with(|stills| stills.picture(path, Instant::now())).flatten()
+    let model = crate::mesh::glb_for(path)?;
+    with(|stills| stills.picture(&model, Instant::now())).flatten()
 }
 
 /// The model the shell renders next (`Stills::next_wanted`).
