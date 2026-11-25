@@ -323,10 +323,8 @@ pub fn menu_sessions() -> menus::Menu {
     menus::sessions_menu(&crate::sessions::ffi::running_now(), language())
 }
 
-/// Shows terminal file `id`'s session in its own tab (`Columns::show_in_tab`), leaving Settings
-/// if open.
+/// Shows terminal file `id`'s session in its own tab (`Columns::show_in_tab`).
 fn show_session(id: &str) -> Effect {
-    crate::ffi::nr_settings_close();
     changed(with_columns(|columns| columns.show_in_tab(id)))
 }
 

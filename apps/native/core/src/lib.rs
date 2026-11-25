@@ -87,8 +87,9 @@ pub(crate) struct App {
     pub changed: Mutex<Option<extern "C" fn()>>,
     /// The app support folder and the open drive folder.
     pub support: Mutex<Option<(std::path::PathBuf, std::path::PathBuf)>>,
-    /// The settings tab on screen, if any, and a revision counter.
-    pub settings: Mutex<(Option<u32>, u64)>,
+    /// Goes up when something the shell draws changed outside the columns
+    /// (`nr_columns_revision`).
+    pub redraws: Mutex<u64>,
     /// Appearance settings, and whether the system is in dark mode.
     pub appearance: Mutex<(settings::appearance::Settings, bool)>,
     /// The full-window page, once the shell asks for it.
@@ -143,7 +144,7 @@ pub(crate) fn notify_changed() {
     let Some(app) = APP.get() else {
         return;
     };
-    app.settings.relock().1 += 1;
+    *app.redraws.relock() += 1;
     let changed = *app.changed.relock();
     if let Some(changed) = changed {
         changed();
@@ -173,7 +174,7 @@ pub(crate) fn start() {
         files: Mutex::new(ffi::NrFileSystem::NONE),
         changed: Mutex::new(None),
         support: Mutex::new(None),
-        settings: Mutex::new((None, 0)),
+        redraws: Mutex::new(0),
         appearance: Mutex::new((settings::appearance::Settings::default(), true)),
         theme: Mutex::new(
             theme::derive(

@@ -1,6 +1,5 @@
 //! The title bar: back and forward, the open tabs, the new-tab button, the review button, the
-//! sessions button and the update button, laid out by the core (`nr_title_bar_lay_out`). In settings it shows the
-//! settings title instead, which Back leaves.
+//! sessions button and the update button, laid out by the core (`nr_title_bar_lay_out`).
 //!
 //! A press asks the core what is under it (`nr_title_bar_hit`); a press on the bar itself moves
 //! the window. A middle click closes the tab it releases on (`nr_title_bar_middle_up`), a right
@@ -44,7 +43,6 @@ struct Bar {
     active: usize,
     back: bool,
     forward: bool,
-    settings: String,
     /// The update button's label (`nr_update_button_label`); empty while it is hidden.
     update: String,
     /// The update is downloading, so the button shows a spinner and ignores presses.
@@ -57,7 +55,6 @@ struct Bar {
 
 impl Bar {
     fn read() -> Self {
-        let words = nr_title_bar_words();
         // With no drive chosen the bar has no tabs but still shows its controls.
         let count = if nr_drive_ready() { nr_tabs_count() } else { 0 };
         let titles: Vec<String> = (0..count).map(|index| text(&nr_tab_title(index))).collect();
@@ -74,7 +71,6 @@ impl Bar {
             active: nr_tabs_active(),
             back: nr_history_can_go_back(),
             forward: nr_history_can_go_forward(),
-            settings: text(&words.settings),
             update: text(&nr_update_button_label()),
             downloading: nr_update_button_downloading(),
             sessions: sessions_button(),
@@ -397,7 +393,7 @@ fn fade(window: &mut Window, key: &CStr, on: bool) -> f32 {
     level.level as f32
 }
 
-/// The face for tab titles and the settings title.
+/// The face for tab titles.
 fn title_face() -> Face {
     Face::sans(12.0, 500.0)
 }
@@ -491,23 +487,6 @@ fn paint(
         .collect();
     paint_ways(window, cx, read, &bar, &place);
 
-    if nr_settings_tab() >= 0 {
-        // In settings the bar shows their title, and Back leaves them.
-        draw_line(
-            window,
-            cx,
-            &read.settings,
-            title_face(),
-            color(Token::Foreground),
-            f32::from(frame.origin.x) + bar.settings_x as f32,
-            f32::from(frame.origin.y) + 13.0,
-            16.0,
-            240.0,
-            None,
-        );
-        paint_controls(window, cx, read, &bar, &place, grown);
-        return Laid { bar, tabs };
-    }
     let tabs_frame = rect(&bar.tabs);
     let clip = bar.clipped.then(|| gpui::ContentMask {
         bounds: place.at(tabs_frame),

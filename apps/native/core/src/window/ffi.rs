@@ -47,7 +47,7 @@ pub use crate::columns::View as NrFolderView;
 /// Which drive view the window shows.
 #[repr(C)]
 pub struct NrShellView {
-    /// Settings replace the folder.
+    /// The active tab is the Settings tab, shown in the folder's place.
     pub settings: bool,
     /// The active tab is a Changes tab, shown in the folder's place (`changes::ffi`).
     pub changes: bool,
@@ -61,8 +61,7 @@ pub struct NrShellView {
 pub extern "C" fn nr_shell_view() -> NrShellView {
     NrShellView {
         settings: crate::ffi::nr_settings_tab() >= 0,
-        // Settings cover a Changes tab as they cover a folder.
-        changes: crate::ffi::nr_settings_tab() < 0 && crate::changes::ffi::nr_changes_shown(),
+        changes: crate::changes::ffi::nr_changes_shown(),
         folder: crate::ffi::folder_view(),
         columns: with_columns(|columns| columns.drawn_columns()).unwrap_or(0),
     }
@@ -354,21 +353,6 @@ fn with_title_bar<T>(action: impl FnOnce(&mut crate::window::title_bar::TitleBar
     action(&mut TITLE_BAR.relock())
 }
 
-/// Text the title bar draws, for the shell to measure and draw.
-#[repr(C)]
-pub struct NrTitleBarWords {
-    /// The settings title.
-    pub settings: NrText,
-}
-
-#[no_mangle]
-pub extern "C" fn nr_title_bar_words() -> NrTitleBarWords {
-    use crate::window::title_bar::SETTINGS;
-    NrTitleBarWords {
-        settings: NrText::borrowing(SETTINGS),
-    }
-}
-
 /// Title bar control frames (`title_bar::Layout`); a hidden control is all zero.
 #[repr(C)]
 pub struct NrTitleBar {
@@ -386,8 +370,6 @@ pub struct NrTitleBar {
     pub sessions_words_x: f64,
     /// The review button, left of the sessions button.
     pub review: NrRect,
-    /// Where the settings title starts, while settings are open.
-    pub settings_x: f64,
     /// How far the tabs are scrolled.
     pub offset: f64,
     /// How many tabs `nr_title_bar_tab` returns.
@@ -408,7 +390,6 @@ fn bar_of(layout: &crate::window::title_bar::Layout, carried: Option<usize>) -> 
         sessions_glyph: rect(layout.sessions_glyph),
         sessions_words_x: layout.sessions_words_x,
         review: rect(layout.review),
-        settings_x: layout.settings_x,
         offset: layout.offset,
         tab_count: layout.tabs.len(),
         carried: carried.map_or(-1, |tab| tab as i64),
@@ -461,7 +442,6 @@ pub unsafe extern "C" fn nr_title_bar_lay_out(
         )
     })
     .unwrap_or_else(|| (vec![false; count], 0, None));
-    let settings = crate::ffi::nr_settings_tab() >= 0;
     // SAFETY: the caller passes one point, or null.
     let pointer = unsafe { pointer.as_ref() }.map(|at| (at.x, at.y));
     with_title_bar(|bar| {
@@ -472,7 +452,6 @@ pub unsafe extern "C" fn nr_title_bar_lay_out(
             pointer,
             active,
             active_id,
-            settings,
             update,
             sessions: crate::window::title_bar::SessionsShown {
                 words: sessions_words,

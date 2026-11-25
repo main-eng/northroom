@@ -213,6 +213,7 @@
   "sessions_needs_you": "1 needs you",
   "sessions_none": "No agents running",
   "sessions_working": "{count} working",
+  "settings_title": "Settings",
   "terminal_activity_ended": "Ended",
   "terminal_activity_finished": "Finished",
   "terminal_activity_idle": "Idle",

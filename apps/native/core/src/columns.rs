@@ -130,8 +130,8 @@ struct ClosedTab {
     location: Location,
     /// The open file's id, and whether it filled the tab.
     opened: Option<(String, bool)>,
-    /// The root a Changes tab showed.
-    changes: Option<std::path::PathBuf>,
+    /// What it showed in its folder's place.
+    instead: Option<Instead>,
 }
 
 /// How many closed tabs Reopen Closed Tab can go back through.
@@ -171,6 +171,18 @@ struct KeptTab {
     opened: Option<(std::path::PathBuf, bool)>,
     /// The root a Changes tab showed.
     changes: Option<std::path::PathBuf>,
+    /// The tab showed Settings.
+    #[serde(default)]
+    settings: bool,
+}
+
+/// What a tab shows in its folder's place. Its columns are not shown and have no history;
+/// going to a folder in it makes it that folder's tab.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Instead {
+    /// The changes of this root (`changes`).
+    Changes(std::path::PathBuf),
+    Settings,
 }
 
 /// A tab's id, unique among the tabs a drive has opened. It stays the same whatever the tab
@@ -190,9 +202,8 @@ struct Tab {
     /// The open file was opened to fill the tab (a double click, ⌘↓ or ⌘O). It then fills it
     /// as columns too, where a file that is only selected shows beside its column.
     filling: bool,
-    /// A Changes tab: the root whose changes it shows (`changes`). Its columns are not shown
-    /// and have no history; going to a folder in it makes it that folder's tab.
-    changes: Option<std::path::PathBuf>,
+    /// A Changes tab or the Settings tab: what it shows in its folder's place.
+    instead: Option<Instead>,
 }
 
 impl Tab {
@@ -543,7 +554,11 @@ impl Columns {
                 at: self.tabs.len(),
                 location,
                 opened,
-                changes: tab.changes,
+                instead: if tab.settings {
+                    Some(Instead::Settings)
+                } else {
+                    tab.changes.map(Instead::Changes)
+                },
             };
             if let Err(error) = self.place_tab(closed) {
                 eprintln!("a kept tab did not open again: {error}");
@@ -566,7 +581,7 @@ impl Columns {
         }
     }
 
-    /// Tab `index` by path: its folder, open file and Changes root.
+    /// Tab `index` by path: its folder, open file and what it shows in the folder's place.
     fn kept_tab(&mut self, index: usize) -> KeptTab {
         let tab = &self.tabs[index];
         let folder = tab.location().folder_id;
@@ -574,13 +589,18 @@ impl Columns {
             .opened
             .as_ref()
             .map(|opened| (opened.id.clone(), tab.filling));
-        let changes = tab.changes.clone();
+        let changes = match &tab.instead {
+            Some(Instead::Changes(root)) => Some(root.clone()),
+            _ => None,
+        };
+        let settings = tab.instead == Some(Instead::Settings);
         KeptTab {
             folder: folder.and_then(|id| self.workspace.path_of(&id).ok()),
             opened: opened.and_then(|(id, filling)| {
                 self.workspace.path_of(&id).ok().map(|path| (path, filling))
             }),
             changes,
+            settings,
         }
     }
 
@@ -653,7 +673,7 @@ impl Columns {
             past: Vec::new(),
             future: Vec::new(),
             filling: false,
-            changes: None,
+            instead: None,
         })
     }
 
@@ -693,7 +713,7 @@ impl Columns {
         let tab = self.tab_mut();
         tab.columns = columns;
         tab.opened = None;
-        tab.changes = None;
+        tab.instead = None;
         self.revision += 1;
         Ok(())
     }
@@ -702,7 +722,7 @@ impl Columns {
     /// enclosing folder. It is unavailable only at the drive's root with nothing open.
     pub fn can_go_back(&self) -> bool {
         let tab = self.tab();
-        if tab.changes.is_some() {
+        if tab.instead.is_some() {
             return false;
         }
         // As columns, a file selected beside its column is not a place to go back from.
@@ -1008,7 +1028,7 @@ impl Columns {
         if path.is_dir() {
             let folder = self.workspace.location_at(path).ok()?;
             return self.tabs.iter().position(|tab| {
-                tab.opened.is_none() && tab.changes.is_none() && tab.location() == folder
+                tab.opened.is_none() && tab.instead.is_none() && tab.location() == folder
             });
         }
         let id = self.workspace.id_at(path).ok()?;
@@ -1084,7 +1104,7 @@ impl Columns {
     }
 
     pub fn can_go_forward(&self) -> bool {
-        self.tab().changes.is_none() && !self.tab().future.is_empty()
+        self.tab().instead.is_none() && !self.tab().future.is_empty()
     }
 
     /// Goes to the folder shown before this one. A folder that has gone since is skipped.
@@ -1158,10 +1178,12 @@ impl Columns {
     }
 
     /// What a tab holds, for its glyph: 0 the drive's own folder, 1 another folder, 3 a file, 5 a
-    /// terminal, 6 a root's changes.
+    /// terminal, 6 a root's changes, 7 Settings.
     pub fn tab_kind(&self, index: usize) -> u32 {
-        if self.tab_changes(index).is_some() {
-            return 6;
+        match self.tabs.get(index).and_then(|tab| tab.instead.as_ref()) {
+            Some(Instead::Changes(_)) => return 6,
+            Some(Instead::Settings) => return 7,
+            None => {}
         }
         if let Some(opened) = self.file_fills_tab(index) {
             return if opened.kind == EntryKind::Terminal {
@@ -1221,6 +1243,7 @@ impl Columns {
             3 => Glyph::File,
             5 => Glyph::TerminalWindow,
             6 => Glyph::Diff,
+            7 => Glyph::Gear,
             _ => Glyph::House,
         }
     }
@@ -1240,7 +1263,10 @@ impl Columns {
 
     /// The root tab `index` shows the changes of, when it is a Changes tab.
     pub fn tab_changes(&self, index: usize) -> Option<&std::path::Path> {
-        self.tabs.get(index)?.changes.as_deref()
+        match self.tabs.get(index)?.instead.as_ref()? {
+            Instead::Changes(root) => Some(root),
+            Instead::Settings => None,
+        }
     }
 
     /// The root the active tab shows the changes of, when it is a Changes tab.
@@ -1250,24 +1276,38 @@ impl Columns {
 
     /// Whether a tab shows the changes of `root`.
     pub fn shows_changes(&self, root: &std::path::Path) -> bool {
-        self.tabs
-            .iter()
-            .any(|tab| tab.changes.as_deref() == Some(root))
+        (0..self.tabs.len()).any(|tab| self.tab_changes(tab) == Some(root))
     }
 
     /// Selects the Changes tab of `root`, or opens one beside the active tab and makes it
     /// active.
     pub fn open_changes_tab(&mut self, root: &std::path::Path) -> DriveResult<()> {
+        self.open_instead(Instead::Changes(root.to_path_buf()))
+    }
+
+    /// Whether the active tab is the Settings tab.
+    pub fn active_settings(&self) -> bool {
+        self.tab().instead == Some(Instead::Settings)
+    }
+
+    /// Selects the Settings tab, or opens it beside the active tab and makes it active.
+    pub fn open_settings_tab(&mut self) -> DriveResult<()> {
+        self.open_instead(Instead::Settings)
+    }
+
+    /// Selects the tab that shows `instead`, or opens one beside the active tab and makes it
+    /// active.
+    fn open_instead(&mut self, instead: Instead) -> DriveResult<()> {
         let shown = self
             .tabs
             .iter()
-            .position(|tab| tab.changes.as_deref() == Some(root));
+            .position(|tab| tab.instead.as_ref() == Some(&instead));
         if let Some(index) = shown {
             self.select_tab(index);
             return Ok(());
         }
         let mut tab = self.new_tab(&Location::ROOT)?;
-        tab.changes = Some(root.to_path_buf());
+        tab.instead = Some(instead);
         self.tabs.insert(self.active + 1, tab);
         self.active += 1;
         self.revision += 1;
@@ -1394,7 +1434,7 @@ impl Columns {
         };
         let at = closed.at.min(self.tabs.len());
         let mut tab = tab;
-        tab.changes = closed.changes;
+        tab.instead = closed.instead;
         self.tabs.insert(at, tab);
         self.active = at;
         self.revision += 1;
@@ -1435,7 +1475,7 @@ impl Columns {
             at: index,
             location: tab.location(),
             opened: tab.opened.map(|opened| (opened.id, tab.filling)),
-            changes: tab.changes,
+            instead: tab.instead,
         });
         if index < self.active || self.active >= self.tabs.len() {
             self.active = self.active.saturating_sub(1).min(self.tabs.len() - 1);
@@ -3579,6 +3619,34 @@ mod tests {
             .expect("visited");
         assert_eq!(columns.active_changes(), None);
         assert_eq!(columns.tab_kind(1), 1);
+    }
+
+    #[test]
+    fn settings_open_in_one_tab_that_is_selected_again_closes_and_is_kept() {
+        let (_root, _metadata, mut columns) = columns();
+        columns.select(0, 2).expect("Films");
+        columns.open_settings_tab().expect("opened");
+        assert_eq!((columns.tab_count(), columns.active_tab()), (2, 1));
+        assert!(columns.active_settings());
+        assert_eq!(
+            (columns.tab_kind(1), columns.tab_glyph(1)),
+            (7, crate::list::Glyph::Gear)
+        );
+        assert!(!columns.can_go_back() && !columns.can_go_forward());
+        // The folder's tab is as it was left; opening Settings again selects their tab.
+        columns.select_tab(0);
+        assert!(!columns.active_settings());
+        assert_eq!(columns.columns().len(), 2);
+        columns.open_settings_tab().expect("selected");
+        assert_eq!((columns.tab_count(), columns.active_tab()), (2, 1));
+        // The next launch opens the tab again.
+        let kept = columns.kept_tab(1);
+        assert!(kept.settings && kept.changes.is_none());
+        // It closes with its cross, and Reopen Closed Tab brings it back.
+        columns.close_tab(1);
+        assert_eq!(columns.tab_count(), 1);
+        columns.reopen_closed_tab().expect("back");
+        assert!(columns.active_settings());
     }
 
     #[test]

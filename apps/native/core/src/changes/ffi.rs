@@ -122,7 +122,7 @@ pub(crate) fn save_now() {
 
 // MARK: Opening
 
-/// Opens or selects the Changes tab of `folder`'s root, an absolute path. Settings close.
+/// Opens or selects the Changes tab of `folder`'s root, an absolute path.
 ///
 /// # Safety
 /// `folder` must point to a NUL-terminated string.
@@ -136,7 +136,6 @@ pub unsafe extern "C" fn nr_changes_open(folder: *const c_char) {
 /// Opens or selects the Changes tab of `folder`'s root: its repository, else the drive.
 pub(crate) fn open_folder(folder: &Path) {
     let root = root_of(folder);
-    crate::ffi::nr_settings_close();
     let opened = with_columns(|columns| columns.open_changes_tab(&root));
     match opened {
         Some(Ok(())) => service().open_view(&root),

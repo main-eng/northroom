@@ -844,9 +844,8 @@ pub(crate) fn with_columns<T>(action: impl FnOnce(&mut Columns) -> T) -> Option<
 /// the value it last drew.
 #[no_mangle]
 pub extern "C" fn nr_columns_revision() -> u64 {
-    // Opening, closing or switching settings redraws the window as a folder change does.
-    let settings = app().settings.relock().1;
-    with_columns(|columns| columns.revision()).unwrap_or(0) + settings
+    let redraws = *app().redraws.relock();
+    with_columns(|columns| columns.revision()).unwrap_or(0) + redraws
 }
 
 /// The interface language code. English only (ADR-0001), because a partly translated catalog
@@ -878,29 +877,24 @@ pub extern "C" fn nr_log_directory() -> NrText {
     )
 }
 
-/// Settings' page while settings are open (`settings::page::TAB_APPEARANCE`), or -1 when they
-/// are closed.
+/// Settings' page while the active tab is the Settings tab
+/// (`settings::page::TAB_APPEARANCE`), or -1 in any other tab.
 #[no_mangle]
 pub extern "C" fn nr_settings_tab() -> i32 {
-    app().settings.relock().0.map_or(-1, |tab| tab as i32)
-}
-
-/// Opens settings, in place of the folder.
-#[no_mangle]
-pub extern "C" fn nr_settings_open() {
-    let mut settings = app().settings.relock();
-    let tab = crate::settings::page::TAB_APPEARANCE;
-    if settings.0 != Some(tab) {
-        *settings = (Some(tab), settings.1 + 1);
+    if with_columns(|columns| columns.active_settings()).unwrap_or(false) {
+        crate::settings::page::TAB_APPEARANCE as i32
+    } else {
+        -1
     }
 }
 
-/// Closes settings; the folder shows as it was left.
+/// Opens Settings in a tab of their own beside the active one, or selects that tab when it is
+/// already open. They close as any tab does. Without a drive there are no tabs, so nothing
+/// opens.
 #[no_mangle]
-pub extern "C" fn nr_settings_close() {
-    let mut settings = app().settings.relock();
-    if settings.0.is_some() {
-        *settings = (None, settings.1 + 1);
+pub extern "C" fn nr_settings_open() {
+    if let Some(Err(error)) = with_columns(|columns| columns.open_settings_tab()) {
+        eprintln!("the Settings tab did not open: {error}");
     }
 }
 
@@ -1263,8 +1257,7 @@ pub unsafe extern "C" fn nr_selection_choose(
     *app().page_file.relock() = None;
     if open_selected(&support, &chosen) {
         // The window redraws: a new drive's revision could equal the old one's.
-        let mut settings = app().settings.relock();
-        settings.1 += 1_000_000;
+        *app().redraws.relock() += 1_000_000;
         lend(String::new())
     } else {
         lend(
@@ -2431,8 +2424,8 @@ pub extern "C" fn nr_tabs_active() -> usize {
     with_columns(|columns| columns.active_tab()).unwrap_or(0)
 }
 
-/// The name a tab shows: the file or folder it holds, "Changes" for a Changes tab, or for a tab
-/// filled by one terminal, the task its session reports. Valid until the next call to this
+/// The name a tab shows: the file or folder it holds, "Changes" for a Changes tab, "Settings"
+/// for the Settings tab, or for a tab filled by one terminal, the task its session reports. Valid until the next call to this
 /// function.
 #[no_mangle]
 pub extern "C" fn nr_tab_title(index: usize) -> NrText {
@@ -2441,6 +2434,11 @@ pub extern "C" fn nr_tab_title(index: usize) -> NrText {
         if columns.tab_changes(index).is_some() {
             let words =
                 crate::strings::text(interface_language(), crate::strings::key::CHANGES_TITLE);
+            return (words.to_owned(), None);
+        }
+        if columns.tab_kind(index) == 7 {
+            let words =
+                crate::strings::text(interface_language(), crate::strings::key::SETTINGS_TITLE);
             return (words.to_owned(), None);
         }
         let terminals = columns.tab_terminal_ids(index);
@@ -2563,7 +2561,7 @@ pub extern "C" fn nr_tab_close(index: usize) {
 
 #[no_mangle]
 pub extern "C" fn nr_history_can_go_back() -> bool {
-    nr_settings_tab() >= 0 || with_columns(|columns| columns.can_go_back()).unwrap_or(false)
+    with_columns(|columns| columns.can_go_back()).unwrap_or(false)
 }
 
 #[no_mangle]
@@ -2574,11 +2572,6 @@ pub extern "C" fn nr_history_can_go_forward() -> bool {
 /// Back: closes an open file, else the folder shown before, else the enclosing folder.
 #[no_mangle]
 pub extern "C" fn nr_history_back() {
-    // Back from settings returns to the folder.
-    if nr_settings_tab() >= 0 {
-        nr_settings_close();
-        return;
-    }
     with_columns(|columns| {
         if let Err(error) = columns.go_back() {
             eprintln!("could not go back: {error}");

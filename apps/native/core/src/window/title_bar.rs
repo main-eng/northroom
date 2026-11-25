@@ -1,6 +1,5 @@
 //! The strip across the top of the window: Back and Forward, the open tabs, the new-tab button,
-//! the sessions button and the update button. While settings are open, their title replaces the
-//! tabs.
+//! the sessions button and the update button.
 //!
 //! The shell measures text and passes the widths in. Everything else is decided here: layout,
 //! hit testing, tooltips, tab scrolling, tab dragging, and when a tab shows its cross and where
@@ -37,8 +36,6 @@ const CLOSE_CLEAR: f64 = 2.0;
 const TITLE_FADE: f64 = 16.0;
 /// Slack for measuring error: a name this far past its room still counts as fitting.
 const TITLE_SLACK: f64 = 1.0;
-/// The settings title starts where a tab's padding would end.
-const SETTINGS_INSET: f64 = 8.0;
 /// The sessions button holds a 14 pt glyph. With text it becomes a pill: 8 pt padding at each
 /// end and the text 6 pt after the glyph. It sits 4 pt left of the next button.
 const SESSIONS_GLYPH: f64 = 14.0;
@@ -49,7 +46,6 @@ const CONTROL_GAP: f64 = 4.0;
 const EDGE: f64 = 8.0;
 
 /// Text the bar shows.
-pub const SETTINGS: &str = "Settings";
 pub const NEW_TAB: &str = "New tab";
 pub const BACK: &str = "Back";
 pub const FORWARD: &str = "Forward";
@@ -66,8 +62,6 @@ pub struct Shown<'a> {
     pub active: usize,
     /// The active tab (`Columns::active_tab_id`); `None` with no tab open.
     pub active_id: Option<TabId>,
-    /// Settings are open, so their title replaces the tabs.
-    pub settings: bool,
     /// The update button sits at the bar's right end.
     pub update: bool,
     pub sessions: SessionsShown,
@@ -166,8 +160,6 @@ pub struct Layout {
     pub sessions_words_x: f64,
     /// The review button, always left of the sessions button.
     pub review: Option<Frame>,
-    /// Where the settings title starts, while settings are open.
-    pub settings_x: f64,
     /// How far the tabs are scrolled, and the row's length.
     pub offset: f64,
     pub length: f64,
@@ -295,13 +287,6 @@ impl TitleBar {
             offset: self.layout.offset,
             ..Layout::default()
         };
-        if shown.settings {
-            // Settings are a place, not a tab. The bar shows their title beside Back and
-            // Forward, as System Settings does, and Back leaves them.
-            layout.settings_x = origin + SETTINGS_INSET;
-            self.layout = layout;
-            return &self.layout;
-        }
         let wanted: Vec<f64> = shown
             .titles
             .iter()
@@ -720,7 +705,6 @@ mod tests {
             active,
             // Tabs keep their places in these rows: a tab's id is its place.
             active_id: Some(TabId(active as u64)),
-            settings: false,
             update: false,
             sessions: SessionsShown::default(),
             window_buttons: WindowButtons::Shown,
@@ -842,11 +826,10 @@ mod tests {
             })
             .clone();
         assert_eq!(shrinking.sessions, half.sessions);
-        // With an update waiting it sits left of the update button, in settings too.
+        // With an update waiting it sits left of the update button.
         let beside = bar
             .lay_out(&Shown {
                 update: true,
-                settings: true,
                 ..shown(&titles, &closes, 0)
             })
             .clone();
@@ -1141,12 +1124,6 @@ mod tests {
         assert_eq!(bar.carry(144.0, 20.0, 2.0), Carry::Moved(0, 1));
         assert_eq!(bar.lay_out(&hidden).tabs[1].frame.x, 124.0);
         assert!(bar.let_go());
-        // Settings name themselves where the tabs would start.
-        let settings = Shown {
-            settings: true,
-            ..hidden
-        };
-        assert_eq!(bar.lay_out(&settings).settings_x, 64.0 + 8.0);
     }
 
     #[test]
@@ -1403,26 +1380,5 @@ mod tests {
         assert!(bar.let_go());
         let laid = bar.lay_out(&shown(&titles, &closes, 0)).clone();
         assert_eq!(laid.tabs[0].frame.x, 142.0, "it settles in its place");
-    }
-
-    #[test]
-    fn settings_show_their_title_in_place_of_the_tabs() {
-        let mut bar = TitleBar::default();
-        let layout = bar
-            .lay_out(&Shown {
-                settings: true,
-                ..shown(&[40.0], &[false], 0)
-            })
-            .clone();
-        assert_eq!(layout.settings_x, 150.0);
-        assert!(layout.tabs.is_empty() && layout.plus.is_none() && layout.tabs_view.is_none());
-        // The title is not a control: pressing it moves the window, and Back leaves settings.
-        assert_eq!(bar.hit(160.0, 20.0), Control::Bar);
-        assert_eq!(bar.hit(90.0, 20.0), Control::Back);
-        assert_eq!(
-            bar.tooltip(150.0, 20.0, &tips(true, true, "", "", "")),
-            None
-        );
-        assert!(!bar.scroll(-10.0, WHEEL_POINTS));
     }
 }
