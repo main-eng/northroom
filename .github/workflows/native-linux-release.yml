@@ -1,5 +1,6 @@
 name: Native Linux release
 
+# Start it from the repository's Actions tab, or with `gh workflow run native-linux-release.yml`.
 # Signs with the updater's minisign key, stored as `LINUX_UPDATE_KEY`. A `public-key`
 # run prints only the public half. A `release` run signs the checked AppImage from a packages run
 # on the same commit.

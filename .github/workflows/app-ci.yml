@@ -1,5 +1,6 @@
 name: "🚦 App CI"
 
+# Start it from the repository's Actions tab, or with `gh workflow run app-ci.yml`.
 # Started by hand only. The same checks run locally before each push.
 on:
   workflow_dispatch:

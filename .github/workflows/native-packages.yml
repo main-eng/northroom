@@ -1,5 +1,6 @@
 name: "📦 Native packages"
 
+# Start it from the repository's Actions tab, or with `gh workflow run native-packages.yml`.
 # Builds the Windows per-user setup (scripts/release-windows.sh --unsigned) and the Linux
 # AppImage (scripts/release-linux.sh --unsigned), both unsigned and marked NOT-FOR-RELEASE
 # (DECISIONS.md, ADR-0010). Each is installed and must start and draw its window

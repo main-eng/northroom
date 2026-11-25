@@ -1,5 +1,6 @@
 name: "🪟 GPUI Shell"
 
+# Start it from the repository's Actions tab, or with `gh workflow run gpui-shell.yml`.
 # Checks that the app behaves the same on Windows, Linux and the Mac (ADR-0001). Each runner lints
 # the core and shell workspaces (rustfmt, and clippy with warnings as errors, since each compiles
 # its own platform code) and runs the kit, shell, core and media tests.

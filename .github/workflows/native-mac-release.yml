@@ -1,5 +1,6 @@
 name: Native Mac release
 
+# Start it from the repository's Actions tab, or with `gh workflow run native-mac-release.yml`.
 # Builds signed, notarized release files. It leaves the public download and update feeds alone;
 # the maintainer publishes by hand (DECISIONS.md, ADR-0010).
 on:
