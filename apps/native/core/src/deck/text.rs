@@ -38,31 +38,83 @@ pub fn glyph_at(glyphs: &[Glyph], (x, y): (f64, f64)) -> Option<usize> {
     (0..glyphs.len()).min_by(|&a, &b| distance(&glyphs[a]).total_cmp(&distance(&glyphs[b])))
 }
 
-/// Glyphs `from` to `to` (either order, both included) as text: a line break where a glyph
-/// starts a new line, a space where it stands apart from the last by a fifth of its height,
-/// unless one of them is already a space.
+/// Glyphs as they read, character by character, each with the glyph it came from: a line
+/// break where a glyph starts a new line and a space where it stands apart from the last by a
+/// fifth of its height (unless one of them is already a space), those belonging to no glyph.
+fn reading(glyphs: &[Glyph]) -> Vec<(char, Option<usize>)> {
+    let mut out = Vec::new();
+    let mut previous: Option<&Glyph> = None;
+    for (index, glyph) in glyphs.iter().enumerate() {
+        if let Some(before) = previous {
+            let spaced = before.text.ends_with(' ') || glyph.text.starts_with(' ');
+            if !same_line(&before.frame, &glyph.frame) {
+                out.push(('\n', None));
+            } else if !spaced
+                && glyph.frame.x - (before.frame.x + before.frame.width) > glyph.frame.height * 0.2
+            {
+                out.push((' ', None));
+            }
+        }
+        out.extend(glyph.text.chars().map(|character| (character, Some(index))));
+        previous = Some(glyph);
+    }
+    out
+}
+
+/// Glyphs `from` to `to` (either order, both included) as text (`reading`).
 pub fn text_between(glyphs: &[Glyph], from: usize, to: usize) -> String {
     let (first, last) = (
         from.min(to),
         from.max(to).min(glyphs.len().saturating_sub(1)),
     );
-    let mut out = String::new();
-    let mut previous: Option<&Glyph> = None;
-    for glyph in glyphs.get(first..=last).unwrap_or(&[]) {
-        if let Some(before) = previous {
-            let spaced = before.text.ends_with(' ') || glyph.text.starts_with(' ');
-            if !same_line(&before.frame, &glyph.frame) {
-                out.push('\n');
-            } else if !spaced
-                && glyph.frame.x - (before.frame.x + before.frame.width) > glyph.frame.height * 0.2
-            {
-                out.push(' ');
-            }
-        }
-        out.push_str(&glyph.text);
-        previous = Some(glyph);
+    let slice = glyphs.get(first..=last).unwrap_or(&[]);
+    reading(slice)
+        .into_iter()
+        .map(|(character, _)| character)
+        .collect()
+}
+
+fn folded(character: char) -> char {
+    character.to_lowercase().next().unwrap_or(character)
+}
+
+/// Where `query` occurs in the glyphs' text, case aside and a line break counting as a space:
+/// each match's first and last glyph.
+pub fn find(glyphs: &[Glyph], query: &str) -> Vec<(usize, usize)> {
+    let wanted: Vec<char> = query.chars().map(folded).collect();
+    if wanted.is_empty() {
+        return Vec::new();
     }
-    out
+    let read = reading(glyphs);
+    let plain: Vec<char> = read
+        .iter()
+        .map(|(character, _)| {
+            if *character == '\n' {
+                ' '
+            } else {
+                folded(*character)
+            }
+        })
+        .collect();
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at + wanted.len() <= plain.len() {
+        if plain[at..at + wanted.len()] != wanted[..] {
+            at += 1;
+            continue;
+        }
+        let owners = read[at..at + wanted.len()]
+            .iter()
+            .filter_map(|(_, owner)| *owner);
+        let (first, last) = owners.fold((usize::MAX, 0), |(low, high), owner| {
+            (low.min(owner), high.max(owner))
+        });
+        if first != usize::MAX {
+            found.push((first, last));
+        }
+        at += wanted.len();
+    }
+    found
 }
 
 #[cfg(test)]
@@ -88,6 +140,9 @@ mod tests {
         ];
         assert_eq!(text_between(&glyphs, 0, 5), "Hi to\nNo");
         assert_eq!(text_between(&glyphs, 3, 1), "i to");
+        assert_eq!(find(&glyphs, "TO no"), [(2, 5)]);
+        assert_eq!(find(&glyphs, "o"), [(3, 3), (5, 5)]);
+        assert!(find(&glyphs, "").is_empty());
     }
 
     #[test]

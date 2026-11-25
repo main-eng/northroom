@@ -64,6 +64,7 @@
   "columns_empty_folder": "Empty folder",
   "columns_folder_unreadable": "Couldn’t open this folder",
   "common_save": "Save",
+  "deck_find": "Find",
   "dialog_add_failed": "Couldn’t add the files",
   "dialog_add_failed_detail": "Open {terminal} and try again.",
   "dialog_end_session_title": "End {name}?",

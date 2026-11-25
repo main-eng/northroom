@@ -8,11 +8,12 @@
 use super::{Ask, Screen, on_bubble, on_bubble_over};
 use crate::script::probe::Probe;
 use gpui::{
-    App, Bounds, ContentMask, Context, Corners, EventEmitter, FocusHandle, Hitbox, HitboxBehavior,
-    Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, PathBuilder, Pixels, Point, Render, Rgba, ScrollEvent, Styled,
-    Window, canvas, point, px,
+    App, AppContext, Bounds, ContentMask, Context, Corners, Entity, EventEmitter, FocusHandle,
+    Focusable, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, PathBuilder, Pixels, Point,
+    Render, Rgba, ScrollEvent, Styled, Window, canvas, point, px,
 };
+use kit::controls::input::{Changed, Command as FieldKey, Field, Keys, Placeholder};
 use kit::controls::{Frame, placed};
 use kit::core::contains;
 use kit::draw::{fill, oval, rounded, stroke};
@@ -45,18 +46,38 @@ pub struct Deck {
     selection: Option<(usize, usize, usize)>,
     /// Whether a drag is selecting text.
     selecting: bool,
+    finder: Option<Finder>,
 }
 
 /// The key context of a deck view, where ⌘C copies the selected text and ⌘A selects a page's.
 const KEYS: &str = "deck";
+
+gpui::actions!(deck_view, [Find]);
 
 pub fn bindings() -> Vec<gpui::KeyBinding> {
     use kit::controls::input::{Copy, SelectAll};
     vec![
         gpui::KeyBinding::new("cmd-c", Copy, Some(KEYS)),
         gpui::KeyBinding::new("cmd-a", SelectAll, Some(KEYS)),
+        gpui::KeyBinding::new("cmd-f", Find, Some(KEYS)),
     ]
 }
+
+/// The find field, open over the view's top right, and what it found.
+struct Finder {
+    field: Entity<Field>,
+    _changes: gpui::Subscription,
+    _commands: gpui::Subscription,
+    /// Each match: its page and its first and last glyph.
+    matches: Vec<(usize, usize, usize)>,
+    /// The match shown.
+    current: usize,
+}
+
+/// The find field's size and its inset from the view's top right corner.
+const FIND_WIDTH: f32 = 240.0;
+const FIND_HEIGHT: f32 = 28.0;
+const FIND_INSET: f32 = 12.0;
 
 /// Where slide `index` of `page` sits in the view, scrolled by `scrolled` (view points).
 fn slide_frame(page: &Page, index: usize, scrolled: f64) -> Option<Rect> {
@@ -205,6 +226,7 @@ impl Deck {
             down: Scroller::default(),
             selection: None,
             selecting: false,
+            finder: None,
         };
         nr_unlock_forget_asked();
         deck.reload(window, cx);
@@ -327,6 +349,129 @@ impl Deck {
         }
     }
 
+    /// Opens the find field, or focuses it when open (⌘F).
+    fn find(&mut self, _: &Find, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(finder) = &self.finder {
+            let focus = finder.field.focus_handle(cx);
+            window.focus(&focus, cx);
+            return;
+        }
+        let placeholder = northroom_core::deck::ffi::find_placeholder();
+        let field = cx.new(|cx| {
+            let mut field = Field::new(placeholder, "", window, cx);
+            field.keys = Keys::Dialog;
+            field.placeholder = Placeholder::Words(placeholder.to_owned());
+            field
+        });
+        let changes = cx.subscribe_in(
+            &field,
+            window,
+            |deck: &mut Self, _, changed: &Changed, _, cx| {
+                deck.search(&changed.0, cx);
+            },
+        );
+        let commands = cx.subscribe_in(
+            &field,
+            window,
+            |deck: &mut Self, _, key: &FieldKey, window, cx| match key {
+                FieldKey::Return => deck.next_match(cx),
+                FieldKey::Escape => deck.close_find(window, cx),
+                FieldKey::Tab | FieldKey::BackTab => {}
+            },
+        );
+        let focus = field.focus_handle(cx);
+        window.focus(&focus, cx);
+        self.finder = Some(Finder {
+            field,
+            _changes: changes,
+            _commands: commands,
+            matches: Vec::new(),
+            current: 0,
+        });
+        cx.notify();
+    }
+
+    fn search(&mut self, query: &str, cx: &mut Context<Self>) {
+        let matches = northroom_core::deck::ffi::deck_find(query);
+        if let Some(finder) = &mut self.finder {
+            finder.matches = matches;
+            finder.current = 0;
+        }
+        self.reveal_match();
+        cx.notify();
+    }
+
+    fn next_match(&mut self, cx: &mut Context<Self>) {
+        if let Some(finder) = self
+            .finder
+            .as_mut()
+            .filter(|finder| !finder.matches.is_empty())
+        {
+            finder.current = (finder.current + 1) % finder.matches.len();
+        }
+        self.reveal_match();
+        cx.notify();
+    }
+
+    fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.finder = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// Scrolls the match shown into view.
+    fn reveal_match(&mut self) {
+        let Some((page, finder)) = self.page.as_ref().zip(self.finder.as_ref()) else {
+            return;
+        };
+        let Some(&(slide, first, last)) = finder.matches.get(finder.current) else {
+            return;
+        };
+        let Some(frame) = slide_frame(page, slide, 0.0) else {
+            return;
+        };
+        let glyphs = deck_text(slide, frame);
+        let shown = glyphs
+            .get(first..=last.min(glyphs.len().saturating_sub(1)))
+            .unwrap_or(&[]);
+        let top = shown
+            .iter()
+            .map(|glyph| glyph.frame.y)
+            .fold(f64::MAX, f64::min);
+        let bottom = shown
+            .iter()
+            .map(|glyph| glyph.frame.y + glyph.frame.height)
+            .fold(f64::MIN, f64::max);
+        if top <= bottom {
+            self.down
+                .reveal(top as f32 - FIND_HEIGHT * 3.0, bottom as f32 + FIND_HEIGHT);
+        }
+    }
+
+    /// Paints the find's matches on slide `index`, placed at `slide`: the one shown stronger.
+    fn paint_matches(&self, index: usize, slide: Rect, window: &mut Window) {
+        let Some(finder) = &self.finder else {
+            return;
+        };
+        let glyphs = deck_text(index, slide);
+        for (number, &(page, first, last)) in finder.matches.iter().enumerate() {
+            if page != index {
+                continue;
+            }
+            let strength = if number == finder.current { 0.6 } else { 0.25 };
+            let tint = Hsla {
+                a: strength,
+                ..color(Token::Accent)
+            };
+            for glyph in glyphs
+                .get(first..=last.min(glyphs.len().saturating_sub(1)))
+                .unwrap_or(&[])
+            {
+                fill(window, glyph.frame.at(self.frame.origin), tint);
+            }
+        }
+    }
+
     /// Paints the selection's glyphs on slide `index`, placed at `slide`.
     fn paint_selection(&self, index: usize, slide: Rect, window: &mut Window) {
         let Some((selected, anchor, reached)) =
@@ -385,6 +530,7 @@ impl Deck {
                     }
                 }
             }
+            self.paint_matches(index, slide, window);
             self.paint_selection(index, slide, window);
         });
     }
@@ -501,11 +647,26 @@ impl Screen for Deck {
 impl Render for Deck {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let deck = cx.entity();
+        let finder = self.finder.as_ref().map(|finder| finder.field.clone());
+        if let Some(field) = &finder {
+            let origin = self.frame.origin;
+            let bounds = Bounds {
+                origin: point(
+                    origin.x + self.frame.size.width - px(FIND_WIDTH + FIND_INSET),
+                    origin.y + px(FIND_INSET),
+                ),
+                size: gpui::size(px(FIND_WIDTH), px(FIND_HEIGHT)),
+            };
+            field.update(cx, |field, cx| {
+                field.place(bounds, Field::settings(bounds), cx)
+            });
+        }
         placed("deck", cx.entity_id(), self.frame)
             .track_focus(&self.focus)
             .key_context(KEYS)
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::find))
             .child(
                 canvas(
                     |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
@@ -515,5 +676,6 @@ impl Render for Deck {
                 )
                 .size_full(),
             )
+            .children(finder)
     }
 }

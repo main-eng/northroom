@@ -148,6 +148,36 @@ pub fn deck_text(slide: usize, frame: Rect) -> Vec<super::text::Glyph> {
         .collect()
 }
 
+/// The find field's placeholder, in the interface language.
+pub fn find_placeholder() -> &'static str {
+    crate::strings::text(
+        crate::ffi::interface_language(),
+        crate::strings::key::DECK_FIND,
+    )
+}
+
+/// Where `query` occurs in the open PDF's text, page by page: each match's page and its first
+/// and last glyph (`text::find`).
+pub fn deck_find(query: &str) -> Vec<(usize, usize, usize)> {
+    let Some(deck) = opened_deck() else {
+        return Vec::new();
+    };
+    (0..deck.slides.len())
+        .flat_map(|slide| {
+            let glyphs: Vec<super::text::Glyph> = page_glyphs(slide)
+                .iter()
+                .map(|glyph| super::text::Glyph {
+                    text: glyph.text.clone(),
+                    frame: glyph.frame,
+                })
+                .collect();
+            super::text::find(&glyphs, query)
+                .into_iter()
+                .map(move |(first, last)| (slide, first, last))
+        })
+        .collect()
+}
+
 /// Forgets the file last read, so the next ask reads it again, as after a password is typed.
 pub fn forget_read() {
     *READ.relock() = None;
