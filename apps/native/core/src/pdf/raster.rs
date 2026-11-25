@@ -482,6 +482,18 @@ impl Canvas {
         }
     }
 
+    /// Pixel (`x`, `y`) as straight RGBA from 0 to 1.
+    pub fn straight(&self, x: usize, y: usize) -> Rgba {
+        let at = (y * self.width + x) * 4;
+        let alpha = f32::from(self.pixels[at + 3]) / 255.0;
+        if alpha <= 0.0 {
+            return [0.0; 4];
+        }
+        let channel =
+            |offset: usize| (f32::from(self.pixels[at + offset]) / 255.0 / alpha).min(1.0);
+        [channel(0), channel(1), channel(2), alpha]
+    }
+
     pub fn is_blank(&self) -> bool {
         self.pixels
             .iter()

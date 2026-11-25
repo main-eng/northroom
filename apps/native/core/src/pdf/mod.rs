@@ -23,6 +23,7 @@ pub mod layers;
 pub mod object;
 pub mod raster;
 pub mod render;
+pub mod shading;
 pub mod stroke;
 pub mod type1;
 
@@ -683,6 +684,31 @@ mod tests {
             (126..=129).contains(&multiplied[0]) && multiplied[1] == 0,
             "{multiplied:?}"
         );
+    }
+
+    #[test]
+    fn a_tiling_pattern_repeats_its_cell_across_what_it_fills() {
+        let cell = "0 0 5 10 re f";
+        let bytes = pdf_of(&[
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 40 10] >>".into(),
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Pattern << /Bars 5 0 R >> >> >>"
+                .into(),
+            stream("/Pattern cs /Bars scn 0 0 40 10 re f"),
+            format!(
+                "<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] \
+                 /XStep 10 /YStep 10 /Resources << >> /Length {} >>\nstream\n{cell}\nendstream",
+                cell.len()
+            ),
+        ]);
+        let document = Document::open(bytes).expect("open");
+        let pages = pages_of(&document);
+        let mut renderer = render::Renderer::new(40, 10, 0);
+        run_page(&document, &pages[0], &mut renderer, 1.0);
+        let canvas = renderer.canvas;
+        for (x, filled) in [(2, true), (7, false), (12, true), (17, false), (32, true)] {
+            assert_eq!(canvas.pixel(x, 5)[3] == 255, filled, "column {x}");
+        }
     }
 
     #[test]

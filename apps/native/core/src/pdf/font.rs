@@ -252,7 +252,8 @@ fn cff_glyph_count(cff: &[u8]) -> Option<usize> {
     Some(count)
 }
 
-/// A bare CFF program as an OpenType font skrifa reads: the CFF, a `head` and a `maxp`.
+/// A bare CFF program as an OpenType font skrifa reads: the CFF with the `head`, `maxp`,
+/// `hhea` and `hmtx` its outline reader needs.
 fn wrap_cff(cff: &[u8]) -> Option<Vec<u8>> {
     let count = cff_glyph_count(cff)?.min(65_535) as u16;
     let mut head = vec![0u8; 54];
@@ -262,7 +263,14 @@ fn wrap_cff(cff: &[u8]) -> Option<Vec<u8>> {
     head[48..50].copy_from_slice(&2u16.to_be_bytes());
     let mut maxp = 0x0000_5000u32.to_be_bytes().to_vec();
     maxp.extend_from_slice(&count.to_be_bytes());
+    // Horizontal metrics, which the outline reader requires: one zero advance for every glyph;
+    // the PDF gives the widths.
+    let mut hhea = vec![0u8; 36];
+    hhea[..4].copy_from_slice(&0x0001_0000u32.to_be_bytes());
+    hhea[34..36].copy_from_slice(&1u16.to_be_bytes());
     let mut tables = std::collections::BTreeMap::new();
+    tables.insert(*b"hhea", hhea);
+    tables.insert(*b"hmtx", vec![0u8; 4]);
     tables.insert(*b"CFF ", cff.to_vec());
     tables.insert(*b"head", head);
     tables.insert(*b"maxp", maxp);
@@ -748,6 +756,17 @@ fn scaled(command: Command, scale: f64) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bare_cff_program_draws_its_glyphs_by_name() {
+        let wrapped =
+            wrap_cff(include_bytes!("../../tests/fixtures/pdf/square.cff")).expect("wrapped");
+        let sfnt = Sfnt::new(wrapped).expect("readable");
+        let glyph = sfnt.glyph_by_name("square").expect("named");
+        let outline = sfnt.outline(glyph).expect("an outline");
+        assert!(outline.contains(&Command::Move(0.1, 0.0)), "{outline:?}");
+        assert!(outline.contains(&Command::Line(0.4, 0.3)), "{outline:?}");
+    }
 
     #[test]
     fn the_fallback_faces_draw_and_measure_letters() {

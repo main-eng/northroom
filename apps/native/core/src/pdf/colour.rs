@@ -26,7 +26,8 @@ pub enum Space {
         alternate: Box<Space>,
         function: Option<Function>,
     },
-    Pattern,
+    /// Patterns; an uncoloured one is painted in the colour space it names, if any.
+    Pattern(Option<Box<Space>>),
 }
 
 fn cmyk_to_rgb(c: f32, m: f32, y: f32, k: f32) -> [f32; 3] {
@@ -67,7 +68,7 @@ fn lab_to_rgb(l: f32, a: f32, b: f32) -> [f32; 3] {
 impl Space {
     pub fn components(&self) -> usize {
         match self {
-            Space::Gray | Space::Indexed { .. } | Space::Pattern => 1,
+            Space::Gray | Space::Indexed { .. } | Space::Pattern(_) => 1,
             Space::Rgb | Space::Lab => 3,
             Space::Cmyk => 4,
             Space::Tint { components, .. } => *components,
@@ -86,7 +87,7 @@ impl Space {
     pub fn rgb(&self, values: &[f32]) -> [f32; 3] {
         let at = |index: usize| values.get(index).copied().unwrap_or(0.0).clamp(0.0, 1.0);
         match self {
-            Space::Gray | Space::Pattern => [at(0); 3],
+            Space::Gray | Space::Pattern(_) => [at(0); 3],
             Space::Rgb => [at(0), at(1), at(2)],
             Space::Cmyk => cmyk_to_rgb(at(0), at(1), at(2), at(3)),
             Space::Lab => lab_to_rgb(
@@ -194,7 +195,9 @@ impl Space {
                 ),
                 function: Function::read(document, &entry(3), 0),
             }),
-            "Pattern" => Some(Space::Pattern),
+            "Pattern" => Some(Space::Pattern(
+                Space::read(document, &entry(1), depth + 1).map(Box::new),
+            )),
             other => Space::named(other),
         }
     }
@@ -204,7 +207,7 @@ impl Space {
             "DeviceGray" | "G" | "CalGray" => Some(Space::Gray),
             "DeviceRGB" | "RGB" | "CalRGB" => Some(Space::Rgb),
             "DeviceCMYK" | "CMYK" => Some(Space::Cmyk),
-            "Pattern" => Some(Space::Pattern),
+            "Pattern" => Some(Space::Pattern(None)),
             _ => None,
         }
     }

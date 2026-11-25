@@ -7,12 +7,13 @@
 //! middle colour), text rendering's clip modes (drawn as fills), and optional content.
 
 use super::blend::Blend;
-use super::colour::{Function, Space};
+use super::colour::Space;
 use super::font::Font;
 use super::image::{self, Picture};
 use super::layers::Layers;
 use super::object::{Dict, Document, Object, Parser, Ref, Stream, Token};
 use super::raster::{Canvas, Mask, Rgba};
+use super::shading::{Paint, Shading};
 use super::stroke::Pen;
 use crate::deck::Command;
 use std::collections::HashMap;
@@ -24,8 +25,6 @@ pub const IDENTITY: Matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 const DEPTH_MAX: usize = 16;
 /// The most operators one page runs, so a damaged stream can't run for ever.
 const OPERATORS_MAX: usize = 4_000_000;
-/// How many colours a gradient is sampled at.
-const GRADIENT_STEPS: usize = 256;
 
 /// `a`, then `b`.
 pub fn multiply(a: Matrix, b: Matrix) -> Matrix {
@@ -82,62 +81,52 @@ fn transform(command: Command, m: Matrix) -> Command {
     }
 }
 
-/// The clip in effect: none, or a coverage mask over the canvas.
-pub type Clip = Option<Rc<Mask>>;
+/// The largest side a tiling pattern's cell is drawn at, in pixels.
+const TILE_SIDE_MAX: f64 = 1024.0;
 
-/// A gradient's colour at each point, sampled along its parameter.
-pub struct Gradient {
-    /// From device points to the shading's own space.
-    inverse: Matrix,
-    kind: GradientKind,
-    colours: Vec<Rgba>,
-    extend: [bool; 2],
-}
+/// Paints nothing: what planning shades with, as it needs only to know a mark is made.
+struct Nothing;
 
-enum GradientKind {
-    Axial {
-        from: (f64, f64),
-        to: (f64, f64),
-    },
-    Radial {
-        centre: (f64, f64),
-        inner: f64,
-        outer: f64,
-    },
-}
-
-impl Gradient {
-    /// The colour at device point `point`, or `None` outside the gradient.
-    pub fn colour_at(&self, point: (f64, f64)) -> Option<Rgba> {
-        let (x, y) = apply(self.inverse, point);
-        let t = match self.kind {
-            GradientKind::Axial { from, to } => {
-                let (dx, dy) = (to.0 - from.0, to.1 - from.1);
-                let length = dx * dx + dy * dy;
-                if length <= 0.0 {
-                    return None;
-                }
-                ((x - from.0) * dx + (y - from.1) * dy) / length
-            }
-            GradientKind::Radial {
-                centre,
-                inner,
-                outer,
-            } => {
-                let span = outer - inner;
-                if span.abs() < 1e-9 {
-                    return None;
-                }
-                ((x - centre.0).hypot(y - centre.1) - inner) / span
-            }
-        };
-        if (t < 0.0 && !self.extend[0]) || (t > 1.0 && !self.extend[1]) {
-            return None;
-        }
-        let index = (t.clamp(0.0, 1.0) * (self.colours.len() - 1) as f64).round() as usize;
-        self.colours.get(index).copied()
+impl Paint for Nothing {
+    fn colour_at(&self, _: (f64, f64)) -> Option<Rgba> {
+        None
     }
 }
+
+/// A tiling pattern's cell, drawn, repeated across the page.
+struct Tile {
+    /// From device pixels to the pattern's space.
+    inverse: Matrix,
+    /// The cell's corner and its steps across and up, in the pattern's space.
+    origin: (f64, f64),
+    step: (f64, f64),
+    /// The cell's size in pixels, and its drawing.
+    size: (usize, usize),
+    canvas: Canvas,
+    /// An uncoloured pattern's colour.
+    tint: Option<Rgba>,
+}
+
+impl Paint for Tile {
+    fn colour_at(&self, point: (f64, f64)) -> Option<Rgba> {
+        let (x, y) = apply(self.inverse, point);
+        let across = ((x - self.origin.0) / self.step.0).rem_euclid(1.0);
+        let up = ((y - self.origin.1) / self.step.1).rem_euclid(1.0);
+        let column = ((across * self.size.0 as f64) as usize).min(self.size.0 - 1);
+        let row = (((1.0 - up) * self.size.1 as f64) as usize).min(self.size.1 - 1);
+        let colour = self.canvas.straight(column, row);
+        if colour[3] <= 0.0 {
+            return None;
+        }
+        Some(match self.tint {
+            Some(tint) => [tint[0], tint[1], tint[2], tint[3] * colour[3]],
+            None => colour,
+        })
+    }
+}
+
+/// The clip in effect: none, or a coverage mask over the canvas.
+pub type Clip = Option<Rc<Mask>>;
 
 /// Where a run's marks go.
 pub trait Sink {
@@ -146,7 +135,8 @@ pub trait Sink {
     fn wants_detail(&self) -> bool;
     fn fill(&mut self, path: &[Command], colour: Rgba, clip: &Clip);
     fn stroke(&mut self, path: &[Command], pen: &Pen, colour: Rgba, clip: &Clip);
-    fn gradient(&mut self, gradient: &Gradient, clip: &Clip);
+    /// Paints each pixel within `clip` the colour `paint` gives it.
+    fn shade(&mut self, paint: &dyn Paint, clip: &Clip);
     fn picture(&mut self, picture: Option<Picture>, matrix: Matrix, alpha: f32, clip: &Clip);
     /// An encoded picture the system decodes and draws on its own: a JPEG or JPEG 2000 shown
     /// in `frame` (left, top, width, height), with `crop` of each edge (left, top, right,
@@ -639,102 +629,148 @@ impl<'a, S: Sink> Interpreter<'a, S> {
 
     // --- Gradients -------------------------------------------------------------------------
 
-    fn read_gradient(&self, shading: &Object, matrix: Matrix) -> Option<Gradient> {
-        let dict = shading.as_dict()?;
-        let kind = self.document.entry(dict, "ShadingType").as_i64()?;
-        let coords: Vec<f64> = self
-            .document
-            .entry(dict, "Coords")
-            .as_array()
-            .map(numbers_of)?;
-        let space = Space::read(self.document, dict.get("ColorSpace")?, 0)?;
-        let function = Function::read(self.document, dict.get("Function")?, 0)?;
-        let domain: Vec<f64> = self
-            .document
-            .entry(dict, "Domain")
-            .as_array()
-            .map(numbers_of)
-            .unwrap_or_else(|| vec![0.0, 1.0]);
-        let (t0, t1) = (
-            domain.first().copied().unwrap_or(0.0),
-            domain.get(1).copied().unwrap_or(1.0),
-        );
-        let extend: Vec<bool> = self
-            .document
-            .entry(dict, "Extend")
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|item| matches!(item, Object::Bool(true)))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let colours = (0..GRADIENT_STEPS)
-            .map(|step| {
-                let t = t0 + (t1 - t0) * step as f64 / (GRADIENT_STEPS - 1) as f64;
-                space.rgba(&function.evaluate(&[t as f32]), self.state.fill_alpha)
-            })
-            .collect();
-        let kind = match (kind, coords.as_slice()) {
-            (2, [x0, y0, x1, y1, ..]) => GradientKind::Axial {
-                from: (*x0, *y0),
-                to: (*x1, *y1),
-            },
-            (3, [x0, y0, r0, x1, y1, r1, ..]) => {
-                let _ = (x0, y0);
-                GradientKind::Radial {
-                    centre: (*x1, *y1),
-                    inner: *r0,
-                    outer: *r1,
-                }
-            }
-            _ => return None,
-        };
-        Some(Gradient {
-            inverse: invert(matrix)?,
-            kind,
-            colours,
-            extend: [
-                extend.first().copied().unwrap_or(false),
-                extend.get(1).copied().unwrap_or(false),
-            ],
-        })
-    }
-
     /// `sh`: paints a shading over the clip.
     fn shade(&mut self, name: &str, resources: Option<&Dict>) {
         if self.hidden() {
             return;
         }
         let shading = self.resource(resources, "Shading", name);
-        if let Some(gradient) = self.read_gradient(&shading, self.state.ctm) {
-            let clip = self.ready();
-            self.sink.gradient(&gradient, &clip);
+        let alpha = self.state.fill_alpha;
+        let clip = self.ready();
+        if !self.sink.wants_detail() {
+            self.sink.shade(&Nothing, &clip);
+            return;
+        }
+        if let Some(shading) =
+            Shading::read(self.document, &shading, self.state.ctm, alpha, resources)
+        {
+            self.sink.shade(&shading, &clip);
         }
     }
 
+    /// Fills `path` with the pattern `name`: a shading, or a cell of content repeated.
     fn fill_with_pattern(&mut self, path: &[Command], name: &str) {
         let pattern = self.resource(self.current_resources.as_ref(), "Pattern", name);
+        let paint_clip = self.ready();
+        let clip = self.sink.clip(&paint_clip, path);
+        if !self.sink.wants_detail() {
+            self.sink.shade(&Nothing, &clip);
+            return;
+        }
         let Some(dict) = pattern.as_dict() else {
             return;
         };
-        if self.document.entry(dict, "PatternType").as_i64() != Some(2) {
-            return;
-        }
         let matrix: Matrix = self
             .document
             .entry(dict, "Matrix")
             .as_array()
             .and_then(|items| numbers_of(items).try_into().ok())
             .unwrap_or(IDENTITY);
-        let shading = self.document.entry(dict, "Shading");
-        let Some(gradient) = self.read_gradient(&shading, multiply(matrix, self.base)) else {
-            return;
+        let placed = multiply(matrix, self.base);
+        let paint: Option<Box<dyn Paint>> =
+            match (&pattern, self.document.entry(dict, "PatternType").as_i64()) {
+                (Object::Stream(stream), Some(1)) => self
+                    .read_tile(stream, placed)
+                    .map(|tile| Box::new(tile) as Box<dyn Paint>),
+                (_, Some(2)) => {
+                    let shading = self.document.entry(dict, "Shading");
+                    Shading::read(
+                        self.document,
+                        &shading,
+                        placed,
+                        self.state.fill_alpha,
+                        self.current_resources.as_ref(),
+                    )
+                    .map(|shading| Box::new(shading) as Box<dyn Paint>)
+                }
+                _ => None,
+            };
+        if let Some(paint) = paint {
+            self.sink.shade(paint.as_ref(), &clip);
+        }
+    }
+
+    /// A tiling pattern's cell drawn once at its size on the page, to repeat across what it
+    /// fills. An uncoloured pattern's cell takes the colour given with it.
+    fn read_tile(&mut self, stream: &Stream, placed: Matrix) -> Option<Tile> {
+        if self.depth >= DEPTH_MAX {
+            return None;
+        }
+        let dict = &stream.dict;
+        let bbox: [f64; 4] = self
+            .document
+            .entry(dict, "BBox")
+            .as_array()
+            .map(numbers_of)?
+            .try_into()
+            .ok()?;
+        let entry = |key: &str| self.document.entry(dict, key).as_f64().unwrap_or(0.0).abs();
+        let step = (entry("XStep"), entry("YStep"));
+        if step.0 < 1e-9 || step.1 < 1e-9 {
+            return None;
+        }
+        let pixels = |length: f64, (a, b): (f64, f64)| {
+            (length * a.hypot(b)).ceil().clamp(1.0, TILE_SIDE_MAX) as usize
         };
-        let paint_clip = self.ready();
-        let clip = self.sink.clip(&paint_clip, path);
-        self.sink.gradient(&gradient, &clip);
+        let size = (
+            pixels(step.0, (placed[0], placed[1])),
+            pixels(step.1, (placed[2], placed[3])),
+        );
+        let origin = (bbox[0].min(bbox[2]), bbox[1].min(bbox[3]));
+        let tint = (self.document.entry(dict, "PaintType").as_i64() == Some(2))
+            .then(|| self.pattern_tint());
+        let canvas = self.draw_cell(stream, origin, step, size)?;
+        Some(Tile {
+            inverse: invert(placed)?,
+            origin,
+            step,
+            size,
+            canvas,
+            tint,
+        })
+    }
+
+    /// The colour an uncoloured pattern paints in: the components given before its name, in
+    /// the pattern space's own colour space.
+    fn pattern_tint(&self) -> Rgba {
+        let values = &self.state.fill;
+        match &self.state.fill_space {
+            Space::Pattern(Some(space)) => space.rgba(values, self.state.fill_alpha),
+            _ => [0.0, 0.0, 0.0, self.state.fill_alpha],
+        }
+    }
+
+    /// Draws a pattern's cell into a canvas of `size` pixels covering one `step` from
+    /// `origin`, drawn again a step back on each axis so what spills past the cell wraps.
+    fn draw_cell(
+        &mut self,
+        stream: &Stream,
+        origin: (f64, f64),
+        step: (f64, f64),
+        size: (usize, usize),
+    ) -> Option<Canvas> {
+        let content = self.document.stream_data(stream).ok()?;
+        let resources = self
+            .document
+            .entry(&stream.dict, "Resources")
+            .as_dict()
+            .cloned();
+        let (sx, sy) = (size.0 as f64 / step.0, size.1 as f64 / step.1);
+        let to_cell = [sx, 0.0, 0.0, -sy, -origin.0 * sx, (origin.1 + step.1) * sy];
+        let mut renderer = Renderer::new(size.0, size.1, 0);
+        let mut fonts = Fonts::default();
+        for shift in [
+            (0.0, 0.0),
+            (-step.0, 0.0),
+            (0.0, -step.1),
+            (-step.0, -step.1),
+        ] {
+            let matrix = multiply([1.0, 0.0, 0.0, 1.0, shift.0, shift.1], to_cell);
+            let mut inner = Interpreter::new(self.document, &mut renderer, &mut fonts, matrix);
+            inner.depth = self.depth + 1;
+            inner.run_page(&content, resources.clone());
+        }
+        Some(renderer.canvas)
     }
 }
 
@@ -805,8 +841,7 @@ impl<'a, S: Sink> Interpreter<'a, S> {
             .collect();
         let stroke = matches!(mode, 1 | 2 | 5 | 6);
         if matches!(mode, 0 | 2 | 4 | 6) {
-            let clip = self.ready();
-            self.sink.fill(&path, self.state.fill_colour(), &clip);
+            self.fill_path(&path);
         }
         if stroke {
             let pen = self.state.device_pen();
@@ -1536,7 +1571,7 @@ impl Sink for Planner {
     fn stroke(&mut self, _: &[Command], _: &Pen, _: Rgba, _: &Clip) {
         self.marked = true;
     }
-    fn gradient(&mut self, _: &Gradient, _: &Clip) {
+    fn shade(&mut self, _: &dyn Paint, _: &Clip) {
         self.marked = true;
     }
     fn picture(&mut self, _: Option<Picture>, _: Matrix, _: f32, _: &Clip) {
@@ -1614,10 +1649,10 @@ impl Sink for Renderer {
             self.top().stroke(path, pen, colour, clip.as_deref());
         }
     }
-    fn gradient(&mut self, gradient: &Gradient, clip: &Clip) {
+    fn shade(&mut self, paint: &dyn Paint, clip: &Clip) {
         if self.mark() {
             self.top()
-                .shade(|point| gradient.colour_at(point), clip.as_deref());
+                .shade(|point| paint.colour_at(point), clip.as_deref());
         }
     }
     fn picture(&mut self, picture: Option<Picture>, matrix: Matrix, alpha: f32, clip: &Clip) {
@@ -1702,7 +1737,7 @@ impl Sink for Extractor {
     }
     fn fill(&mut self, _: &[Command], _: Rgba, _: &Clip) {}
     fn stroke(&mut self, _: &[Command], _: &Pen, _: Rgba, _: &Clip) {}
-    fn gradient(&mut self, _: &Gradient, _: &Clip) {}
+    fn shade(&mut self, _: &dyn Paint, _: &Clip) {}
     fn picture(&mut self, _: Option<Picture>, _: Matrix, _: f32, _: &Clip) {}
     fn encoded(&mut self, stream: &Stream, _: [f64; 4], _: [f64; 4]) {
         if self.seen == self.wanted {
