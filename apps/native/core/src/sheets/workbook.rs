@@ -1,5 +1,6 @@
-//! Reads an Excel workbook (`.xlsx`, `.xlsm`) for display: a zip of XML parts located through
-//! their relationship files. Each visible worksheet becomes a sheet of formatted cell text with
+//! Reads a workbook file for display. An OpenDocument spreadsheet (`.ods`) is read in
+//! `opendocument.rs`, through this file's zip and XML readers. An Excel workbook (`.xlsx`,
+//! `.xlsm`) is read here: a zip of XML parts located through their relationship files. Each visible worksheet becomes a sheet of formatted cell text with
 //! the file's bold, alignment and column widths. Formulas show their saved result and are never
 //! calculated; fills, colours, charts, images, merged cells and conditional formatting are
 //! ignored. Entries are inflated by miniz_oxide (RFC 1951), rejecting what a browser's decoder
@@ -27,9 +28,9 @@ impl std::fmt::Display for WorkbookError {
     }
 }
 
-type Result<T> = std::result::Result<T, WorkbookError>;
+pub(crate) type Result<T> = std::result::Result<T, WorkbookError>;
 
-fn fail<T>(message: impl Into<String>) -> Result<T> {
+pub(crate) fn fail<T>(message: impl Into<String>) -> Result<T> {
     Err(WorkbookError(message.into()))
 }
 
@@ -38,13 +39,13 @@ pub const PART_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// The largest workbook shown as a table; larger ones open in their own application.
 pub const FILE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
-/// Whether a file name has an Excel workbook extension.
+/// Whether a file name has a workbook extension: Excel's or OpenDocument's.
 pub fn is_workbook_name(name: &str) -> bool {
     let extension = std::path::Path::new(name)
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase);
-    matches!(extension.as_deref(), Some("xlsx" | "xlsm"))
+    matches!(extension.as_deref(), Some("xlsx" | "xlsm" | "ods"))
 }
 
 // --- Inflate (RFC 1951) ------------------------------------------------------------------
@@ -521,6 +522,16 @@ pub struct XmlElement {
     attributes: Vec<(String, String)>,
     pub children: Vec<XmlElement>,
     pub text: String,
+    /// For each child, how much of `text` came before it, in bytes: where the child sits among
+    /// the text (`pieces`).
+    text_before: Vec<usize>,
+}
+
+/// One piece of an element's content, in document order.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Piece<'a> {
+    Text(&'a str),
+    Child(&'a XmlElement),
 }
 
 impl XmlElement {
@@ -531,12 +542,33 @@ impl XmlElement {
             .map(|(_, value)| value.as_str())
     }
 
-    fn child(&self, name: &str) -> Option<&XmlElement> {
+    pub(crate) fn child(&self, name: &str) -> Option<&XmlElement> {
         self.children.iter().find(|child| child.name == name)
     }
 
-    fn children_named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a XmlElement> {
+    pub(crate) fn children_named<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> impl Iterator<Item = &'a XmlElement> {
         self.children.iter().filter(move |child| child.name == name)
+    }
+
+    /// The element's text and children in document order, for content that mixes the two (an
+    /// OpenDocument paragraph). Empty stretches of text are left out.
+    pub(crate) fn pieces(&self) -> Vec<Piece<'_>> {
+        let mut pieces = Vec::with_capacity(self.children.len() * 2 + 1);
+        let mut from = 0;
+        for (child, &before) in self.children.iter().zip(&self.text_before) {
+            if before > from {
+                pieces.push(Piece::Text(&self.text[from..before]));
+            }
+            pieces.push(Piece::Child(child));
+            from = before;
+        }
+        if from < self.text.len() {
+            pieces.push(Piece::Text(&self.text[from..]));
+        }
+        pieces
     }
 }
 
@@ -746,7 +778,10 @@ impl XmlParser<'_> {
     /// Appends a finished element to its parent, or makes it the root.
     fn place(&mut self, element: XmlElement) {
         match self.open.last_mut() {
-            Some(holder) => holder.children.push(element),
+            Some(holder) => {
+                holder.text_before.push(holder.text.len());
+                holder.children.push(element);
+            }
             None => self.root = Some(element),
         }
     }
@@ -816,6 +851,7 @@ impl XmlParser<'_> {
             },
             children: Vec::new(),
             text: String::new(),
+            text_before: Vec::new(),
         };
         if self_closing {
             self.place(element);
@@ -1603,7 +1639,7 @@ fn at_index<T>(items: &[T], index: f64) -> Option<&T> {
         .then(|| &items[index as usize])
 }
 
-fn read_part(archive: &ZipArchive, path: &str) -> Result<Option<XmlElement>> {
+pub(crate) fn read_part(archive: &ZipArchive, path: &str) -> Result<Option<XmlElement>> {
     match archive.read_entry(path, PART_MAX_BYTES)? {
         Some(bytes) => parse_xml(&decode_utf8(&bytes)).map(Some),
         None => Ok(None),
@@ -1857,8 +1893,8 @@ fn read_cell_text(
 
 /// Excel's limits: 16,384 columns (XFD) and 1,048,576 rows. A file past them is refused rather
 /// than filled with empty cells.
-const COLUMN_LIMIT: f64 = 16_384.0;
-const ROW_LIMIT: f64 = 1_048_576.0;
+pub(crate) const COLUMN_LIMIT: f64 = 16_384.0;
+pub(crate) const ROW_LIMIT: f64 = 1_048_576.0;
 
 /// Converts Excel column widths: points per character, plus padding. Excel measures columns in
 /// default-font characters; the grid's text is a little wider and its padding larger, so a
@@ -1867,7 +1903,7 @@ const COLUMN_WIDTH_CHARACTER: f64 = 8.0;
 const COLUMN_WIDTH_PADDING: f64 = 17.0;
 
 /// Sets `items[index]`, padding with defaults up to it.
-fn place_at<T: Clone + Default>(items: &mut Vec<T>, index: usize, item: T) {
+pub(crate) fn place_at<T: Clone + Default>(items: &mut Vec<T>, index: usize, item: T) {
     if items.len() <= index {
         items.resize(index + 1, T::default());
     }
@@ -1973,9 +2009,13 @@ fn read_sheet(name: &str, worksheet: &XmlElement, context: &Context) -> Result<S
     Ok(spreadsheet::sheet(name, rows, column_count, widths))
 }
 
-/// Reads the visible worksheets of an Excel workbook held in memory.
+/// Reads the visible sheets of a workbook held in memory: an OpenDocument spreadsheet when the
+/// zip is one (`opendocument::is_spreadsheet`), else an Excel workbook.
 pub fn parse(bytes: &[u8]) -> Result<Workbook> {
     let archive = ZipArchive::open(bytes)?;
+    if crate::sheets::opendocument::is_spreadsheet(&archive) {
+        return crate::sheets::opendocument::parse(&archive);
+    }
     let Some(workbook_path) =
         find_relationship(&read_relationships(&archive, "")?, "/officeDocument").map(str::to_owned)
     else {

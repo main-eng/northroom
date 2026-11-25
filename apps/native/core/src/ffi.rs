@@ -2914,7 +2914,7 @@ pub(crate) fn opened_html_path() -> String {
         .unwrap_or_default()
 }
 
-/// The open file's path when it is an Excel workbook shown as a table: an `.xlsx` or `.xlsm`
+/// The open file's path when it is a workbook shown as a table: an `.xlsx`, `.xlsm` or `.ods`
 /// of at most 16 MB (a larger one opens in its own application).
 pub(crate) fn opened_workbook_path() -> Option<std::path::PathBuf> {
     let path = with_columns(|columns| {

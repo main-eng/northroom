@@ -1,7 +1,7 @@
-//! A spreadsheet file: delimited text (`.csv`, `.tsv`) as one sheet, an Excel workbook (`.xlsx`,
-//! `.xlsm`) as its visible sheets, or a SQLite database as its tables (rows read as they scroll
-//! into view). The grid keeps column headings and row numbers fixed while it scrolls, with a line
-//! below and right of every cell.
+//! A spreadsheet file: delimited text (`.csv`, `.tsv`) as one sheet, an Excel or OpenDocument
+//! workbook (`.xlsx`, `.xlsm`, `.ods`) as its visible sheets, or a SQLite database as its tables
+//! (rows read as they scroll into view). The grid keeps column headings and row numbers fixed
+//! while it scrolls, with a line below and right of every cell.
 //!
 //! A workbook with several sheets shows them as flat tabs in a bar under the grid, on the muted
 //! ground with a line to the right of each. The open tab sits on the background with no top line

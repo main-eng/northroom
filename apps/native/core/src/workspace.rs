@@ -621,8 +621,8 @@ const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
     "pptx", "pptm", "ppt", "ppsx", "pps", "potx", "pot", "key", "odp",
     // Documents: Word, rich text, Pages and OpenDocument.
     "docx", "docm", "doc", "dotx", "rtf", "rtfd", "pages", "odt",
-    // Spreadsheets the table cannot read: legacy Excel, Numbers and OpenDocument.
-    "xls", "numbers", "ods",
+    // Spreadsheets the table cannot read: legacy Excel and Numbers.
+    "xls", "numbers",
     // Fonts.
     "ttf", "otf", "ttc", "otc", "dfont",
     // Pictures the app cannot decode: Photoshop files and camera raw photos.
@@ -650,7 +650,8 @@ pub enum FileRead {
     /// A file the platform previewer draws, by name (`is_system_preview_file`), where one
     /// exists. Elsewhere such a file opens in its own application.
     SystemPreview,
-    /// An Excel workbook up to `workbook::FILE_MAX_BYTES`, by name: a table when opened.
+    /// An Excel or OpenDocument workbook up to `workbook::FILE_MAX_BYTES`, by name: a table
+    /// when opened.
     Workbook,
     /// A SQLite database, by contents (`database::is_database`): tables when opened. The
     /// string is the top of its first table for the card (empty when there is no table or it is

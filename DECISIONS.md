@@ -155,6 +155,20 @@ reason it was rejected.
   - A file per area: nobody knew where to look.
   - Applying a drive change at once: it kills the editing agent's terminal mid-turn.
 
+## ADR-0015: Northroom draws every file itself
+
+- Every kind of file opens inside Northroom, drawn by its own code, the same on all three systems. Nothing is handed to another application.
+- The core reads each format into Northroom's own types and the shell draws them (ADR-0001). Formats that share a container share its reader: the zip and XML readers serve Excel and OpenDocument files alike.
+- A view shows a file; it does not edit it. It reads right: the same words, numbers, pictures and positions, not a copy of another program's line breaks.
+- Quick Look is a stopgap on the Mac for the formats still on `SYSTEM_PREVIEW_EXTENSIONS`. A format leaves that list in the change that adds its own view, and nothing is added to it.
+- Media still goes through the system's codecs (ADR-0004), and PDF keeps PDFKit and the web view until the other formats are done.
+- **Why:** off the Mac a file without a view only shows its details, and on the Mac Quick Look draws a picture the app can't select from, search or keep the same across systems.
+- **Rejected:**
+  - Quick Look for good: Mac only, read as a picture.
+  - Opening the file in its own application: the person leaves Northroom, and needs that application.
+  - Converting to HTML for the web view: ADR-0001 keeps web views to live pages.
+  - A bundled office suite: its size, its licence and its release cycle.
+
 ## Design rules
 
 - Monochrome chrome: accents use the text colour. Hue only comes from the person's choice. Red means loss.
