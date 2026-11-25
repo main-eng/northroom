@@ -336,7 +336,7 @@ impl Dialogs {
             Point::default(),
             panel.center(),
         );
-        // The panel and its contents fade in as one layer.
+        // The panel and its contents appear as one group.
         let painter = DialogPainter {
             open,
             pose: Pose {

@@ -10,8 +10,8 @@
 //! A page player's controls (made for its `block`) leave presses outside their parts to the
 //! page and wake their player through `wake` when the core asks.
 //!
-//! The panel and the menu each fade as one group (`kit::layer::group`); the buttons inside the
-//! panel fade individually.
+//! The panel and the menu each appear and leave as one group (`kit::layer::group`); the buttons
+//! inside the panel fade individually.
 
 use super::preview;
 use gpui::{
@@ -629,8 +629,8 @@ fn video_now(handle: *mut NrControls, bounds: Bounds<Pixels>) -> (NrVideoFrame, 
     (shown, first, second)
 }
 
-/// Draws the video controls. The panel and menu each fade as one group, like the browser's
-/// layers (`kit::layer::group`). While either animates it redraws every display frame rather
+/// Draws the video controls. The panel and menu each appear and leave as one group
+/// (`kit::layer::group`). While either animates it redraws every display frame rather
 /// than at the follow rate. Returns a hash of what was drawn (`video_print`).
 fn draw_video(
     window: &mut Window,
@@ -1042,7 +1042,7 @@ fn draw_menu(window: &mut Window, cx: &mut App, bounds: Bounds<Pixels>, since: f
         posed.menu.width as f32,
         posed.menu.height as f32,
     );
-    // The sheet and its shadow fade together.
+    // The sheet and its shadow appear together.
     kit::layer::group(window, cx, strength, |window, cx| {
         let corner = menu_number(NrMenuNumber::Corner) * grown;
         window.paint_drop_shadows(

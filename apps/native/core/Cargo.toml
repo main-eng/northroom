@@ -91,12 +91,6 @@ gstreamer-pbutils = "0.25"
 # The colour names of GStreamer 1.18 and later (PQ, HLG, Display P3).
 gstreamer-video = { version = "0.25", features = ["v1_18"] }
 
-# The terminal emulator, patched so a Windows session's environment is the core's whole and
-# never the app's merged in (`patches/alacritty_terminal/UPSTREAM.md`); the GPUI workspace names
-# the same patch.
-[patch.crates-io]
-alacritty_terminal = { path = "patches/alacritty_terminal" }
-
 [profile.release]
 opt-level = 3
 lto = "thin"

@@ -1,12 +1,9 @@
-//! Layered drawing: parts faded as one group (`group`), as AppKit fades transparency layers and
-//! menu and tooltip windows, and captures of what lies under a view (`ask_under`, `under`) for
-//! blurring, as the Dock does.
+//! Layered drawing: parts that appear and leave as one group (`group`), and captures of what
+//! lies under a view (`ask_under`, `under`) for blurring, as the Dock does.
 //!
-//! GPUI draws a group into its own texture and draws that at the group's opacity
-//! (`Window::paint_with_opacity`, patched in; see `patches/gpui/UPSTREAM.md`). A glyph inside a
-//! fading panel then shows the panel through it rather than what is under the panel, matching
-//! AppKit's `a·G + (1 − a·α)·B`, where `G` is the group alone, `α` its coverage and `B` the
-//! backdrop.
+//! A group is drawn whole or not at all. GPUI can only fade each part on its own, which lets a
+//! glyph show what is under its panel, so a group does not fade: it appears once its entrance is
+//! half done and goes once its exit is, still growing or shrinking as it does.
 //!
 //! A capture under a view comes from the window's own frame (`render_to_image`) between frames:
 //! the frame is drawn again without the view and overlays, read back, then redrawn as shown. It
@@ -55,21 +52,20 @@ pub fn taking() -> Taking {
     TAKING.with(Cell::get)
 }
 
-/// Draws a group at `opacity` as one layer, as AppKit fades a view or transparency layer.
-/// `draw` paints the parts at full opacity.
+/// The opacity of its entrance or exit at which a group is shown.
+const SHOWN_FROM: f32 = 0.5;
+
+/// Draws a group whose entrance or exit is at `opacity`: whole from `SHOWN_FROM` up, and not at
+/// all below it. `draw` paints the parts at full opacity.
 pub fn group(
     window: &mut Window,
     cx: &mut App,
     opacity: f32,
     draw: impl FnOnce(&mut Window, &mut App),
 ) {
-    if opacity <= 0.0 {
-        return;
+    if opacity >= SHOWN_FROM {
+        draw(window, cx);
     }
-    if opacity >= 1.0 {
-        return draw(window, cx);
-    }
-    window.paint_with_opacity(opacity, |window| draw(window, cx));
 }
 
 /// Requests a capture of what is under `bounds` (window points) after this frame, leaving out

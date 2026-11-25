@@ -17,7 +17,7 @@ reason it was rejected.
   - Electron: the largest start-up and memory cost.
   - A native shell per OS: every view built three times.
   - GPUI `surface` for video: a second GPU device, a per-frame UI wait, no HDR.
-  - A long-lived GPUI fork: patches stay small and go upstream.
+  - A GPUI fork or patched copies of its crates: every move to a newer GPUI meant re-applying them across three renderers. GPUI and the emulator library are used as published; a bug in them is reported upstream, and the interface changes to fit what they draw (a menu or dialog appears without a fade).
   - A terminal renderer of its own behind a hole in GPUI's frame: the two fell out of step while resizing or moving, so text flickered.
 
 ## ADR-0002: Work is ordinary files in one local folder
@@ -57,7 +57,7 @@ reason it was rejected.
 
 - No built-in assistant, skills, models or MCP server.
 - A `.nterm` file names nothing to run. Opening a received one starts only the person's shell.
-- Never pass on the app's environment, read agent credentials, edit agent settings, or write into PATH or folders.
+- Never pass on the app's environment (on Windows the emulator library adds the app's variables the fresh environment does not name, as other terminals do), read agent credentials, edit agent settings, or write into PATH or folders.
 - Known limits: Claude Code older than 2.1.280 ignores the plugin. Codex shows approvals only through OSC 9. Codex can't be hooked without editing its config (no environment-only hooks or `notify`), so its changes are credited by timing only. Agents inside tmux or ssh aren't seen.
 - **Why:** people already pay for their agent. The terminal works for every vendor; not every agent speaks MCP. Bundled models freeze at release.
 - **Rejected:**

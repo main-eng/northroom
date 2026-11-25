@@ -817,7 +817,7 @@ impl Menus {
 
 /// Draws a menu on the popover surface: 1 px border, 10 px corners, 4 px padding, 24 pt rows
 /// 2 pt apart, 12 px type, muted 14 px glyphs, and the hovered row on 8% of the text colour. It
-/// fades as one group (`crate::layer::group`).
+/// appears and leaves as one group (`crate::layer::group`).
 fn draw_panel(panel: &Panel, window: &mut Window, cx: &mut App) {
     let pose = panel.pose();
     crate::layer::group(window, cx, pose.opacity, |window, cx| {

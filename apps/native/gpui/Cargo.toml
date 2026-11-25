@@ -5,13 +5,12 @@
 [workspace]
 resolver = "3"
 members = ["shell", "kit", "webhost", "mac-tools"]
-# Patched GPUI crates, built only through the `[patch]` table below.
-exclude = ["patches"]
 
 [workspace.dependencies]
 # Pinned to a Zed main commit. GPUI and every Zed crate it pulls in (gpui_*, collections,
 # sum_tree, refineable, scheduler, http_client, ztracing) are Apache-2.0; no GPL editor crate is
-# used. Move the pin deliberately, never with a bare `cargo update`.
+# used. GPUI is used as published at this commit, with no changes of ours (ADR-0001). Move the
+# pin deliberately, never with a bare `cargo update`.
 gpui = { git = "https://github.com/zed-industries/zed", rev = "125ca8672e928b19a62c2e4b761fb29fe2a34ae3" }
 # `font-kit` is the Mac text system (Core Text). `runtime_shaders` compiles shaders at launch,
 # so the build needs no Xcode Metal compiler.
@@ -28,28 +27,6 @@ calloop = { git = "https://github.com/zed-industries/calloop", rev = "3759371fee
 khronos-egl = { git = "https://github.com/zed-industries/khronos-egl", rev = "42214b36347b108fd9630ca6254b96dde59e04fe" }
 # Windows screen capture (GPUI through zed-scap).
 windows-capture = { git = "https://github.com/zed-industries/windows-capture.git", rev = "f0d6c1b6691db75461b732f6d5ff56eed002eeb9" }
-# The core's terminal emulator, patched so a Windows session gets only the core's environment,
-# not the app's merged in (`../core/patches/alacritty_terminal/UPSTREAM.md`). The core's manifest
-# names the same patch for standalone builds.
-alacritty_terminal = { path = "../core/patches/alacritty_terminal" }
-
-# GPUI crates copied from the pinned rev and patched; each `UPSTREAM.md` lists the changes.
-# Moving the pin means copying each crate from the new rev and re-applying them (ADR-0001).
-# - `gpui_wgpu` (Linux renderer and text): glyphs unhinted at GPUI's subpixel offset, as Core
-#   Text draws them.
-# - `gpui_windows` (Windows renderer and text): glyphs unhinted, antialiased on both axes, at the
-#   wgpu renderer's gamma and contrast.
-# - `gpui` and `gpui_apple`: `Window::paint_with_opacity` draws a group of primitives into its own
-#   texture and composites it at an opacity, as Core Animation fades a layer. The Metal renderer
-#   lives here; the wgpu and DirectX ones are in the two crates above.
-# - `gpui_macos` (Mac windows): frames paced by a CVDisplayLink that stops while the window is
-#   idle, so each window holds three drawables instead of five (ADR-0001).
-[patch."https://github.com/zed-industries/zed"]
-gpui = { path = "patches/gpui" }
-gpui_apple = { path = "patches/gpui_apple" }
-gpui_macos = { path = "patches/gpui_macos" }
-gpui_wgpu = { path = "patches/gpui_wgpu" }
-gpui_windows = { path = "patches/gpui_windows" }
 
 [profile.release]
 opt-level = 3

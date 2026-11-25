@@ -186,7 +186,7 @@ impl Tooltips {
 
 /// Draws a tooltip: a 10 pt diamond turned 45° with its centre 5 pt inside the body's
 /// control-facing edge (2 pt of its tip shows), the body with 6 px corners, and the text. It
-/// fades as one group.
+/// appears and leaves as one group (`crate::layer::group`).
 fn draw(tip: &Tip, window: &mut Window, cx: &mut App) {
     let pose = tip.pose();
     crate::layer::group(window, cx, pose.opacity, |window, cx| {

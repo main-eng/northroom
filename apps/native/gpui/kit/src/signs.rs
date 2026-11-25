@@ -1,17 +1,23 @@
-//! The shape a session's dot takes (`terminal::activity::Sign`) wherever the dot shows. The
-//! window animates it (`Window::paint_timed_svg`): the sprite is turned or slid on the GPU before
-//! each present, so the view is not redrawn. With reduced motion each sign is drawn still.
+//! The shape a session's dot takes (`terminal::activity::Sign`) wherever the dot shows. A moving
+//! sign is drawn at its pose for the current time and asks for the next frame, as the spinner
+//! is (`controls::spinner`). With reduced motion each sign is drawn still.
 
+use crate::controls::spinner::clock;
 use crate::core::inset;
 use crate::draw::oval;
+use crate::nr::{nr_motion_spin, nr_motion_spins};
 use gpui::{
-    App, Bounds, Easing, Hsla, Pixels, SharedString, TimedTransformation, Transformation, Window,
-    point, px,
+    App, Bounds, Hsla, Pixels, Radians, ScaledPixels, SharedString, TransformationMatrix, Window,
+    point,
 };
 use northroom_core::terminal::activity::Sign;
 use std::f32::consts::TAU;
 use std::sync::OnceLock;
-use std::time::Duration;
+
+/// How long the nudge takes to hop up, and again to come back, in seconds.
+const NUDGE_SECONDS: f64 = 0.7;
+/// How far the nudge hops, as a share of the dot's width.
+const NUDGE_REACH: f32 = 0.45;
 
 /// The bounds `sign` covers for a dot in `dot` (`Sign::growth`), which a caller rings in its own
 /// background.
@@ -24,47 +30,75 @@ pub fn reach(sign: &str, dot: Bounds<Pixels>) -> Bounds<Pixels> {
 /// Draws `sign` (a `Sign::name`) for a dot in `dot`, in `color`.
 pub fn paint(window: &mut Window, cx: &App, sign: &str, dot: Bounds<Pixels>, color: Hsla) {
     let bounds = reach(sign, dot);
-    let across = f32::from(dot.size.width);
-    let (key, svg, timed) = match sign {
-        // One turn per second. 30 fps is smooth at this size and halves the work.
+    let reduced = crate::platform::reduce_motion();
+    let moving = nr_motion_spins(reduced);
+    let scale = window.scale_factor();
+    let (key, svg, pose) = match sign {
+        // One turn per second, as the spinner turns.
         "comet" => (
             "sign/comet.svg",
             comet(),
-            TimedTransformation::rotation(Duration::from_millis(1000), Transformation::default())
-                .with_max_fps(30.0),
+            Some(turned(
+                bounds,
+                scale,
+                nr_motion_spin(clock(), reduced) as f32,
+            )),
         ),
         // Hops up and back. At rest it sits where the dot would.
         "nudge" => (
             "sign/dot.svg",
             DOT,
-            TimedTransformation::new(Duration::from_millis(700))
-                .from(Transformation::default())
-                .to(Transformation::translate(point(
-                    px(0.0),
-                    px(-across * 0.45),
-                )))
-                .with_easing(Easing::EaseInOut)
-                .alternate(),
+            moving.then(|| hopped(f32::from(dot.size.width) * scale, clock())),
         ),
-        "check" => ("sign/check.svg", CHECK, still()),
-        "ring" => ("sign/ring.svg", RING, still()),
+        "check" => ("sign/check.svg", CHECK, None),
+        "ring" => ("sign/ring.svg", RING, None),
         _ => {
             oval(window, dot, color);
             return;
         }
     };
-    let _ = window.paint_timed_svg(
+    let _ = window.paint_svg(
         bounds,
         SharedString::from(key),
         Some(svg.as_bytes()),
-        timed,
+        pose.unwrap_or_else(TransformationMatrix::unit),
         color,
         cx,
     );
+    if moving && pose.is_some() {
+        window.request_animation_frame();
+    }
 }
 
-fn still() -> TimedTransformation {
-    TimedTransformation::new(Duration::ZERO)
+/// `turns` of a turn clockwise about the middle of `bounds`, in device pixels.
+fn turned(bounds: Bounds<Pixels>, scale: f32, turns: f32) -> TransformationMatrix {
+    let centre = bounds.center();
+    let middle = point(
+        ScaledPixels(f32::from(centre.x) * scale),
+        ScaledPixels(f32::from(centre.y) * scale),
+    );
+    let back = point(ScaledPixels(-middle.x.0), ScaledPixels(-middle.y.0));
+    TransformationMatrix::unit()
+        .translate(middle)
+        .rotate(Radians(turns * TAU))
+        .translate(back)
+}
+
+/// The nudge's hop at `seconds` for a dot `across` device pixels wide: up and back, easing in
+/// and out each way.
+fn hopped(across: f32, seconds: f64) -> TransformationMatrix {
+    let passes = seconds / NUDGE_SECONDS;
+    let along = passes.fract() as f32;
+    let along = if (passes as u64).is_multiple_of(2) {
+        along
+    } else {
+        1.0 - along
+    };
+    let eased = along * along * (3.0 - 2.0 * along);
+    TransformationMatrix::unit().translate(point(
+        ScaledPixels(0.0),
+        ScaledPixels(-across * NUDGE_REACH * eased),
+    ))
 }
 
 const DOT: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">\

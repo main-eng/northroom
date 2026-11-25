@@ -2,9 +2,11 @@
 //!
 //! The session is the person's login shell in the file's folder, so PATH and aliases match their
 //! own terminal. The app's environment does not leak into it: only identity, home, locale, SSH
-//! agent and proxies are kept, as in a new Terminal.app window. On Windows the session is
-//! PowerShell with the fresh environment Explorer would give a program, plus the same kept
-//! variables and Northroom's own. Nothing else of the app's, secrets above all, reaches it.
+//! agent and proxies are kept, as in a new Terminal.app window, and nothing else of the app's,
+//! secrets above all, reaches it. On Windows the session is PowerShell with the fresh
+//! environment Explorer would give a program, plus the same kept variables and Northroom's own;
+//! the emulator library then adds any variable of the app's that those do not name, as Zed,
+//! VS Code and Alacritty pass theirs on.
 
 use std::path::{Path, PathBuf};
 
