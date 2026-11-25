@@ -617,8 +617,6 @@ pub fn is_system_preview_file(path: &Path) -> bool {
 // One kind of file per line, under its comment.
 #[rustfmt::skip]
 const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
-    // Fonts.
-    "ttf", "otf", "ttc", "otc", "dfont",
     // 3D scenes Model I/O reads.
     "usdz", "usd", "usda", "usdc", "obj", "stl", "ply", "abc",
 ];
@@ -2667,7 +2665,7 @@ mod tests {
         } else {
             FileRead::External
         };
-        for name in ["Brand.otf", "Cup.usdz", "Bag.obj"] {
+        for name in ["Cup.usdz", "Bag.obj"] {
             assert_eq!(read_file(&write(name, b"text")), previewed, "{name}");
         }
         assert_eq!(read_text_file(&root.path().join("Bag.obj")), None);

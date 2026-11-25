@@ -12,6 +12,7 @@ pub mod doc;
 pub mod docx;
 pub mod ffi;
 pub mod flow;
+pub mod font;
 pub mod iwork;
 pub mod layout;
 mod odf;
@@ -88,6 +89,8 @@ pub enum Kind {
     RawPhoto,
     /// Keynote, Pages or Numbers, shown as the preview it carries.
     AppleDocument,
+    /// A font file, shown as a specimen of each face it holds.
+    Font,
 }
 
 /// The largest document drawn; a larger one shows its details. A file is read whole when it
@@ -110,7 +113,8 @@ impl Kind {
             | Kind::OpenDocumentPresentation
             | Kind::RichText
             | Kind::Photoshop
-            | Kind::RawPhoto => true,
+            | Kind::RawPhoto
+            | Kind::Font => true,
         }
     }
 
@@ -124,7 +128,8 @@ impl Kind {
             | Kind::LegacyWordDocument
             | Kind::OpenDocumentText
             | Kind::OpenDocumentPresentation
-            | Kind::RichText => DOCUMENT_MAX_BYTES,
+            | Kind::RichText
+            | Kind::Font => DOCUMENT_MAX_BYTES,
         }
     }
 
@@ -144,6 +149,7 @@ impl Kind {
             "rtf" | "rtfd" => Kind::RichText,
             "psd" | "psb" => Kind::Photoshop,
             "key" | "pages" | "numbers" => Kind::AppleDocument,
+            "ttf" | "otf" | "ttc" | "otc" | "dfont" => Kind::Font,
             "dng" | "cr2" | "cr3" | "nef" | "nrw" | "arw" | "raf" | "orf" | "rw2" | "pef"
             | "srw" => Kind::RawPhoto,
             _ => return None,
@@ -165,6 +171,7 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
         Kind::Photoshop => picture::read_photoshop_file(path),
         Kind::RawPhoto => picture::read_raw_file(path),
         Kind::AppleDocument => iwork::read(path),
+        Kind::Font => font::read(path),
     }
 }
 
@@ -296,6 +303,27 @@ pub struct Slide {
 pub enum Item {
     Shape(Shape),
     Picture(Placed),
+    Figure(Figure),
+}
+
+/// One drawing command of a path, in points from the page's top-left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Command {
+    Move(f64, f64),
+    Line(f64, f64),
+    /// A quadratic curve: its control point, then where it ends.
+    Quad(f64, f64, f64, f64),
+    /// A cubic curve: its two control points, then where it ends.
+    Cubic(f64, f64, f64, f64, f64, f64),
+    Close,
+}
+
+/// A figure: a filled path, such as a glyph drawn from its font's outline. Overlapping parts fill by
+/// the nonzero rule, as fonts expect.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Figure {
+    pub commands: Vec<Command>,
+    pub colour: Colour,
 }
 
 /// A picture on a slide: which of the deck's pictures, where, and how much of each edge is cut

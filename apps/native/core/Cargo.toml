@@ -37,6 +37,10 @@ minisign-verify = "0.3"
 # Apache-2.0 or MIT; read-fonts and HarfRust are already in the GPUI shell's tree).
 brotli-decompressor = "5"
 read-fonts = "0.41"
+# A font file's glyph outlines for its specimen (`deck::font`), TrueType and CFF alike: the
+# outline reader built on read-fonts (MIT or Apache-2.0; in the GPUI shell's tree, at this
+# version). Writing a CFF charstring interpreter ourselves would duplicate it.
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
 harfrust = "0.12"
 # Where a line may break (`typeset`): ICU4X's rules, the Unicode rules Core Text breaks lines
 # by (Unicode-3.0; in the GPUI shell's tree).

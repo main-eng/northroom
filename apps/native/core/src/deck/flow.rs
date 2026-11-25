@@ -393,6 +393,7 @@ mod tests {
             .map(|item| match item {
                 Item::Shape(shape) => shape.frame.y,
                 Item::Picture(placed) => placed.frame.y,
+                Item::Figure(_) => unreachable!("a flow draws no figures"),
             })
             .collect()
     }
@@ -468,7 +469,7 @@ mod tests {
             .iter()
             .map(|item| match item {
                 Item::Shape(shape) => shape.frame,
-                Item::Picture(_) => unreachable!(),
+                Item::Picture(_) | Item::Figure(_) => unreachable!(),
             })
             .collect();
         // 30 given, the two missing columns share the other 150; a row is its text's height

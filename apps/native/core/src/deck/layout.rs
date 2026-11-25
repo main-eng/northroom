@@ -7,7 +7,8 @@
 //! narrower or wider than the app's, so a line may end a little short of or past the frame.
 
 use super::{
-    Align, Anchor, Body, Colour, Deck, Fit, Form, Item, Paragraph, Run, Shape, Spacing, Stroke,
+    Align, Anchor, Body, Colour, Command, Deck, Fit, Form, Item, Paragraph, Run, Shape, Spacing,
+    Stroke,
 };
 use crate::board::card::Font;
 use crate::dialog::layout::Measure;
@@ -91,6 +92,11 @@ pub enum Mark {
         crop: [f64; 4],
     },
     Words(Words),
+    /// A figure, its commands in the view's points.
+    Figure {
+        commands: Vec<Command>,
+        colour: Colour,
+    },
 }
 
 /// Where a slide is drawn: its top-left in the view and how much larger than its own points.
@@ -109,6 +115,32 @@ impl Stage {
             frame.width * self.zoom,
             frame.height * self.zoom,
         )
+    }
+
+    fn point(self, x: f64, y: f64) -> (f64, f64) {
+        (self.x + x * self.zoom, self.y + y * self.zoom)
+    }
+
+    fn command(self, command: Command) -> Command {
+        match command {
+            Command::Move(x, y) => {
+                let (x, y) = self.point(x, y);
+                Command::Move(x, y)
+            }
+            Command::Line(x, y) => {
+                let (x, y) = self.point(x, y);
+                Command::Line(x, y)
+            }
+            Command::Quad(cx, cy, x, y) => {
+                let ((cx, cy), (x, y)) = (self.point(cx, cy), self.point(x, y));
+                Command::Quad(cx, cy, x, y)
+            }
+            Command::Cubic(ax, ay, bx, by, x, y) => {
+                let (a, b, end) = (self.point(ax, ay), self.point(bx, by), self.point(x, y));
+                Command::Cubic(a.0, a.1, b.0, b.1, end.0, end.1)
+            }
+            Command::Close => Command::Close,
+        }
     }
 
     fn form(self, form: Form) -> Form {
@@ -473,6 +505,14 @@ pub fn marks(deck: &Deck, slide: usize, frame: Rect, measure: &mut Measure) -> V
                 picture: placed.picture,
                 crop: placed.crop,
             }),
+            Item::Figure(figure) => marks.push(Mark::Figure {
+                commands: figure
+                    .commands
+                    .iter()
+                    .map(|command| stage.command(*command))
+                    .collect(),
+                colour: figure.colour,
+            }),
         }
     }
     marks
@@ -550,7 +590,10 @@ mod tests {
             .into_iter()
             .filter_map(|mark| match mark {
                 Mark::Words(words) => Some((words.text, words.x, words.top)),
-                Mark::Fill { .. } | Mark::Outline { .. } | Mark::Picture { .. } => None,
+                Mark::Fill { .. }
+                | Mark::Outline { .. }
+                | Mark::Picture { .. }
+                | Mark::Figure { .. } => None,
             })
             .collect()
     }

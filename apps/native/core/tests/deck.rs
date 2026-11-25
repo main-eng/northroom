@@ -27,7 +27,7 @@ fn shapes(slide: &Slide) -> Vec<&Shape> {
         .iter()
         .filter_map(|item| match item {
             Item::Shape(shape) => Some(shape),
-            Item::Picture(_) => None,
+            Item::Picture(_) | Item::Figure(_) => None,
         })
         .collect()
 }

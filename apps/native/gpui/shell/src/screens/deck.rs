@@ -25,7 +25,7 @@ use kit::theme::{Face, Token, color};
 use northroom_core::board::card::Font;
 use northroom_core::deck::ffi::{deck_marks, deck_page, deck_picture, opened_deck};
 use northroom_core::deck::layout::{Mark, Page, Words};
-use northroom_core::deck::{Colour, Deck as Read, Form, Stroke};
+use northroom_core::deck::{Colour, Command, Deck as Read, Form, Stroke};
 use northroom_core::geometry::Rect;
 use std::sync::Arc;
 
@@ -133,6 +133,26 @@ fn paint_picture(window: &mut Window, bounds: Bounds<Pixels>, index: usize, crop
     });
 }
 
+/// Fills a figure's path, its commands in view points from `origin`.
+fn paint_figure(window: &mut Window, commands: &[Command], colour: Colour, origin: Point<Pixels>) {
+    let at = |x: f64, y: f64| point(px(x as f32) + origin.x, px(y as f32) + origin.y);
+    let mut path = PathBuilder::fill();
+    for command in commands {
+        match *command {
+            Command::Move(x, y) => path.move_to(at(x, y)),
+            Command::Line(x, y) => path.line_to(at(x, y)),
+            Command::Quad(cx, cy, x, y) => path.curve_to(at(x, y), at(cx, cy)),
+            Command::Cubic(ax, ay, bx, by, x, y) => {
+                path.cubic_bezier_to(at(x, y), at(ax, ay), at(bx, by));
+            }
+            Command::Close => path.close(),
+        }
+    }
+    if let Ok(path) = path.build() {
+        window.paint_path(path, hsla(colour));
+    }
+}
+
 fn paint_words(window: &mut Window, cx: &mut App, words: &Words, origin: Point<Pixels>) {
     draw_line(
         window,
@@ -219,6 +239,9 @@ impl Deck {
                         crop,
                     } => paint_picture(window, frame.at(origin), picture, crop),
                     Mark::Words(words) => paint_words(window, cx, &words, origin),
+                    Mark::Figure { commands, colour } => {
+                        paint_figure(window, &commands, colour, origin);
+                    }
                 }
             }
         });

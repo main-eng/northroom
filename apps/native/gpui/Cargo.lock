@@ -4089,6 +4089,7 @@ dependencies = [
  "read-fonts 0.41.0",
  "serde",
  "serde_json",
+ "skrifa 0.44.0",
  "unicode-width",
  "uuid",
  "wgpu 30.0.2",
