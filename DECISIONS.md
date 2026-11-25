@@ -70,12 +70,14 @@ reason it was rejected.
 ## ADR-0006: Production is a static site and GitHub releases
 
 - The website is static files on Cloudflare, in the private repo `main-eng/northroom-web`. The private repo `main-eng/northroom-infra` declares its DNS in Terraform.
-- The app's installers and update feed are this repository's GitHub releases. The app reads `releases/latest/download`; the download page asks GitHub's API for the latest release.
+- The app's installers and update files are this repository's GitHub releases. The download page asks GitHub's API for the latest release.
+- The app reads its update feed at `api.northroom.com/api/download/update`, which a Cloudflare rule redirects to `releases/latest/download`. Every address built into the app is on `northroom.com`: an installed app can't be changed, a redirect can.
 - Nothing runs on push. Releases go out by hand from `master`.
 - Dashboards are read-only. Secret values never enter Terraform state.
 - **Why:** a public repository has nothing to guard, so nothing needs to stand between people and the release files. No backend is cheaper and safer than a small one.
 - **Rejected:**
   - A download server: only needed when releases are private.
+  - GitHub's address built into the app (1.3.0 only): moving or closing the repository would end updates for every installed copy.
   - Serverless functions: queues, a pooler and cron, and their limits shape the code.
   - A staging environment: nothing to stage.
 

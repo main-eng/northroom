@@ -1,7 +1,8 @@
 //! App updates (ADR-0010): checking for, downloading, verifying and installing a new release.
 //!
-//! The feed is an electron-builder generic feed at the public repository's latest GitHub release
-//! (`FEED`), read by electron-updater 6.8's rules (`feed`). The core owns the feed URL and
+//! The feed is an electron-builder generic feed at Northroom's own address (`FEED`), which
+//! redirects to the public repository's latest GitHub release, read by electron-updater 6.8's
+//! rules (`feed`). The core owns the feed URL and
 //! channel file, parsing, zip choice, the update decision, rollout, digest check, controller
 //! and schedule, plus the files: download path, reuse of a complete zip, the temporary name,
 //! cleanup on rejection, the unpack folder and the app found there. The shell does what needs
@@ -33,9 +34,11 @@ use crate::transport::{Reply, Request};
 use controller::{Controller, Effect, Found, Origin, Words};
 use std::path::{Path, PathBuf};
 
-/// The feed URL. GitHub redirects `<FEED>/<name>` to that file in the newest release that is not
-/// a draft or prerelease, and the transport follows the redirect.
-pub const FEED: &str = "https://github.com/main-eng/northroom/releases/latest/download";
+/// The feed URL, on Northroom's own domain so that where releases are hosted can change without
+/// stranding installed apps (ADR-0006). Cloudflare redirects `<FEED>/<name>` to that file in the
+/// public repository's newest GitHub release that is not a draft or prerelease, and the
+/// transport follows the redirects.
+pub const FEED: &str = "https://api.northroom.com/api/download/update";
 /// This app's channel. The feed's `latest` channel is not for this app.
 pub const CHANNEL: &str = "native";
 /// Check schedule: 30 s after start, then every 6 hours.
@@ -496,6 +499,13 @@ mod tests {
         assert!(!is_local("http://127.0.0.1:/"));
         assert!(!is_local("http://127.0.0.1:80a/"));
         assert!(!is_local("http://::1/"));
+    }
+
+    /// An installed app keeps its feed address for good, so it must be one Northroom can
+    /// redirect (ADR-0006).
+    #[test]
+    fn the_feed_is_on_northrooms_own_domain() {
+        assert!(FEED.starts_with("https://api.northroom.com/"));
     }
 
     #[test]
