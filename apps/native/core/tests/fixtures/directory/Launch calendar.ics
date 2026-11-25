@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Harbor Coffee//Launch//EN
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+UID:first-boxes@harborcoffee.example
+DTSTAMP:20260314T143000Z
+DTSTART:20260401T130000Z
+DTEND:20260401T160000Z
+SUMMARY:First Harbor Monthly boxes ship
+LOCATION:Roastery\, 48 Commercial Street\, Portland
+DESCRIPTION:Mar 18: Photograph all three bags\nMar 21: Subscribe page goes live for pre-orders\nMar 24: Email the 1\,200 people on the shop list\nApr 1: First boxes ship
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Boxes ship today
+TRIGGER:-PT1H
+END:VALARM
+END:VEVENT
+END:VCALENDAR

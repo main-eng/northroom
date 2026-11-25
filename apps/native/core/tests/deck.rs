@@ -4,7 +4,8 @@
 //! sample-files script writes.
 
 use northroom_core::deck::{
-    odp, pptx, Align, Anchor, Colour, Deck, Form, Item, ReadError, Shape, Slide, Source,
+    flow, odp, picture, pptx, Align, Anchor, Colour, Deck, Fit, Form, Item, ReadError, Shape,
+    Slide, Source,
 };
 use northroom_core::geometry::Rect;
 use std::path::PathBuf;
@@ -281,4 +282,32 @@ fn an_opendocument_presentation_reads_with_its_masters_styles_and_shapes() {
         (words.align, words.runs[0].colour),
         (Align::Center, hex("f6f3ec"))
     );
+}
+
+#[test]
+fn a_photoshop_file_draws_its_flattened_picture() {
+    let deck = picture::read_photoshop_file(&fixture("Label artwork.psd")).expect("read");
+    assert_eq!(
+        (deck.width, deck.height, deck.fit),
+        (800.0, 1000.0, Fit::Picture)
+    );
+    let Source::Bytes { bytes, extension } = &deck.pictures[0] else {
+        panic!("the decoded picture");
+    };
+    assert_eq!(*extension, "png");
+    assert_eq!(flow::picture_pixels(bytes), Some((800, 1000)));
+}
+
+#[test]
+fn a_raw_photo_draws_its_largest_preview() {
+    let deck = picture::read_raw_file(&fixture("Stand-in raw.dng")).expect("read");
+    assert_eq!((deck.width, deck.height), (1200.0, 675.0));
+    let Source::Bytes { bytes, extension } = &deck.pictures[0] else {
+        panic!("the preview");
+    };
+    assert_eq!(
+        (*extension, flow::picture_pixels(bytes)),
+        ("jpeg", Some((1200, 675)))
+    );
+    assert!(bytes.ends_with(&[0xff, 0xd9]));
 }

@@ -15,6 +15,7 @@ pub mod layout;
 mod odf;
 pub mod odp;
 pub mod odt;
+pub mod picture;
 pub mod pptx;
 pub mod rtf;
 
@@ -74,13 +75,31 @@ pub enum Kind {
     OpenDocumentPresentation,
     /// Rich text: `.rtf`, and `.rtfd`, a folder holding it with its pictures.
     RichText,
+    /// Photoshop: `.psd` and its large-document form.
+    Photoshop,
+    /// A camera's raw photo.
+    RawPhoto,
 }
 
-/// The largest file drawn; a larger one shows its details. A file is read whole when it opens,
-/// on the thread that draws.
-pub const FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// The largest document drawn; a larger one shows its details. A file is read whole when it
+/// opens, on the thread that draws.
+const DOCUMENT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// The largest picture drawn: raw photos and layered Photoshop files are large.
+const PICTURE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 impl Kind {
+    /// The largest file of this kind drawn.
+    pub fn max_bytes(self) -> u64 {
+        match self {
+            Kind::Photoshop | Kind::RawPhoto => PICTURE_MAX_BYTES,
+            Kind::Presentation
+            | Kind::WordDocument
+            | Kind::OpenDocumentText
+            | Kind::OpenDocumentPresentation
+            | Kind::RichText => DOCUMENT_MAX_BYTES,
+        }
+    }
+
     /// The kind a file name says, by its extension in any case.
     pub fn of_name(name: &str) -> Option<Self> {
         let extension = Path::new(name)
@@ -93,6 +112,9 @@ impl Kind {
             "odt" | "ott" => Kind::OpenDocumentText,
             "odp" | "otp" => Kind::OpenDocumentPresentation,
             "rtf" | "rtfd" => Kind::RichText,
+            "psd" | "psb" => Kind::Photoshop,
+            "dng" | "cr2" | "cr3" | "nef" | "nrw" | "arw" | "raf" | "orf" | "rw2" | "pef"
+            | "srw" => Kind::RawPhoto,
             _ => return None,
         })
     }
@@ -107,6 +129,8 @@ pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measur
         Kind::OpenDocumentText => Ok(flow::paginate(odt::read(path)?, measure)),
         Kind::OpenDocumentPresentation => odp::read(path),
         Kind::RichText => Ok(flow::paginate(rtf::read(path)?, measure)),
+        Kind::Photoshop => picture::read_photoshop_file(path),
+        Kind::RawPhoto => picture::read_raw_file(path),
     }
 }
 
@@ -160,11 +184,13 @@ impl Source {
 }
 
 /// How a deck's pages fit a view: slides whole, each as large as the view holds; a document's
-/// pages across the view's width, read by scrolling.
+/// pages across the view's width, read by scrolling; a picture whole, but never larger than its
+/// own size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fit {
     Whole,
     Width,
+    Picture,
 }
 
 /// A colour as a file gives it, with its opacity from 0 to 1.

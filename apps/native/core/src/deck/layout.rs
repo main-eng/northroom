@@ -43,6 +43,7 @@ pub fn page(deck: &Deck, width: f64, height: f64) -> Page {
     let zoom = match deck.fit {
         Fit::Whole => (room.0 / deck.width).min(room.1 / deck.height),
         Fit::Width => (room.0 / deck.width).min(PAGE_ZOOM_MAX),
+        Fit::Picture => (room.0 / deck.width).min(room.1 / deck.height).min(1.0),
     };
     let (slide_width, slide_height) = (deck.width * zoom, deck.height * zoom);
     let left = ((width - slide_width) / 2.0).max(0.0);

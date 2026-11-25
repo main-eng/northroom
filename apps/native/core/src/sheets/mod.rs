@@ -1,6 +1,8 @@
-//! Files shown as sheets: delimited text, Excel and OpenDocument workbooks and SQLite databases.
+//! Files shown as sheets: delimited text, Excel and OpenDocument workbooks, SQLite databases, and
+//! contacts and calendar events.
 
 pub mod database;
+pub mod directory;
 pub mod layout;
 pub mod opendocument;
 pub mod spreadsheet;

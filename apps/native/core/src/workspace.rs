@@ -625,12 +625,8 @@ const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
     "xls", "numbers",
     // Fonts.
     "ttf", "otf", "ttc", "otc", "dfont",
-    // Pictures the app cannot decode: Photoshop files and camera raw photos.
-    "psd", "dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2",
     // 3D scenes Model I/O reads.
     "usdz", "usd", "usda", "usdc", "obj", "stl", "ply", "abc",
-    // Contacts and calendar events.
-    "vcf", "ics",
 ];
 
 /// Document packages: folders on disk that Finder and the app list as one file.
@@ -653,7 +649,7 @@ pub enum FileRead {
     /// An Excel or OpenDocument workbook up to `workbook::FILE_MAX_BYTES`, by name: a table
     /// when opened.
     Workbook,
-    /// A file drawn as pages (`deck::Kind`) up to `deck::FILE_MAX_BYTES`, by name: its pages
+    /// A file drawn as pages (`deck::Kind`) up to its kind's `max_bytes`, by name: its pages
     /// when opened.
     Deck,
     /// A SQLite database, by contents (`database::is_database`): tables when opened. The
@@ -754,8 +750,8 @@ fn read_by_name(path: &Path, length_bytes: u64) -> Option<FileRead> {
 /// show, else as a file with only its details. `None` for any other name.
 fn read_document(path: &Path, length_bytes: u64) -> Option<FileRead> {
     let name = path.file_name()?.to_string_lossy();
-    let (shown, max_bytes) = if crate::deck::Kind::of_name(&name).is_some() {
-        (FileRead::Deck, crate::deck::FILE_MAX_BYTES)
+    let (shown, max_bytes) = if let Some(kind) = crate::deck::Kind::of_name(&name) {
+        (FileRead::Deck, kind.max_bytes())
     } else if crate::sheets::workbook::is_workbook_name(&name) {
         (FileRead::Workbook, crate::sheets::workbook::FILE_MAX_BYTES)
     } else {

@@ -216,7 +216,12 @@ fn the_sample_rich_text_letters_read_like_their_word_twin() {
     let words = |flow: &Flow| -> Vec<String> {
         paragraphs(flow)
             .into_iter()
-            .map(|paragraph| text(paragraph).split_whitespace().collect::<Vec<_>>().join(" "))
+            .map(|paragraph| {
+                text(paragraph)
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
             .filter(|line| !line.is_empty())
             .collect()
     };
@@ -224,7 +229,12 @@ fn the_sample_rich_text_letters_read_like_their_word_twin() {
     assert_eq!(words(&plain), words(&word));
     let heading = &paragraphs(&plain)[1].runs[0];
     assert_eq!(
-        (heading.text.as_str(), heading.bold, heading.colour, heading.size),
+        (
+            heading.text.as_str(),
+            heading.bold,
+            heading.colour,
+            heading.size
+        ),
         ("HARBOR COFFEE", true, hex("1b5e3a"), 29.0)
     );
     assert_eq!(plain.pictures, []);
@@ -233,7 +243,12 @@ fn the_sample_rich_text_letters_read_like_their_word_twin() {
     assert_eq!(words(&package), words(&word));
     assert_eq!(
         package.pictures,
-        [Source::File(fixture("Wholesale letter.rtfd").join("Attachment.png"))]
+        [Source::File(
+            fixture("Wholesale letter.rtfd").join("Attachment.png")
+        )]
     );
-    assert!(matches!(package.blocks[0], Block::Picture { picture: 0, .. }));
+    assert!(matches!(
+        package.blocks[0],
+        Block::Picture { picture: 0, .. }
+    ));
 }

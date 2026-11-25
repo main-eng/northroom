@@ -2,7 +2,7 @@
 //! placed for a view, and its pictures as files a shell can load.
 
 use super::layout::{self, Mark, Page};
-use super::{Deck, Kind, Source, FILE_MAX_BYTES};
+use super::{Deck, Kind, Source};
 use crate::ffi::with_columns;
 use crate::geometry::Rect;
 use crate::workspace::EntryKind;
@@ -15,7 +15,7 @@ use std::time::SystemTime;
 const PICTURES_FOLDER: &str = "deck-pictures";
 
 /// The open file's path and kind when it is drawn as pages: a kind by name (`Kind::of_name`), of
-/// at most `FILE_MAX_BYTES`. A document package is a folder, so only its size is not checked.
+/// at most its kind's largest size. A document package is a folder, so its size is not checked.
 fn opened_path() -> Option<(PathBuf, Kind)> {
     let (path, kind) = with_columns(|columns| {
         let opened = columns.opened()?.clone();
@@ -24,7 +24,7 @@ fn opened_path() -> Option<(PathBuf, Kind)> {
     })
     .flatten()?;
     let stat = std::fs::metadata(&path).ok()?;
-    (stat.is_dir() || stat.len() <= FILE_MAX_BYTES).then_some((path, kind))
+    (stat.is_dir() || stat.len() <= kind.max_bytes()).then_some((path, kind))
 }
 
 /// A version of a file: its size and when it changed.
