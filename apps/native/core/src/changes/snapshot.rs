@@ -10,7 +10,7 @@ use std::io;
 use std::path::Path;
 
 /// Files larger than this are listed by stamp only.
-pub const LARGEST_BYTES: u64 = 8 * 1024 * 1024;
+const LARGEST_BYTES: u64 = 8 * 1024 * 1024;
 /// A file with a NUL in its first 8 KB is binary.
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
 /// A file changed within this long of the last snapshot may have changed again in the same
@@ -165,7 +165,7 @@ fn read_content(path: &Path, stamp: Stamp, store: &Store) -> io::Result<Content>
     })
 }
 
-pub fn is_binary(bytes: &[u8]) -> bool {
+fn is_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(BINARY_SNIFF_BYTES).any(|&byte| byte == 0)
 }
 

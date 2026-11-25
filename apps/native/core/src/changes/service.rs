@@ -1,20 +1,18 @@
 //! Runs the changes for the app: the engine behind a lock, one thread that takes snapshots,
-//! reads what git says of each shown root (`git`), counts lines, keeps each root's record
+//! counts lines, keeps each root's record
 //! (`record`) a moment after it changes and prunes the store, and a recursive watcher on each folder a terminal works in or a Changes tab shows.
 //! The watcher only marks what changed and when; snapshots read the files. A root's record is
 //! read when the root is first watched. Nothing here blocks the UI thread for longer than a
 //! lock.
 
-use crate::changes::git::{self, Git};
 use crate::changes::record::{self, Record};
-use crate::changes::snapshot::Entry;
 use crate::changes::snapshot::{self, Budget};
 use crate::changes::store::{self, Store};
 use crate::changes::turns::{Engine, Signal};
 use crate::changes::{view, Clock};
 use crate::Relock;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -227,22 +225,11 @@ fn start_watcher(jobs: Sender<Job>) -> Option<RecommendedWatcher> {
     }
 }
 
-/// What the thread keeps for reading git: the program, if the computer has it, and what each
-/// commit's files read as.
-struct GitReading {
-    git: Option<Git>,
-    kept: HashMap<(String, String), Option<Entry>>,
-}
-
 /// The changes' thread: takes file events in bursts, ends quiet turns, takes the snapshots
-/// asked for, reads git, counts their lines and prunes the store, until the service is gone.
+/// asked for, counts their lines and prunes the store, until the service is gone.
 fn run(shared: &Shared, receiver: &Receiver<Job>) {
     let mut pruned_ms = None;
     let mut saving = Saving::default();
-    let mut reading = GitReading {
-        git: Git::find(),
-        kept: HashMap::new(),
-    };
     loop {
         match receiver.recv_timeout(TICK) {
             Ok(Job::Touched(paths)) => {
@@ -255,8 +242,7 @@ fn run(shared: &Shared, receiver: &Receiver<Job>) {
         }
         let now_ms = shared.clock.now_ms();
         shared.engine.relock().tick(now_ms);
-        let took = take_snapshots(shared);
-        if read_git(shared, &mut reading) | took {
+        if take_snapshots(shared) {
             count_lines(shared);
             (shared.changed)();
         }
@@ -376,37 +362,6 @@ fn take_snapshots(shared: &Shared) -> bool {
         }
         shared.engine.relock().snapshot_taken(&request, taken);
         took = true;
-    }
-}
-
-/// Reads what git says of a shown root when it is due. Returns whether it read any.
-fn read_git(shared: &Shared, reading: &mut GitReading) -> bool {
-    let Some(git) = reading.git.as_ref() else {
-        return false;
-    };
-    let mut read = false;
-    loop {
-        let wanted = shared.engine.relock().git_wanted();
-        let Some((root, latest, rules)) = wanted else {
-            return read;
-        };
-        let leaves_out = |path: &str| crate::changes::turns::leaves_out(&rules, path);
-        let mut reader = git::Reader {
-            git,
-            store: &shared.store,
-            kept: &mut reading.kept,
-        };
-        let repository = reader
-            .repository(&root, &latest, &leaves_out)
-            .unwrap_or_else(|error| {
-                eprintln!(
-                    "the changes could not ask git about {}: {error}",
-                    root.display()
-                );
-                None
-            });
-        shared.engine.relock().git_read(&root, repository);
-        read = true;
     }
 }
 
@@ -550,9 +505,9 @@ mod tests {
         service.open_view(&root);
         assert!(wait_for(|| rows(&service) == ["a.txt"]));
         assert!(service.read(|engine| engine.roots[&root].kept.contains_key("b.txt")));
-        // Keep all empties it, and the next run still lists nothing.
+        // Keeping it empties the list, and the next run still lists nothing.
         let now_ms = service.now_ms();
-        service.change(|engine| view::keep_all(engine, &root, now_ms));
+        assert!(service.change(|engine| view::keep_file(engine, &root, "a.txt", now_ms)));
         assert_eq!(service.waiting(&root), 0);
         service.save_now();
         drop(service);
@@ -564,53 +519,5 @@ mod tests {
             watched.session_base.is_some() && watched.latest.is_some()
         })));
         assert!(rows(&service).is_empty());
-    }
-
-    #[test]
-    fn a_shown_repository_lists_what_is_uncommitted_and_what_differs_from_main() {
-        use crate::changes::git::testing::{git_in, repository, write};
-        use crate::changes::view::{choose, Scope};
-        let (folder, data) = (
-            tempfile::tempdir().expect("f"),
-            tempfile::tempdir().expect("d"),
-        );
-        let root = folder.path().canonicalize().expect("real path");
-        let files = [("a.txt", "a\n"), (".gitignore", "*.log\n")];
-        if repository(&root, &files).is_none() {
-            eprintln!("git is not usable here; skipped");
-            return;
-        }
-        git_in(&root, &["checkout", "-q", "-b", "feature"]);
-        write(&root, "b.txt", "b\n");
-        git_in(&root, &["add", "b.txt"]);
-        git_in(&root, &["commit", "-q", "-m", "b"]);
-        // The person's own edit, a new file, and an ignored one.
-        write(&root, "a.txt", "a!\n");
-        write(&root, "c.txt", "c\n");
-        write(&root, "debug.log", "noise\n");
-        let service = Service::start(data.path(), Arc::new(SystemClock), || {});
-        service.open_view(&root);
-        let paths = |service: &Service| {
-            service.read(|engine| {
-                list(engine, &root)
-                    .into_iter()
-                    .map(|row| row.change.path)
-                    .collect::<Vec<_>>()
-            })
-        };
-        assert!(wait_for(
-            || service.read(|engine| engine.roots[&root].git.is_some())
-        ));
-        // New has nothing: no terminal changed anything.
-        assert!(paths(&service).is_empty());
-        assert!(service.change(|engine| choose(engine, &root, Scope::Uncommitted)));
-        assert_eq!(paths(&service), ["a.txt", "c.txt"]);
-        assert!(service.change(|engine| choose(engine, &root, Scope::Branch)));
-        assert_eq!(paths(&service), ["a.txt", "b.txt", "c.txt"]);
-        // A commit is seen: Uncommitted empties.
-        git_in(&root, &["add", "-A"]);
-        git_in(&root, &["commit", "-q", "-m", "all"]);
-        assert!(service.change(|engine| choose(engine, &root, Scope::Uncommitted)));
-        assert!(wait_for(|| paths(&service).is_empty()));
     }
 }

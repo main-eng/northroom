@@ -1,17 +1,12 @@
-//! The Changes tab's model: the files of a root in one flat list, each with its diff, in the
-//! scope the tab's picker shows (`Scope`).
+//! The Changes tab's model: the files of a root in one flat list, each with its diff.
 //!
-//! New lists every file the terminals changed since the person last kept it, newest first.
+//! It lists every file the terminals changed since the person last kept it, newest first.
 //! Keep takes a file's change, or one hunk of it, into what the file is diffed from (as Zed's
 //! review keeps an agent's edits): a whole file leaves the list and lists again only once a
 //! terminal changes it after that; a kept hunk leaves the diff and the file's other hunks stay.
 //! Changes made while no turn ran are credited to no terminal and left out. A file an earlier
 //! run listed (`Root::carried`) lists on until it is kept or is again as it was; a change made
-//! while the app was closed keeps the credit it had.
-//!
-//! Uncommitted and vs main list what git says differs (`git`): from the last commit, the
-//! person's own edits and untracked files too, and from where the branch left the default
-//! branch, read only. The shell only draws what this lists.
+//! while the app was closed keeps the credit it had. The shell only draws what this lists.
 //!
 //! Every file starts expanded except noisy ones (`starts_folded`): large diffs, lock and
 //! generated files, deleted files and files without a text diff. A file the person collapsed
@@ -19,7 +14,6 @@
 
 use crate::changes::actions::ActionError;
 use crate::changes::diff::{self, Deadline, FileDiff};
-use crate::changes::git::Committed;
 use crate::changes::record::{Listed, Record};
 use crate::changes::scan::Stamp;
 use crate::changes::snapshot::{Content, Entry, Manifest};
@@ -39,81 +33,6 @@ pub struct ViewState {
     /// Each file the person collapsed (true) or expanded (false), by path; wins over how it
     /// starts (`folded`).
     pub folds: BTreeMap<String, bool>,
-}
-
-/// What a Changes tab lists, chosen in its picker.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Scope {
-    /// What the terminals changed since the person last kept it.
-    #[default]
-    New,
-    /// Everything not committed in the root's repository: the working tree and the index
-    /// against the last commit, untracked files too.
-    Uncommitted,
-    /// The working tree against where the branch left the default branch; read only.
-    Branch,
-}
-
-impl Scope {
-    /// Whether Keep applies: only New has a version the person moves on.
-    pub fn keeps(self) -> bool {
-        match self {
-            Self::New => true,
-            Self::Uncommitted | Self::Branch => false,
-        }
-    }
-
-    /// Whether Undo applies: vs main is read only.
-    pub fn undoes(self) -> bool {
-        match self {
-            Self::New | Self::Uncommitted => true,
-            Self::Branch => false,
-        }
-    }
-}
-
-/// The scopes `root`'s picker offers, in order: New always, Uncommitted inside a repository,
-/// and vs main off the default branch.
-pub fn offered(root: &Root) -> Vec<Scope> {
-    let mut scopes = vec![Scope::New];
-    if let Some(repository) = &root.git {
-        scopes.push(Scope::Uncommitted);
-        if repository.branch.is_some() {
-            scopes.push(Scope::Branch);
-        }
-    }
-    scopes
-}
-
-/// The scope `root`'s tab shows: the one last chosen while it is offered, else New.
-pub fn shown_scope(root: &Root) -> Scope {
-    match offered(root).contains(&root.scope) {
-        true => root.scope,
-        false => Scope::New,
-    }
-}
-
-/// The default branch's name, which vs main says, when that scope is offered.
-pub fn branch_name(root: &Root) -> Option<&str> {
-    let (branch, _) = root.git.as_ref()?.branch.as_ref()?;
-    Some(&branch.name)
-}
-
-/// Shows `scope` in `root`'s tab from the top, when offered. Returns whether it is offered.
-pub fn choose(engine: &mut Engine, root: &Path, scope: Scope) -> bool {
-    let Some(watched) = engine.roots.get_mut(root) else {
-        return false;
-    };
-    if !offered(watched).contains(&scope) {
-        return false;
-    }
-    watched.scope = scope;
-    if let Some(view) = engine.views.get_mut(root) {
-        view.selected = None;
-        view.within = 0.0;
-    }
-    engine.touch();
-    true
 }
 
 /// What happened to a file.
@@ -212,8 +131,7 @@ pub struct FileRow {
     pub counts: Option<(usize, usize)>,
     /// Two terminals changed it at the same time.
     pub contested: bool,
-    /// When the first turn that changed it since it was last kept started; orders New. 0 in
-    /// the git scopes, which list by path.
+    /// When the first turn that changed it since it was last kept started; orders the list.
     pub entered_ms: u64,
 }
 
@@ -358,7 +276,7 @@ fn unkept(root: &Root) -> Vec<Unkept> {
         .collect()
 }
 
-/// What `root`'s New list needs across restarts as of `now_ms` (`record`): every file listed,
+/// What `root`'s list needs across restarts as of `now_ms` (`record`): every file listed,
 /// with its baseline and credit, and every kept mark. Before this run's first snapshot it is
 /// what an earlier run left.
 pub fn record(root: &Root, now_ms: u64) -> Record {
@@ -384,7 +302,7 @@ pub fn record(root: &Root, now_ms: u64) -> Record {
     record
 }
 
-/// How many files `root`'s New list holds, which the title bar's review button says.
+/// How many files `root`'s list holds, which the title bar's review button says.
 /// Before this run's first snapshot of it, those an earlier run left.
 pub fn waiting(engine: &Engine, root: &Path) -> usize {
     let Some(watched) = engine.roots.get(root) else {
@@ -413,82 +331,19 @@ pub fn referenced(engine: &Engine) -> BTreeSet<Hash> {
             .carried
             .values()
             .filter_map(|listed| listed.baseline.clone());
-        let committed = git_scopes(root)
-            .flat_map(|committed| committed.values())
-            .flatten()
-            .cloned();
-        let entries = sides.chain(kept).chain(carried).chain(committed);
+        let entries = sides.chain(kept).chain(carried);
         hashes.extend(entries.filter_map(|entry| entry.content.hash().cloned()));
     }
     hashes
 }
 
-/// What git says differs in each of `root`'s git scopes.
-fn git_scopes(root: &Root) -> impl Iterator<Item = &Committed> {
-    let repository = root.git.as_deref();
-    let uncommitted = repository.map(|repository| &repository.uncommitted);
-    let branch = repository
-        .and_then(|repository| repository.branch.as_ref())
-        .map(|(_, committed)| committed);
-    uncommitted.into_iter().chain(branch)
-}
-
-/// What git says differs in `scope` of `root`; none for New.
-fn committed_in(root: &Root, scope: Scope) -> Option<&Committed> {
-    let repository = root.git.as_deref()?;
-    match scope {
-        Scope::New => None,
-        Scope::Uncommitted => Some(&repository.uncommitted),
-        Scope::Branch => repository.branch.as_ref().map(|(_, committed)| committed),
-    }
-}
-
-/// Each file of `committed` that differs from its commit's version now, by path.
-fn committed_changes(root: &Root, committed: &Committed) -> Vec<FileChange> {
-    let Some(latest) = &root.latest else {
-        return Vec::new();
-    };
-    committed
-        .iter()
-        .filter_map(|(path, before)| {
-            let after = latest.files.get(path);
-            differs(before.as_ref(), after).then(|| FileChange {
-                path: path.clone(),
-                before: before.clone(),
-                after: after.cloned(),
-            })
-        })
-        .collect()
-}
-
-/// Every file `root`'s tab lists, in the scope it shows (`shown_scope`).
-fn changes_shown(root: &Root) -> Vec<FileChange> {
-    match committed_in(root, shown_scope(root)) {
-        Some(committed) => committed_changes(root, committed),
-        None => unkept(root).into_iter().map(|file| file.change).collect(),
-    }
-}
-
-/// The file list of `root` in the scope its tab shows (`shown_scope`). New lists every file
-/// changed since it was last kept, newest first by when a turn first changed it since then,
-/// then by path: a file changed again keeps its place, so the list doesn't reshuffle while it
-/// is looked at, and a newly changed file comes in at the top. The git scopes list by path.
+/// The file list of `root`: every file changed since it was last kept, newest first by when a
+/// turn first changed it since then, then by path. A file changed again keeps its place, so the
+/// list doesn't reshuffle while it is looked at, and a newly changed file comes in at the top.
 pub fn list(engine: &Engine, root: &Path) -> Vec<FileRow> {
     let Some(watched) = engine.roots.get(root) else {
         return Vec::new();
     };
-    if let Some(committed) = committed_in(watched, shown_scope(watched)) {
-        return committed_changes(watched, committed)
-            .into_iter()
-            .map(|change| FileRow {
-                status: change.status(),
-                counts: engine.counts.get(&change),
-                contested: false,
-                entered_ms: 0,
-                change,
-            })
-            .collect();
-    }
     let mut rows: Vec<FileRow> = unkept(watched)
         .into_iter()
         .map(|file| FileRow {
@@ -505,45 +360,10 @@ pub fn list(engine: &Engine, root: &Path) -> Vec<FileRow> {
     rows
 }
 
-/// The rows of `root`'s New list, whatever scope its tab shows.
-fn new_rows(engine: &Engine, root: &Path) -> Vec<FileRow> {
-    let Some(watched) = engine.roots.get(root) else {
-        return Vec::new();
-    };
-    unkept(watched)
-        .into_iter()
-        .map(|file| FileRow {
-            status: file.change.status(),
-            counts: None,
-            contested: file.contested,
-            entered_ms: file.entered_ms,
-            change: file.change,
-        })
-        .collect()
-}
-
-/// Keeps every file of `root`'s New list at `now_ms` (Keep all): each leaves the list, its
-/// version now what it is diffed from once a terminal changes it again. A choice to expand or
-/// collapse one is forgotten, so it comes back as it starts. Nothing on disk changes.
-pub fn keep_all(engine: &mut Engine, root: &Path, now_ms: u64) {
-    let rows = new_rows(engine, root);
-    if let Some(view) = engine.views.get_mut(root) {
-        for row in &rows {
-            view.folds.remove(&row.change.path);
-        }
-        view.selected = None;
-        view.within = 0.0;
-    }
-    let entries = rows
-        .into_iter()
-        .map(|row| (row.change.path, row.change.after));
-    engine.keep(root, entries, now_ms);
-}
-
-/// Keeps the file at `path` of `root`'s New list whole at `now_ms`: it leaves the list until a
+/// Keeps the file at `path` of `root`'s list whole at `now_ms`: it leaves the list until a
 /// terminal changes it again. Returns whether it was listed.
 pub fn keep_file(engine: &mut Engine, root: &Path, path: &str, now_ms: u64) -> bool {
-    let Some(row) = new_rows(engine, root)
+    let Some(row) = list(engine, root)
         .into_iter()
         .find(|row| row.change.path == path)
     else {
@@ -556,7 +376,7 @@ pub fn keep_file(engine: &mut Engine, root: &Path, path: &str, now_ms: u64) -> b
     true
 }
 
-/// Keeps hunk `hunk` of the file at `path` of `root`'s New list at `now_ms`, as Zed keeps an
+/// Keeps hunk `hunk` of the file at `path` of `root`'s list at `now_ms`, as Zed keeps an
 /// agent's edits in a range: the hunk's new text folds into what the file is diffed from, kept
 /// in `store`, so it leaves the diff and the file's other hunks stay. Keeping its last hunk
 /// keeps the whole file (`keep_file`). Returns whether it was listed.
@@ -568,7 +388,7 @@ pub fn keep_hunk(
     hunk: usize,
     now_ms: u64,
 ) -> Result<bool, ActionError> {
-    let Some(row) = new_rows(engine, root)
+    let Some(row) = list(engine, root)
         .into_iter()
         .find(|row| row.change.path == path)
     else {
@@ -686,13 +506,13 @@ pub fn next_after(rows: &[FileRow], path: &str) -> Option<String> {
         .map(|row| row.change.path.clone())
 }
 
-/// Text pairs of every root's listed files not yet counted, in the scope each tab shows.
+/// Text pairs of every root's listed files not yet counted.
 pub fn uncounted(engine: &Engine) -> Vec<Pair> {
     let wanted: BTreeSet<Pair> = engine
         .roots
         .values()
-        .flat_map(changes_shown)
-        .filter_map(|change| engine.counts.lacks(&change))
+        .flat_map(unkept)
+        .filter_map(|file| engine.counts.lacks(&file.change))
         .collect();
     wanted.into_iter().collect()
 }
@@ -883,7 +703,14 @@ mod tests {
             .collect()
     }
 
-    /// Keeps just `paths` whole as listed now, as Keep all does to every file.
+    /// Keeps every listed file whole, one by one, at `now_ms`.
+    fn keep_every(engine: &mut Engine, root: &Path, now_ms: u64) {
+        for row in list(engine, root) {
+            assert!(keep_file(engine, root, &row.change.path, now_ms));
+        }
+    }
+
+    /// Keeps just `paths` whole as listed now.
     fn keep_paths(engine: &mut Engine, paths: &[&str], now_ms: u64) {
         let entries = rows_of(engine, paths)
             .into_iter()
@@ -892,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn keep_all_empties_the_list_and_a_file_returns_only_once_a_terminal_changes_it() {
+    fn keeping_every_file_empties_the_list_and_a_file_returns_only_once_a_terminal_changes_it() {
         let mut engine = two_terminals();
         let root = Path::new(ROOT);
         turn(
@@ -909,7 +736,7 @@ mod tests {
             .folds
             .insert("one.txt".into(), true);
         assert_eq!(waiting(&engine, root), 2);
-        keep_all(&mut engine, root, 300);
+        keep_every(&mut engine, root, 300);
         assert!(listed(&engine).is_empty());
         assert_eq!(waiting(&engine, root), 0);
         assert!(engine.views[root].folds.is_empty());
@@ -949,7 +776,7 @@ mod tests {
         engine.refresh(root);
         answer(&mut engine, 210, &[("one.txt", "1!"), ("two.txt", "2")]);
         assert_eq!(listed(&engine), ["one.txt"]);
-        keep_all(&mut engine, root, 300);
+        keep_every(&mut engine, root, 300);
         assert!(listed(&engine).is_empty());
         engine.signal("a", Signal::Hook(Activity::Finished), 400);
         answer(&mut engine, 410, &[("one.txt", "1!!"), ("two.txt", "2")]);
@@ -1049,7 +876,7 @@ mod tests {
             (100, 200),
             &[("one.txt", "1!"), ("two.txt", "2")],
         );
-        keep_all(&mut engine, root, 300);
+        keep_every(&mut engine, root, 300);
         turn(
             &mut engine,
             "a",
@@ -1063,97 +890,6 @@ mod tests {
             &[("one.txt", "1!"), ("two.txt", "2")],
         );
         assert!(listed(&engine).is_empty());
-    }
-
-    /// A repository's answer for the test root: `uncommitted` files with their committed text
-    /// (`None`: not committed), and vs `main` when `branch` holds files.
-    fn repository(
-        uncommitted: &[(&str, Option<&str>)],
-        branch: Option<&[(&str, Option<&str>)]>,
-    ) -> crate::changes::git::Repository {
-        let committed = |files: &[(&str, Option<&str>)]| {
-            files
-                .iter()
-                .map(|(path, text)| ((*path).to_owned(), text.map(entry)))
-                .collect()
-        };
-        let main = crate::changes::git::DefaultBranch {
-            name: "main".into(),
-            reference: "refs/heads/main".into(),
-        };
-        crate::changes::git::Repository {
-            uncommitted: committed(uncommitted),
-            branch: branch.map(|files| (main, committed(files))),
-        }
-    }
-
-    #[test]
-    fn the_picker_offers_git_scopes_only_in_a_repository_and_vs_main_only_off_its_branch() {
-        let mut engine = two_terminals();
-        let root = Path::new(ROOT);
-        let offers = |engine: &Engine| offered(&engine.roots[root]);
-        // Not a repository, or no git: New alone, and nothing else can be chosen.
-        assert_eq!(offers(&engine), [Scope::New]);
-        assert!(!choose(&mut engine, root, Scope::Uncommitted));
-        // On the default branch: no vs main.
-        engine.git_read(root, Some(repository(&[], None)));
-        assert_eq!(offers(&engine), [Scope::New, Scope::Uncommitted]);
-        assert_eq!(branch_name(&engine.roots[root]), None);
-        assert!(!choose(&mut engine, root, Scope::Branch));
-        // On a branch of its own.
-        engine.git_read(root, Some(repository(&[], Some(&[]))));
-        assert_eq!(
-            offers(&engine),
-            [Scope::New, Scope::Uncommitted, Scope::Branch]
-        );
-        assert_eq!(branch_name(&engine.roots[root]), Some("main"));
-        assert!(choose(&mut engine, root, Scope::Branch));
-        assert_eq!(shown_scope(&engine.roots[root]), Scope::Branch);
-        // Back on main, the tab shows New until vs main is offered again.
-        engine.git_read(root, Some(repository(&[], None)));
-        assert_eq!(shown_scope(&engine.roots[root]), Scope::New);
-        // Only New keeps; vs main is read only.
-        assert!(Scope::New.keeps() && !Scope::Uncommitted.keeps() && !Scope::Branch.keeps());
-        assert!(Scope::New.undoes() && Scope::Uncommitted.undoes() && !Scope::Branch.undoes());
-    }
-
-    #[test]
-    fn the_git_scopes_list_what_differs_from_the_commit_by_path_and_new_still_counts() {
-        let mut engine = two_terminals();
-        let root = Path::new(ROOT);
-        turn(
-            &mut engine,
-            "a",
-            (100, 200),
-            &[("one.txt", "1!"), ("two.txt", "2"), ("new.txt", "n")],
-        );
-        // The person's own edit too, made while no turn ran.
-        engine.touched(&[PathBuf::from("/p/two.txt")], 5_000);
-        engine.tick(7_000);
-        let files = [("one.txt", "1!"), ("two.txt", "2?"), ("new.txt", "n")];
-        answer(&mut engine, 7_001, &files);
-        let uncommitted = [
-            ("one.txt", Some("1")),
-            ("two.txt", Some("2")),
-            ("new.txt", None),
-            // Back as committed: not listed.
-            ("same.txt", None),
-        ];
-        let branch = [("one.txt", Some("0")), ("two.txt", Some("2"))];
-        engine.git_read(root, Some(repository(&uncommitted, Some(&branch))));
-        assert_eq!(listed(&engine), ["new.txt", "one.txt"]);
-        assert!(choose(&mut engine, root, Scope::Uncommitted));
-        assert_eq!(listed(&engine), ["new.txt", "one.txt", "two.txt"]);
-        let rows = list(&engine, root);
-        assert_eq!(rows[0].status, Status::Added);
-        assert_eq!(rows[1].change.before, Some(entry("1")));
-        assert!(choose(&mut engine, root, Scope::Branch));
-        assert_eq!(listed(&engine), ["one.txt", "two.txt"]);
-        assert_eq!(list(&engine, root)[0].change.before, Some(entry("0")));
-        // Review changes counts New, whatever the tab shows; the commits' texts are spared.
-        assert_eq!(waiting(&engine, root), 2);
-        assert!(referenced(&engine).contains(&Hash::of(b"0")));
-        assert_eq!(uncounted(&engine).len(), 2);
     }
 
     /// The test root with `texts` kept in `store`, so diffs read them.
@@ -1318,7 +1054,7 @@ mod tests {
         let two = &rows_of(&later, &["two.txt"])[0];
         assert_eq!(two.change.before, Some(entry("2!")));
         // Keeping drops both from the next record, the carried one too.
-        keep_all(&mut later, root, 12_000);
+        keep_every(&mut later, root, 12_000);
         let kept = view_record(&later, 12_001);
         assert!(kept.listed.is_empty());
         assert_eq!(kept.kept["one.txt"].entry, Some(entry("1!")));

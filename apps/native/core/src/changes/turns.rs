@@ -5,7 +5,7 @@
 //! service takes them off the UI thread.
 
 use crate::changes::actions::Undone;
-use crate::changes::git::{Repository, GIT_MARK};
+use crate::changes::git::GIT_MARK;
 use crate::changes::ignore::{Kind, Rules};
 use crate::changes::record::{Listed, Record};
 use crate::changes::scan;
@@ -147,13 +147,7 @@ pub struct Root {
     pub kept: BTreeMap<String, Kept>,
     /// Files listed when an earlier run quit, by path, from the root's record (`carried`).
     pub carried: BTreeMap<String, Listed>,
-    /// The scope its Changes tab shows, as last chosen this run (`view::shown_scope`).
-    pub scope: crate::changes::view::Scope,
-    /// What git says of it, once read; `None` outside a repository or without git.
-    pub git: Option<Arc<Repository>>,
-    /// Git is to be read again: a snapshot was taken or the repository changed.
-    git_due: bool,
-    pub(crate) rules: Rules,
+    rules: Rules,
     last_change_ms: u64,
     refresh_due: bool,
     running: BTreeSet<TerminalId>,
@@ -169,9 +163,6 @@ impl Root {
             turns: Vec::new(),
             kept: BTreeMap::new(),
             carried: BTreeMap::new(),
-            scope: crate::changes::view::Scope::New,
-            git: None,
-            git_due: true,
             rules: Rules::default(),
             last_change_ms: 0,
             refresh_due: false,
@@ -217,7 +208,7 @@ impl Root {
 }
 
 /// Whether the changes leave out `path` (relative): skipped names and what `rules` ignore.
-pub fn leaves_out(rules: &Rules, path: &str) -> bool {
+fn leaves_out(rules: &Rules, path: &str) -> bool {
     scan::skips(path) || rules.ignores(path, Kind::File)
 }
 
@@ -483,12 +474,8 @@ impl Engine {
             let Some(relative) = relative_to(&root.path, path) else {
                 continue;
             };
-            if relative.split('/').next() == Some(GIT_MARK) {
-                // A commit, checkout or staging: git is read again.
-                root.git_due = true;
-                continue;
-            }
-            if root.leaves_out(&relative) {
+            // A commit, checkout or staging touches only git's own files: no change.
+            if relative.split('/').next() == Some(GIT_MARK) || root.leaves_out(&relative) {
                 continue;
             }
             root.last_change_ms = root.last_change_ms.max(now_ms);
@@ -579,7 +566,6 @@ impl Engine {
         root.latest = Some(Arc::clone(&manifest));
         root.cache = None;
         root.rules = taken.rules;
-        root.git_due = true;
         match &request.purpose {
             Purpose::Base => {
                 root.session_base.get_or_insert(manifest);
@@ -652,35 +638,6 @@ impl Engine {
         watched.kept.insert(path.to_owned(), kept);
         self.undone.clear();
         self.touch();
-    }
-
-    /// A shown root whose git is due to be read: its path, latest snapshot and what it leaves
-    /// out. Asking clears the request.
-    pub fn git_wanted(&mut self) -> Option<(PathBuf, Arc<Manifest>, Rules)> {
-        let path = self
-            .views
-            .keys()
-            .find(|path| {
-                self.roots
-                    .get(*path)
-                    .is_some_and(|root| root.git_due && root.latest.is_some())
-            })?
-            .clone();
-        let root = self.roots.get_mut(&path)?;
-        root.git_due = false;
-        let latest = root.latest.clone()?;
-        Some((path, latest, root.rules.clone()))
-    }
-
-    /// Takes what git says of `root` (`None`: not a repository, or git could not say).
-    pub fn git_read(&mut self, root: &Path, repository: Option<Repository>) {
-        if let Some(watched) = self.roots.get_mut(root) {
-            let read = repository.map(Arc::new);
-            if watched.git != read {
-                watched.git = read;
-                self.touch();
-            }
-        }
     }
 
     /// The root with the latest turn, this run's or one an earlier run listed, which Show

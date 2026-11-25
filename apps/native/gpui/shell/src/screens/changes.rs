@@ -1,11 +1,9 @@
-//! A Changes tab (CONTEXT.md): what changed in a root, in the scope its picker shows, in the
-//! folder's place while its tab is active. The core lists, diffs and places everything
-//! (`changes::ffi`, `nr_changes_frames`); this screen draws what it reads and passes input on.
+//! A Changes tab (CONTEXT.md): what the terminals changed in a root since the person last kept
+//! it, in the folder's place while its tab is active. The core lists, diffs and places
+//! everything (`changes::ffi`, `nr_changes_frames`); this screen draws what it reads and passes
+//! input on.
 //!
-//! The list's first line is the picker, a quiet row that says the scope and its count with a
-//! chevron ("New · 4 ▾"), as Zed's review does; a click opens its menu (`menu_changes_scope`):
-//! New, Uncommitted and vs main where the root offers them, then Keep all and Undo all in New.
-//! Under it, every listed file in one flat list: the path, then `+3 −1` for text or "new",
+//! On the left, every listed file in one flat list from the top: the path, then `+3 −1` for text or "new",
 //! "changed" or "deleted", with a warning when two terminals changed it at once. On the right,
 //! one continuous diff of them all, a section per file that starts with a slim muted line naming
 //! it behind a chevron: monospace 12 px on 16 px lines as source files show, line numbers, added
@@ -23,19 +21,17 @@
 //! line for the whole file (`nr_changes_line_tools`, beside Open for a file without diff lines),
 //! and on a hunk in a small strip at its first row's right end (`nr_changes_strip`), which also
 //! shows on the hunk N and P stepped to. They are quiet icon buttons with tooltips naming their
-//! keys; the core decides which a scope has (none in vs main). A click on a tool does only what
-//! it does; the rest of the line folds.
+//! keys. A click on a tool does only what it does; the rest of the line folds.
 //!
 //! The file whose section holds the diff's top edge is in view (the core's scroll-spy,
 //! `nr_changes_scrolled`): it lights in the list, which scrolls to keep it shown, and its name
 //! line stays pinned at the diff's top over its rows, on the background with a hairline under
 //! it, until the next file's line pushes it up (`nr_changes_pinned`). A click in the list
 //! scrolls the diff to that file. With nothing listed, one plain line in the diff's place says
-//! so for the scope, and the picker stays.
+//! so.
 //!
 //! Keys go to the core (`nr_changes_key`): J and K or Down and Up for files, N and P for hunks,
-//! X to fold the file in view (⌥X every file), ⌘1 to ⌘3 for the scopes, ⌘Y and ⌘⌥Z to keep and
-//! undo the current hunk (with ⇧ its file), and ⌘Z right after an Undo to put it back.
+//! X to fold the file in view (⌥X every file), ⌘Y and ⌘⌥Z to keep and undo the current hunk (with ⇧ its file), and ⌘Z right after an Undo to put it back.
 //!
 //! Only the sections on screen are drawn, and a file's rows are read from the core the first
 //! time it shows. On a Mac their lines take syntax colours from the core's highlighter
@@ -62,7 +58,6 @@ use kit::nr::*;
 use kit::text::{draw_line, width};
 use kit::theme::{Face, Token, color, faded, mixed};
 use std::collections::HashMap;
-use std::rc::Rc;
 
 /// Monospace 12 px, as source files show; lines are the core's `diff_line` tall.
 fn mono() -> Face {
@@ -87,13 +82,11 @@ const STRIP_CORNER: f32 = 4.0;
 const GLYPH: f32 = 16.0;
 /// A hunk strip's glyphs, smaller to fit a diff line.
 const STRIP_GLYPH: f32 = 13.0;
-/// The picker's menu hangs this far under it.
-const MENU_DROP: f32 = 2.0;
-
-/// Every fixed word the tab draws besides its tools' tooltips and its picker's
-/// (`nr_changes_words`).
+/// Every fixed word the tab draws besides its tools' tooltips (`nr_changes_words`).
 #[derive(Default)]
 struct Words {
+    /// What the tab says with nothing listed.
+    empty: String,
     whole: String,
     new: String,
     changed: String,
@@ -107,6 +100,7 @@ impl Words {
     fn read() -> Self {
         let words = nr_changes_words();
         Self {
+            empty: text(&words.empty),
             whole: text(&words.whole),
             new: text(&words.new),
             changed: text(&words.changed),
@@ -398,9 +392,6 @@ pub struct Changes {
     /// The core's revision last loaded (`nr_changes_revision`).
     revision: Option<u64>,
     words: Words,
-    /// The picker's words ("New · 4") and what the scope says with nothing listed.
-    picker: String,
-    empty: String,
     laid: NrChangesFrames,
     files: Vec<File>,
     in_view: Option<usize>,
@@ -420,10 +411,9 @@ pub struct Changes {
     pressed: Option<Target>,
 }
 
-/// What a point over the tab is on: the picker, or over the diff (`nr_changes_hit`).
+/// What a point over the diff is on (`nr_changes_hit`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Target {
-    Picker,
     /// A tool of a file's name line.
     Tool(usize, NrChangesTool),
     /// A file's name line, off its tools.
@@ -439,7 +429,7 @@ impl Target {
     fn line(self) -> Option<usize> {
         match self {
             Self::Tool(file, _) | Self::Line(file) => Some(file),
-            Self::Picker | Self::HunkTool(..) | Self::Hunk(_) => None,
+            Self::HunkTool(..) | Self::Hunk(_) => None,
         }
     }
 
@@ -447,14 +437,14 @@ impl Target {
     fn hunk(self) -> Option<usize> {
         match self {
             Self::HunkTool(hunk, _) | Self::Hunk(hunk) => Some(hunk),
-            Self::Picker | Self::Tool(..) | Self::Line(_) => None,
+            Self::Tool(..) | Self::Line(_) => None,
         }
     }
 
-    /// A button: the picker or a tool.
+    /// A button: a tool.
     fn is_button(self) -> bool {
         match self {
-            Self::Picker | Self::Tool(..) | Self::HunkTool(..) => true,
+            Self::Tool(..) | Self::HunkTool(..) => true,
             Self::Line(_) | Self::Hunk(_) => false,
         }
     }
@@ -467,8 +457,6 @@ impl Changes {
             focus: cx.focus_handle(),
             revision: None,
             words: Words::read(),
-            picker: String::new(),
-            empty: String::new(),
             laid: zeroed(),
             files: Vec::new(),
             in_view: None,
@@ -495,9 +483,6 @@ impl Changes {
         }
         self.revision = Some(nr_changes_revision());
         let loaded = nr_changes_load();
-        let picker = nr_changes_picker();
-        self.picker = text(&picker.label);
-        self.empty = text(&picker.empty);
         self.files = (0..loaded.files)
             .filter_map(|index| File::read(index, &self.words))
             .collect();
@@ -637,12 +622,8 @@ impl Changes {
     }
 
     /// What window point `at` is on, with the frame of it in window points and its tooltip
-    /// (empty for a name line, a hunk or the picker).
+    /// (empty for a name line or a hunk).
     fn hit(&self, at: Point<Pixels>) -> Option<(Target, Bounds<Pixels>, String)> {
-        let picker = self.part(&self.laid.picker);
-        if contains(&picker, at) {
-            return Some((Target::Picker, picker, String::new()));
-        }
         if self.files.is_empty() {
             return None;
         }
@@ -679,35 +660,15 @@ impl Changes {
         cx.emit(Ask::Said(Said::of(&effect)));
     }
 
-    /// Does what the button `target` is does: opens the picker's menu, or a tool to its file or
-    /// hunk.
+    /// Does what the button `target` is does: a tool to its file or hunk.
     fn press_button(&mut self, target: Target, cx: &mut Context<Self>) {
         cx.emit(Ask::Tooltip(None));
         self.sync_spy();
         match target {
-            Target::Picker => self.open_picker(cx),
             Target::Tool(file, tool) => self.say(nr_changes_file_tool(file, tool), cx),
             Target::HunkTool(hunk, tool) => self.say(nr_changes_hunk_tool(hunk, tool), cx),
             Target::Line(_) | Target::Hunk(_) => {}
         }
-    }
-
-    /// The picker's menu, hanging under it from its left edge. The core rebuilds it on each
-    /// read, so it stays current while open.
-    fn open_picker(&mut self, cx: &mut Context<Self>) {
-        let picker = self.part(&self.laid.picker);
-        let gap = px(self.laid.gap as f32);
-        let at = point(
-            picker.origin.x + gap,
-            picker.origin.y + picker.size.height + px(MENU_DROP),
-        );
-        let again: kit::menu::Again = Rc::new(|_| menu_changes_scope());
-        cx.emit(Ask::Menu {
-            which: NrMenu::ChangesScope,
-            again,
-            at,
-            below: true,
-        });
     }
 
     // MARK: Keys and pointer
@@ -894,10 +855,9 @@ impl Changes {
     fn paint(&mut self, hitbox: &Hitbox, window: &mut Window, cx: &mut Context<Self>) {
         let now = now();
         fill(window, self.frame, color(Token::Background));
-        self.paint_picker(window, cx);
         self.paint_list(window, cx, now);
         if self.files.is_empty() {
-            paint_note(window, cx, &self.empty, self.part(&self.laid.diff));
+            paint_note(window, cx, &self.words.empty, self.part(&self.laid.diff));
         } else {
             self.spy(cx);
             self.paint_diff(window, cx, now);
@@ -916,12 +876,11 @@ impl Changes {
             f32::from(view.size.height),
             self.files.len() as f32 * row + 2.0 * gap,
         );
-        let picker = self.part(&self.laid.picker);
         let edge = frame(
             f32::from(view.origin.x + view.size.width) - 1.0,
-            f32::from(picker.origin.y),
+            f32::from(view.origin.y),
             1.0,
-            f32::from(view.bottom() - picker.origin.y),
+            f32::from(view.size.height),
         );
         fill(window, edge, color(Token::Border));
         let top = f32::from(view.origin.y) + gap - self.list_down.offset();
@@ -1239,38 +1198,6 @@ impl Changes {
             room,
             None,
         );
-    }
-
-    /// The picker on the list's first line, as quiet as a list row: the scope and its count,
-    /// then a chevron, shaded under the pointer and while pressed.
-    fn paint_picker(&self, window: &mut Window, cx: &mut App) {
-        let picker = self.part(&self.laid.picker);
-        let gap = self.laid.gap as f32;
-        let row = frame(
-            f32::from(picker.origin.x),
-            f32::from(picker.origin.y) + gap,
-            f32::from(picker.size.width) - 1.0,
-            self.laid.list_row as f32,
-        );
-        let bar = inset(row, 8.0, 2.0);
-        let shade = match (self.pressed, self.hovered) {
-            (Some(Target::Picker), _) => Some(PRESS),
-            (_, Some(Target::Picker)) => Some(HOVER),
-            _ => None,
-        };
-        if let Some(shade) = shade {
-            rounded(window, bar, mixed(Token::Foreground, shade), TOOL_CORNER);
-        }
-        let x = f32::from(bar.origin.x) + 8.0;
-        let y = f32::from(bar.origin.y) + (f32::from(bar.size.height) - 16.0) / 2.0;
-        let face = Face::sans(12.0, 500.0);
-        let words = width(&self.picker, face);
-        let room = (f32::from(bar.size.width) - 16.0 - 18.0).max(0.0);
-        let ink = color(Token::Foreground);
-        draw_line(window, cx, &self.picker, face, ink, x, y, 16.0, room, None);
-        let chevron = frame(x + words.min(room) + 4.0, y + 2.0, 12.0, 12.0);
-        let muted = color(Token::MutedForeground);
-        icons::draw(window, cx, Glyph::CaretDown, chevron, muted);
     }
 
     /// The strips of the hunk under the pointer and of the one N or P stepped to.
@@ -1596,12 +1523,9 @@ impl Screen for Changes {
         }
     }
 
-    /// The centre of the picker when `title` is its words, of the file in view's tool whose
-    /// tooltip is `title`, or of the list row of the file at that path.
+    /// The centre of the file in view's tool whose tooltip is `title`, or of the list row of
+    /// the file at that path.
     fn point_of(&self, title: &str, _: &App) -> Option<Point<Pixels>> {
-        if self.picker == title {
-            return Some(self.part(&self.laid.picker).center());
-        }
         if let Some(at) = self.in_view_tool(title) {
             return Some(at);
         }
@@ -1654,8 +1578,8 @@ pub fn register(table: &mut Table) {
 }
 
 /// `changessay`: one line per listed file (`changes\trow\t<path>\t<ending>\t<flags>`, flags
-/// `contested`, `inview` and `folded`), the diff's offset, the picker's words and the pinned
-/// file (`changes\tview\t<offset>\t<picker>\t<path>`), each file's section
+/// `contested`, `inview` and `folded`), the diff's offset and the pinned file
+/// (`changes\tview\t<offset>\t<path>`), each file's section
 /// (`changes\tfile\t<path>\t<top>\t<rows>\t<coloured>\t<height>`), and each of its drawn rows
 /// (`changes\tline\t<path>\t<shows>\t<old>\t<new>\t<text>`), with `\tcoloured` when it shows in
 /// syntax colours, then `\twraps:<n>`, the visual lines it wraps onto.
@@ -1714,11 +1638,7 @@ impl Changes {
             .ok()
             .and_then(|index| self.files.get(index))
             .map_or("", |file| file.path.as_str());
-        said.push(format!(
-            "changes\tview\t{}\t{}\t{pinned}",
-            self.down.offset(),
-            self.picker,
-        ));
+        said.push(format!("changes\tview\t{}\t{pinned}", self.down.offset()));
         for (index, file) in self.files.iter().enumerate() {
             said.extend(self.said_file(index, file));
         }

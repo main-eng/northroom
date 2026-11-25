@@ -1,7 +1,6 @@
-//! Where the Changes tab puts its parts in its frame: the scope picker on the list's first line,
-//! the flat file list under it on the left and, on the right, one continuous diff of every listed
-//! file, each file a section that starts with a slim line naming it. A file's tools sit at its
-//! name line's right end; the line of the file in view stays pinned at the diff's top while its
+//! Where the Changes tab puts its parts in its frame: the flat file list on the left and, on the
+//! right, one continuous diff of every listed file, each file a section that starts with a slim
+//! line naming it. A file's tools sit at its name line's right end; the line of the file in view stays pinned at the diff's top while its
 //! section scrolls under it, until the next file's line pushes it up. A hunk's tools sit in a
 //! small strip at the right end of its first row, kept below the pinned line while the hunk shows.
 //! Frames are in the tab's points from its top-left; section offsets are points down the diff's
@@ -44,8 +43,6 @@ pub const NOWHERE: Frame = Frame {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frames {
-    /// The scope picker, the list's first line, which stays as the files scroll under it.
-    pub picker: Frame,
     pub list: Frame,
     pub diff: Frame,
 }
@@ -56,19 +53,12 @@ pub fn frames(width: f64, height: f64) -> Frames {
     let list_width = (width * LIST_SHARE)
         .clamp(LIST_NARROWEST, LIST_WIDEST)
         .min(width / 2.0);
-    let picker_height = (GAP + LIST_ROW).min(height);
     Frames {
-        picker: Frame {
+        list: Frame {
             x: 0.0,
             y: 0.0,
             width: list_width,
-            height: picker_height,
-        },
-        list: Frame {
-            x: 0.0,
-            y: picker_height,
-            width: list_width,
-            height: height - picker_height,
+            height,
         },
         diff: Frame {
             x: list_width,
@@ -337,7 +327,7 @@ mod tests {
     fn the_list_takes_a_share_of_the_width_and_the_diff_the_rest() {
         let laid = frames(1200.0, 800.0);
         assert_eq!(laid.list.width, 340.0);
-        assert_eq!(laid.list.y + laid.list.height, 800.0);
+        assert_eq!((laid.list.y, laid.list.height), (0.0, 800.0));
         assert_eq!(laid.diff.x, 340.0);
         assert_eq!(laid.diff.x + laid.diff.width, 1200.0);
         assert_eq!((laid.diff.y, laid.diff.height), (0.0, 800.0));
@@ -351,16 +341,6 @@ mod tests {
         let tiny = frames(0.0, 10.0);
         assert_eq!(tiny.diff.width, 0.0);
         assert_eq!(tiny.list.width, 0.0);
-    }
-
-    #[test]
-    fn the_picker_is_the_list_s_first_line_and_the_files_start_under_it() {
-        let laid = frames(1200.0, 800.0);
-        assert_eq!(laid.picker.y, 0.0);
-        assert_eq!(laid.picker.height, GAP + LIST_ROW);
-        assert_eq!(laid.picker.width, laid.list.width);
-        assert_eq!(laid.list.y, laid.picker.height);
-        assert_eq!(laid.list.y + laid.list.height, 800.0);
     }
 
     #[test]

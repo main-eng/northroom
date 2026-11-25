@@ -1,16 +1,15 @@
 //! Changes: what the terminals changed on disk in a folder while they worked there, credited
-//! to the terminal that made each change, and shown in a Changes tab until the person keeps it;
-//! beside it, what git says is uncommitted or differs from the default branch (CONTEXT.md,
-//! ADR-0002).
+//! to the terminal that made each change, and shown in a Changes tab until the person keeps it
+//! (CONTEXT.md, ADR-0002).
 //!
 //! A turn runs from a prompt to the agent's stop, read from Northroom's hooks, or for other
 //! programs from Return to the activity settling. Each turn has a snapshot of its folder at its
 //! start and end (`snapshot`), whose contents are kept once each in the app's data (`store`).
-//! The engine (`turns`) holds the turns, snapshots, what was kept and what git said; the view
-//! (`view`) lists and diffs them (`diff`) in the scope shown and keeps them, and `frames` places
-//! its parts; `actions` undoes on disk; `service` runs snapshots, git and the folder watcher off
-//! the UI thread, and keeps each root's `record`, what its list needs across restarts. A root is
-//! a repository's top folder, else the drive (`git`), so terminals anywhere in it share one tab.
+//! The engine (`turns`) holds the turns, snapshots and what was kept; the view (`view`) lists
+//! and diffs them (`diff`) and keeps them, and `frames` places its parts; `actions` undoes on
+//! disk; `service` runs snapshots and the folder watcher off the UI thread, and keeps each
+//! root's `record`, what its list needs across restarts. A root is a repository's top folder,
+//! else the drive (`git`), so terminals anywhere in it share one tab.
 
 pub mod ffi;
 

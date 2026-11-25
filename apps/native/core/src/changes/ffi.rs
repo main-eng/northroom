@@ -1,14 +1,12 @@
 //! The Changes tab's boundary (ADR-0001): what changed in a root (`changes`), listed and diffed
 //! by the core so the shell only draws. A Changes tab is a tab of the title bar's strip
-//! (`Columns::open_changes_tab`); everything here reads the root of the active one. Its picker,
-//! on the list's first line, chooses the scope (`view::Scope`): New (what agents changed since
-//! the person last kept it), Uncommitted and vs main (what git says differs). It shows a flat
-//! list of the files and one continuous diff of them all, a section per file; the file whose
-//! section holds the diff's top edge is in view, lit in the list, and its name line stays pinned
-//! at the diff's top. Under the pointer a name line ends in Keep and Undo for its file, and a
-//! hunk in a strip of the same two at its first row's right end; vs main is read only and has
-//! neither, Uncommitted has only Undo. Undo asks nothing: what it replaces goes to the Trash, and
-//! ⌘Z right after puts it back. A section collapses to its name line when the person folds it, or
+//! (`Columns::open_changes_tab`); everything here reads the root of the active one. It lists
+//! what agents changed since the person last kept it: a flat list of the files and one
+//! continuous diff of them all, a section per file; the file whose section holds the diff's top
+//! edge is in view, lit in the list, and its name line stays pinned at the diff's top. Under the
+//! pointer a name line ends in Keep and Undo for its file, and a hunk in a strip of the same two
+//! at its first row's right end. Undo asks nothing: what it replaces goes to the Trash, and ⌘Z
+//! right after puts it back. A section collapses to its name line when the person folds it, or
 //! when it starts so as noise (`view::starts_folded`). Text is borrowed UTF-8, valid until the
 //! next `nr_changes_load` (or the next call that returned it).
 //!
@@ -23,11 +21,10 @@
 //! - `nr_changes_shown() -> bool`: whether the active tab is a Changes tab
 //!   (`NrShellView.changes`).
 //! - `nr_changes_revision() -> u64`: changes whenever anything below may read differently.
-//! - `nr_changes_words() -> NrChangesWords`: every fixed word the screen draws.
-//! - `nr_changes_load() -> NrChangesLoaded`: lists every file of the scope shown, with its
-//!   diff, and says which is in view and the offset that keeps it so.
-//! - `nr_changes_picker() -> NrChangesPicker`: the picker's words ("New · 4") and what an empty
-//!   scope says; `menu_changes_scope()` is its menu (`NrMenu::ChangesScope`).
+//! - `nr_changes_words() -> NrChangesWords`: every fixed word the screen draws, with what it
+//!   says when nothing is listed.
+//! - `nr_changes_load() -> NrChangesLoaded`: lists every file, with its diff, and says which is
+//!   in view and the offset that keeps it so.
 //! - `nr_changes_file(index, *mut NrChangesFile) -> bool`: one file: its row and its section.
 //! - `nr_changes_texts(index) -> NrChangesTexts`: its extension and both sides' texts for
 //!   `nr_syntax_call`.
@@ -44,11 +41,10 @@
 //! - `nr_changes_hit(offset, x, y) -> NrChangesHit`: what a point is on: a name line's tool, a
 //!   name line, which a click folds (`nr_changes_fold`, ⌥ every file), a hunk's tool or a hunk.
 //! - `nr_changes_key(NrKeyPress) -> NrChangesKey`: J/K or Down/Up files, N/P hunks, X folds the
-//!   file in view (⌥X every file), ⌘1–⌘3 scopes, ⌘Y keeps the current hunk and ⌘⌥Z undoes it
+//!   file in view (⌥X every file), ⌘Y keeps the current hunk and ⌘⌥Z undoes it
 //!   (⌘⇧Y and ⌘⇧⌥Z its whole file), ⌘Z puts the last Undo back.
 //! - The tools: `nr_changes_file_tool(index, tool)` and `nr_changes_hunk_tool(hunk, tool)`, each
-//!   `-> NrMenuEffect` (a redraw, or a notice of why it failed); Keep all and Undo all are in
-//!   the picker's menu.
+//!   `-> NrMenuEffect` (a redraw, or a notice of why it failed).
 //!
 //! Beside these: `NrShellView.changes` (`nr_shell_view`), the `changes` flag of
 //! `nr_window_layout`, tab kind 6 with the `diff` glyph, and the menus' Show Changes (View
@@ -60,11 +56,10 @@ use crate::changes::frames::{self, Sections};
 use crate::changes::git;
 use crate::changes::service::Service;
 use crate::changes::turns::{relative_to, Engine, Signal, TurnTap};
-use crate::changes::view::{self, FileRow, Scope, Status, ViewState};
+use crate::changes::view::{self, FileRow, Status, ViewState};
 use crate::ffi::{interface_language, text_of, with_columns, NrKey, NrKeyPress, NrRect, NrText};
 use crate::glyph::Glyph;
 use crate::menus::ffi::NrMenuEffect;
-use crate::menus::{self, Entry, Shortcut};
 use crate::strings::{self, key};
 use crate::Relock;
 use std::ffi::c_char;
@@ -168,7 +163,7 @@ pub extern "C" fn nr_changes_open_current() {
     }
 }
 
-/// How many files the list Review changes opens holds: the New list of the root with the latest
+/// How many files the list Review changes opens holds: the list of the root with the latest
 /// turn, else of the folder on screen.
 fn waiting() -> usize {
     current_folder().map_or(0, |folder| service().waiting(&root_of(&folder)))
@@ -248,9 +243,11 @@ pub extern "C" fn nr_changes_revision() -> u64 {
 
 // MARK: Words
 
-/// Every fixed word the tab draws besides its tools' tooltips and its picker's.
+/// Every fixed word the tab draws besides its tools' tooltips.
 #[repr(C)]
 pub struct NrChangesWords {
+    /// What the tab says with nothing listed.
+    pub empty: NrText,
     /// After a file's name line when its diff gave up.
     pub whole: NrText,
     /// A row's ending for a file without a line diff: new, changed or deleted.
@@ -271,6 +268,7 @@ fn say(word: strings::Key) -> NrText {
 #[no_mangle]
 pub extern "C" fn nr_changes_words() -> NrChangesWords {
     NrChangesWords {
+        empty: say(key::CHANGES_EMPTY),
         whole: say(key::CHANGES_WHOLE),
         new: say(key::CHANGES_NEW),
         changed: say(key::CHANGES_CHANGED),
@@ -351,12 +349,11 @@ impl Section {
     }
 
     /// Its name line's tools, left to right: while the pointer is over the line (`hovered`),
-    /// Keep where `scope` keeps and Undo where it undoes (`hover_tools`); then Open for a file
-    /// without diff lines that is still there, last so it keeps its place as the others come
-    /// and go.
-    fn line_tools(&self, hovered: bool, scope: Scope) -> Vec<NrChangesTool> {
+    /// Keep and Undo (`HOVER_TOOLS`); then Open for a file without diff lines that is still
+    /// there, last so it keeps its place as the others come and go.
+    fn line_tools(&self, hovered: bool) -> Vec<NrChangesTool> {
         let shown = match hovered {
-            true => hover_tools(scope),
+            true => HOVER_TOOLS.to_vec(),
             false => Vec::new(),
         };
         let open = self.openable().then_some(NrChangesTool::Open);
@@ -436,15 +433,10 @@ struct HunkPlace {
     bottom: f64,
 }
 
-/// What `nr_changes_load` listed: the scope shown and its picker's words, every file's section,
-/// where each starts and each hunk sits, and the file in view at the diff's last reported
-/// offset.
+/// What `nr_changes_load` listed: every file's section, where each starts and each hunk sits,
+/// and the file in view at the diff's last reported offset.
 struct Loaded {
     root: Option<PathBuf>,
-    scope: Scope,
-    /// The picker's words ("New · 4") and what the scope says with nothing listed.
-    picker: String,
-    empty: String,
     files: Vec<Section>,
     sections: Sections,
     /// Every shown hunk, in order down the diff; a collapsed file's are passed over.
@@ -502,7 +494,7 @@ impl Loaded {
     fn line_tools(&self, index: usize, hovered: bool) -> Vec<NrChangesTool> {
         self.files
             .get(index)
-            .map_or_else(Vec::new, |file| file.line_tools(hovered, self.scope))
+            .map_or_else(Vec::new, |file| file.line_tools(hovered))
     }
 
     fn position(&self, path: &str) -> Option<usize> {
@@ -555,13 +547,10 @@ impl Loaded {
     }
 
     /// Hunk `index`'s strip with the diff scrolled to `offset`: the strip and each tool with its
-    /// frame; `None` for a scope without hunk tools.
+    /// frame; `None` past the last hunk.
     fn strip(&self, index: usize, offset: f64) -> Option<(Frame, Vec<(NrChangesTool, Frame)>)> {
         let place = self.hunks.get(index)?;
-        let tools = hover_tools(self.scope);
-        if tools.is_empty() {
-            return None;
-        }
+        let tools = HOVER_TOOLS;
         let diff = self.laid.diff;
         let floor = self
             .sections
@@ -607,9 +596,6 @@ enum Found {
 
 static LOADED: Mutex<Loaded> = Mutex::new(Loaded {
     root: None,
-    scope: Scope::New,
-    picker: String::new(),
-    empty: String::new(),
     files: Vec::new(),
     sections: Sections::empty(),
     hunks: Vec::new(),
@@ -618,7 +604,6 @@ static LOADED: Mutex<Loaded> = Mutex::new(Loaded {
     offset: 0.0,
     keys: 0,
     laid: frames::Frames {
-        picker: frames::NOWHERE,
         list: frames::NOWHERE,
         diff: frames::NOWHERE,
     },
@@ -667,48 +652,13 @@ pub struct NrChangesLoaded {
     pub offset: f64,
 }
 
-/// The scope `root`'s tab shows, its picker's words for `count` files, and what it says with
-/// none.
-fn scope_words(engine: &Engine, root: &Path, count: usize) -> (Scope, String, String) {
-    let language = interface_language();
-    let Some(watched) = engine.roots.get(root) else {
-        return (Scope::New, String::new(), String::new());
-    };
-    let scope = view::shown_scope(watched);
-    let branch = view::branch_name(watched).unwrap_or_default();
-    let picker = strings::format(
-        language,
-        key::CHANGES_PICKER,
-        &[
-            ("scope", &scope_name(scope, branch, language)),
-            ("count", &count.to_string()),
-        ],
-    );
-    let empty = match scope {
-        Scope::New => strings::text(language, key::CHANGES_EMPTY).to_owned(),
-        Scope::Uncommitted => strings::text(language, key::CHANGES_EMPTY_UNCOMMITTED).to_owned(),
-        Scope::Branch => strings::format(language, key::CHANGES_EMPTY_BRANCH, &[("name", branch)]),
-    };
-    (scope, picker, empty)
-}
-
-/// What the picker calls `scope`; vs main by the default branch's name, `branch`.
-fn scope_name(scope: Scope, branch: &str, language: &str) -> String {
-    match scope {
-        Scope::New => strings::text(language, key::CHANGES_SCOPE_NEW).to_owned(),
-        Scope::Uncommitted => strings::text(language, key::CHANGES_SCOPE_UNCOMMITTED).to_owned(),
-        Scope::Branch => strings::format(language, key::CHANGES_SCOPE_BRANCH, &[("name", branch)]),
-    }
-}
-
-/// Lists the active Changes tab's files and their diffs, in the scope it shows.
+/// Lists the active Changes tab's files and their diffs.
 #[no_mangle]
 pub extern "C" fn nr_changes_load() -> NrChangesLoaded {
     let root = shown_root();
-    let (rows, in_view, within, view, words) = service().read(|engine| {
+    let (rows, in_view, within, view) = service().read(|engine| {
         let Some(root) = root.as_deref() else {
-            let words = (Scope::New, String::new(), String::new());
-            return (Vec::new(), None, 0.0, None, words);
+            return (Vec::new(), None, 0.0, None);
         };
         let rows = view::list(engine, root);
         let in_view = view::shown_selection(engine, root, &rows);
@@ -717,11 +667,9 @@ pub extern "C" fn nr_changes_load() -> NrChangesLoaded {
             .as_ref()
             .filter(|view| view.selected == in_view)
             .map_or(0.0, |view| view.within);
-        let words = scope_words(engine, root, rows.len());
-        (rows, in_view, within, view, words)
+        (rows, in_view, within, view)
     });
     let mut loaded = LOADED.relock();
-    (loaded.scope, loaded.picker, loaded.empty) = words;
     loaded.reload(root, rows, view.as_ref());
     let index = in_view.and_then(|path| loaded.position(&path));
     loaded.in_view = index;
@@ -731,23 +679,6 @@ pub extern "C" fn nr_changes_load() -> NrChangesLoaded {
         files: loaded.files.len(),
         in_view: index.map_or(-1, |index| index as i64),
         offset: loaded.offset,
-    }
-}
-
-/// The picker's words as last loaded ("New · 4", "vs main · 2") and what the scope says with
-/// nothing listed ("No uncommitted changes.").
-#[repr(C)]
-pub struct NrChangesPicker {
-    pub label: NrText,
-    pub empty: NrText,
-}
-
-#[no_mangle]
-pub extern "C" fn nr_changes_picker() -> NrChangesPicker {
-    let loaded = LOADED.relock();
-    NrChangesPicker {
-        label: NrText::borrowing(&loaded.picker),
-        empty: NrText::borrowing(&loaded.empty),
     }
 }
 
@@ -1194,7 +1125,6 @@ enum Asked {
     Hunk(i64),
     /// Collapse or expand the file in view, or with `true` every file.
     Fold(bool),
-    Scope(Scope),
     Keep(Reach),
     Undo(Reach),
     /// Put the last Undo back.
@@ -1228,7 +1158,7 @@ fn asked(press: &NrKeyPress) -> Option<Asked> {
     }
 }
 
-/// ⌘1, ⌘2 and ⌘3 show New, Uncommitted and vs main; ⌘Y keeps the current hunk and ⌘⇧Y the file
+/// ⌘Y keeps the current hunk and ⌘⇧Y the file
 /// in view; ⌘⌥Z undoes the current hunk and ⌘⇧⌥Z the file in view; ⌘Z puts the last Undo back.
 /// Other ⌘ keys pass on (⌘X stays Cut).
 fn commanded(press: &NrKeyPress) -> Option<Asked> {
@@ -1240,9 +1170,6 @@ fn commanded(press: &NrKeyPress) -> Option<Asked> {
         false => Reach::Hunk,
     };
     match (press.letter()?, option) {
-        ('1', false) if !shift => Some(Asked::Scope(Scope::New)),
-        ('2', false) if !shift => Some(Asked::Scope(Scope::Uncommitted)),
-        ('3', false) if !shift => Some(Asked::Scope(Scope::Branch)),
         ('y', false) => Some(Asked::Keep(reach)),
         ('z', true) => Some(Asked::Undo(reach)),
         ('z', false) if !shift => Some(Asked::Restore),
@@ -1258,7 +1185,6 @@ pub extern "C" fn nr_changes_key(press: NrKeyPress) -> NrChangesKey {
     };
     match asked {
         Asked::File(_) | Asked::Hunk(_) | Asked::Fold(_) => step(asked),
-        Asked::Scope(scope) => acted_by_key(choose_scope(scope)),
         Asked::Keep(reach) | Asked::Undo(reach) => acted_by_key(act_by_key(asked, reach)),
         Asked::Restore if nothing_to_restore() => answer(NrChangesKeyEffect::PassOn, 0.0),
         Asked::Restore => acted_by_key(restore_last()),
@@ -1285,7 +1211,7 @@ fn step(asked: Asked) -> NrChangesKey {
             loaded.stepped = Some(stepped);
             stepped.1
         }),
-        Asked::Fold(_) | Asked::Scope(_) | Asked::Keep(_) | Asked::Undo(_) | Asked::Restore => None,
+        Asked::Fold(_) | Asked::Keep(_) | Asked::Undo(_) | Asked::Restore => None,
     };
     scroll_to(offset.unwrap_or(loaded.offset))
 }
@@ -1375,11 +1301,6 @@ fn listed_at(path: &str) -> Option<(PathBuf, Vec<FileRow>, FileRow)> {
     })
 }
 
-/// The scope `root`'s tab shows.
-fn scope_of(root: &Path) -> Scope {
-    service().read(|engine| engine.roots.get(root).map_or(Scope::New, view::shown_scope))
-}
-
 /// Brings the file after `row` into view once it leaves the list, at its top, so looking goes
 /// on down the diff; only when it was the file in view.
 fn move_past(root: &Path, rows: &[FileRow], row: &FileRow) {
@@ -1397,28 +1318,19 @@ fn move_past(root: &Path, rows: &[FileRow], row: &FileRow) {
     });
 }
 
-/// Shows `scope` in the active tab, when offered.
-fn choose_scope(scope: Scope) -> Outcome {
-    let Some(root) = shown_root() else {
-        return Ok(false);
-    };
-    Ok(service().change(|engine| view::choose(engine, &root, scope)))
-}
-
 /// Runs `tool` on listed file `index`: Keep or Undo the whole file, or Open it.
 fn use_file_tool(index: usize, tool: NrChangesTool) -> Outcome {
     let Some((root, rows, row)) = listed(index) else {
         return Ok(false);
     };
-    let scope = scope_of(&root);
     match tool {
         NrChangesTool::Open => Ok(nr_changes_open_file(index)),
-        NrChangesTool::Keep if scope.keeps() => {
+        NrChangesTool::Keep => {
             move_past(&root, &rows, &row);
             let now_ms = service().now_ms();
             Ok(service().change(|engine| view::keep_file(engine, &root, &row.change.path, now_ms)))
         }
-        NrChangesTool::Undo if scope.undoes() => {
+        NrChangesTool::Undo => {
             let undone = with_trash(|trash| {
                 actions::undo_file(&root, &row.change, service().store(), trash)
             });
@@ -1427,7 +1339,6 @@ fn use_file_tool(index: usize, tool: NrChangesTool) -> Outcome {
             remember_undone(&root, vec![undone]);
             Ok(true)
         }
-        NrChangesTool::Keep | NrChangesTool::Undo => Ok(false),
     }
 }
 
@@ -1436,10 +1347,9 @@ fn use_hunk_tool(index: usize, tool: NrChangesTool) -> Outcome {
     let Some((root, path, hunk)) = hunk_of(index) else {
         return Ok(false);
     };
-    let scope = scope_of(&root);
     let service = service();
     match tool {
-        NrChangesTool::Keep if scope.keeps() => {
+        NrChangesTool::Keep => {
             let now_ms = service.now_ms();
             let kept = service.change(|engine| {
                 let file = (root.as_path(), path.as_str());
@@ -1447,7 +1357,7 @@ fn use_hunk_tool(index: usize, tool: NrChangesTool) -> Outcome {
             });
             kept.map_err(|error| keep_failed(&error))
         }
-        NrChangesTool::Undo if scope.undoes() => {
+        NrChangesTool::Undo => {
             let Some((_, _, row)) = listed_at(&path) else {
                 return Ok(false);
             };
@@ -1462,7 +1372,7 @@ fn use_hunk_tool(index: usize, tool: NrChangesTool) -> Outcome {
             remember_undone(&root, vec![undone.map_err(|error| undo_failed(&error))?]);
             Ok(true)
         }
-        NrChangesTool::Open | NrChangesTool::Keep | NrChangesTool::Undo => Ok(false),
+        NrChangesTool::Open => Ok(false),
     }
 }
 
@@ -1524,29 +1434,6 @@ fn restore_last() -> Outcome {
         .map_err(|error| undo_failed(&error))
 }
 
-/// Keeps every file New lists (Keep all).
-fn keep_all() -> Outcome {
-    let Some(root) = shown_root().filter(|root| scope_of(root).keeps()) else {
-        return Ok(false);
-    };
-    let now_ms = service().now_ms();
-    service().change(|engine| view::keep_all(engine, &root, now_ms));
-    Ok(true)
-}
-
-/// Undoes every file New lists (Undo all), each kept in the trash first; ⌘Z puts them back.
-fn undo_all() -> Outcome {
-    let Some(root) = shown_root().filter(|root| scope_of(root) == Scope::New) else {
-        return Ok(false);
-    };
-    let rows = service().read(|engine| view::list(engine, &root));
-    let changes: Vec<_> = rows.into_iter().map(|row| row.change).collect();
-    let (undone, done) =
-        with_trash(|trash| actions::undo_files(&root, &changes, service().store(), trash));
-    remember_undone(&root, undone);
-    done.map(|()| true).map_err(|error| undo_failed(&error))
-}
-
 /// Runs `tool` of listed file `index`'s name line: Keep or Undo the file, or Open it. The
 /// effect is a redraw, or a notice of why it failed.
 #[no_mangle]
@@ -1584,70 +1471,6 @@ fn nr_changes_open_file(index: usize) -> bool {
     }
 }
 
-// MARK: The picker's menu
-
-/// The picker's entries' ids.
-const SCOPE_ENTRIES: [(&str, Scope, char); 3] = [
-    ("scope:new", Scope::New, '1'),
-    ("scope:uncommitted", Scope::Uncommitted, '2'),
-    ("scope:branch", Scope::Branch, '3'),
-];
-const KEEP_ALL_ENTRY: &str = "keep-all";
-const UNDO_ALL_ENTRY: &str = "undo-all";
-/// The picker's menu is as wide as this at least.
-const SCOPE_MENU_WIDTH: f64 = 200.0;
-
-/// The picker's menu (`NrMenu::ChangesScope`): each scope the root offers, the shown one
-/// ticked, with its key; then, below a line, what applies to every file of the scope: Keep all
-/// and Undo all in New, nothing in the git scopes.
-pub fn menu_changes_scope() -> menus::Menu {
-    let language = interface_language();
-    let Some(root) = shown_root() else {
-        return menus::Menu::new("", Vec::new());
-    };
-    let (offered, shown, branch, count) = service().read(|engine| {
-        let Some(watched) = engine.roots.get(&root) else {
-            return (vec![Scope::New], Scope::New, String::new(), 0);
-        };
-        let branch = view::branch_name(watched).unwrap_or_default().to_owned();
-        let count = view::list(engine, &root).len();
-        (
-            view::offered(watched),
-            view::shown_scope(watched),
-            branch,
-            count,
-        )
-    });
-    let mut entries: Vec<Entry> = SCOPE_ENTRIES
-        .iter()
-        .filter(|(_, scope, _)| offered.contains(scope))
-        .map(|(id, scope, number)| {
-            Entry::item(*id, scope_name(*scope, &branch, language))
-                .written_keys(Shortcut::command(*number))
-                .ticked(*scope == shown)
-        })
-        .collect();
-    if shown == Scope::New {
-        entries.push(Entry::separator());
-        let say = |words| strings::text(language, words);
-        entries.push(Entry::item(KEEP_ALL_ENTRY, say(key::CHANGES_KEEP_ALL)).enabled(count > 0));
-        entries.push(Entry::item(UNDO_ALL_ENTRY, say(key::CHANGES_UNDO_ALL)).enabled(count > 0));
-    }
-    menus::Menu::new("", entries).wide(SCOPE_MENU_WIDTH)
-}
-
-/// Runs entry `id` of the picker's menu.
-pub(crate) fn run_scope_entry(id: &str) -> Outcome {
-    if let Some((_, scope, _)) = SCOPE_ENTRIES.iter().find(|(entry, _, _)| *entry == id) {
-        return choose_scope(*scope);
-    }
-    match id {
-        KEEP_ALL_ENTRY => keep_all(),
-        UNDO_ALL_ENTRY => undo_all(),
-        _ => Ok(false),
-    }
-}
-
 // MARK: Frames and tools
 
 /// A tool of a name line or a hunk's strip.
@@ -1656,10 +1479,9 @@ pub(crate) fn run_scope_entry(id: &str) -> Outcome {
 pub enum NrChangesTool {
     /// Opens the file in a tab; only on the name line of a file without diff lines.
     Open,
-    /// Takes the change into what the file is diffed from (New only).
+    /// Takes the change into what the file is diffed from.
     Keep,
-    /// Puts the file or hunk back as it is diffed from, its version now in the trash (not vs
-    /// main).
+    /// Puts the file or hunk back as it is diffed from, its version now in the trash.
     Undo,
 }
 
@@ -1684,13 +1506,8 @@ impl NrChangesTool {
     }
 }
 
-/// The tools under the pointer in `scope`, on a name line or a hunk: Keep where it keeps, then
-/// Undo where it undoes; none in vs main.
-fn hover_tools(scope: Scope) -> Vec<NrChangesTool> {
-    let keep = scope.keeps().then_some(NrChangesTool::Keep);
-    let undo = scope.undoes().then_some(NrChangesTool::Undo);
-    keep.into_iter().chain(undo).collect()
-}
+/// The tools under the pointer, on a name line or a hunk: Keep, then Undo.
+const HOVER_TOOLS: [NrChangesTool; 2] = [NrChangesTool::Keep, NrChangesTool::Undo];
 
 /// A tool: what it does, where it sits, and its glyph's name and tooltip.
 #[repr(C)]
@@ -1769,7 +1586,7 @@ pub struct NrChangesStrip {
 }
 
 /// Hunk `hunk`'s strip, as last loaded, with the diff scrolled to `offset`; not shown past the
-/// last, or in vs main, which has no tools.
+/// last.
 #[no_mangle]
 pub extern "C" fn nr_changes_strip(hunk: usize, offset: f64) -> NrChangesStrip {
     let loaded = LOADED.relock();
@@ -1878,14 +1695,13 @@ fn hit_of(found: Option<Found>) -> NrChangesHit {
     }
 }
 
-/// Where the tab's parts go in its frame, in the tab's points (`changes::frames`): the picker
-/// on the list's first line, the file list under it and the diff; the diff's scrolling
+/// Where the tab's parts go in its frame, in the tab's points (`changes::frames`): the file list
+/// and the diff; the diff's scrolling
 /// `extent`; `relaid` when its rows now wrap differently, so the shell loads again; the height
 /// of a list row, a diff line and a file's name line; and the inset and gap between controls.
 #[repr(C)]
 pub struct NrChangesFrames {
     pub relaid: bool,
-    pub picker: NrRect,
     pub list: NrRect,
     pub diff: NrRect,
     pub extent: f64,
@@ -1920,7 +1736,6 @@ pub extern "C" fn nr_changes_frames(width: f64, height: f64, advance: f64) -> Nr
     }
     NrChangesFrames {
         relaid,
-        picker: rect_of(laid.picker),
         list: rect_of(laid.list),
         diff: rect_of(laid.diff),
         extent: loaded.sections.extent(laid.diff.height),
@@ -2091,16 +1906,8 @@ mod tests {
 
     /// A Loaded of `files`, laid out as `view` folds them.
     fn loaded(files: Vec<Section>, view: &ViewState) -> Loaded {
-        loaded_in(Scope::New, files, view)
-    }
-
-    /// A Loaded of `files` in `scope`, laid out as `view` folds them.
-    fn loaded_in(scope: Scope, files: Vec<Section>, view: &ViewState) -> Loaded {
         let mut loaded = Loaded {
             root: None,
-            scope,
-            picker: String::new(),
-            empty: String::new(),
             stepped: None,
             files,
             sections: Sections::empty(),
@@ -2153,15 +1960,11 @@ mod tests {
         let picture = section("shot.png", Status::Added, 0, &[]);
         let gone = section("old.png", Status::Deleted, 0, &[]);
         use NrChangesTool::{Keep, Open, Undo};
-        assert!(lined.line_tools(false, Scope::New).is_empty());
-        assert_eq!(lined.line_tools(true, Scope::New), [Keep, Undo]);
-        assert_eq!(picture.line_tools(false, Scope::New), [Open]);
-        assert_eq!(picture.line_tools(true, Scope::New), [Keep, Undo, Open]);
-        assert_eq!(gone.line_tools(true, Scope::New), [Keep, Undo]);
-        // Uncommitted only undoes; vs main is read only.
-        assert_eq!(lined.line_tools(true, Scope::Uncommitted), [Undo]);
-        assert!(lined.line_tools(true, Scope::Branch).is_empty());
-        assert_eq!(picture.line_tools(true, Scope::Branch), [Open]);
+        assert!(lined.line_tools(false).is_empty());
+        assert_eq!(lined.line_tools(true), [Keep, Undo]);
+        assert_eq!(picture.line_tools(false), [Open]);
+        assert_eq!(picture.line_tools(true), [Keep, Undo, Open]);
+        assert_eq!(gone.line_tools(true), [Keep, Undo]);
         let tips = |reach| -> Vec<&str> {
             [Keep, Undo, Open]
                 .map(|tool| strings::text("en", tool.tip(reach)))
@@ -2172,7 +1975,7 @@ mod tests {
             ["Keep file (⌘⇧Y)", "Undo file (⌘⇧⌥Z)", "Open"]
         );
         assert_eq!(tips(Reach::Hunk)[..2], ["Keep (⌘Y)", "Undo (⌘⌥Z)"]);
-        assert_eq!(picture.line_tools(true, Scope::New).len(), MOST_LINE_TOOLS);
+        assert_eq!(picture.line_tools(true).len(), MOST_LINE_TOOLS);
     }
 
     #[test]
@@ -2208,18 +2011,18 @@ mod tests {
     }
 
     /// Two text files of 30 rows, a hunk header at rows 0 and 15 of the first and 0 of the
-    /// second, in `scope`.
-    fn two_hunked(scope: Scope) -> Loaded {
+    /// second.
+    fn two_hunked() -> Loaded {
         let files = vec![
             section("a.txt", Status::Modified, 30, &[0, 15]),
             section("b.txt", Status::Modified, 30, &[0]),
         ];
-        loaded_in(scope, files, &ViewState::default())
+        loaded(files, &ViewState::default())
     }
 
     #[test]
     fn a_hunk_under_the_pointer_shows_keep_and_undo_at_its_first_row_s_right_end() {
-        let laid = two_hunked(Scope::New);
+        let laid = two_hunked();
         assert_eq!(laid.hunks.len(), 3);
         let first = laid.hunks[0];
         assert_eq!((first.file, first.top), (0, frames::SEPARATOR));
@@ -2253,39 +2056,13 @@ mod tests {
         let offset = first.top + 4.0 * frames::DIFF_LINE;
         let (strip, _) = laid.strip(0, offset).expect("a strip");
         assert_eq!(strip.y, diff.y + frames::SEPARATOR);
-        // Uncommitted has Undo alone.
-        let uncommitted = two_hunked(Scope::Uncommitted);
-        let (_, tools) = uncommitted.strip(0, 0.0).expect("a strip");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].0, NrChangesTool::Undo);
-    }
-
-    #[test]
-    fn vs_main_is_read_only_with_no_keep_or_undo_to_hit() {
-        let laid = two_hunked(Scope::Branch);
-        assert_eq!(laid.strip(0, 0.0), None);
-        let diff = laid.laid.diff;
-        // Where Keep and Undo would be, on a hunk's first row: only the hunk.
-        let (_, tools) = two_hunked(Scope::New).strip(0, 0.0).expect("a strip");
-        for (_, frame) in tools {
-            let middle = (frame.x + frame.width / 2.0, frame.y + frame.height / 2.0);
-            assert_eq!(laid.hunk_hit(0.0, middle), Some(Found::Hunk(0)));
-        }
-        // A name line has no tools either: the whole line folds.
-        let end = frames::tools_end(diff);
-        for slot in 0..3 {
-            let x = end - (f64::from(slot) + 0.5) * frames::LINE_TOOL;
-            let found = frames::hit(&laid.sections, diff, 0.0, (x, 16.0), |index| {
-                laid.line_tools(index, true)
-            });
-            assert_eq!(found.map(|(hit, _)| hit), Some(frames::Hit::Line(0)));
-        }
-        assert_eq!(hover_tools(Scope::Branch), []);
+        // Past the last hunk there is none.
+        assert_eq!(laid.strip(3, 0.0), None);
     }
 
     #[test]
     fn the_current_hunk_is_the_one_stepped_to_else_the_first_shown_below_the_pinned_line() {
-        let mut laid = two_hunked(Scope::New);
+        let mut laid = two_hunked();
         assert_eq!(laid.current_hunk(), Some(0));
         // Scrolled past most of the first hunk: still it, while a row shows under the line.
         laid.offset = laid.hunks[0].bottom - frames::SEPARATOR - 1.0;
@@ -2304,47 +2081,6 @@ mod tests {
         assert_eq!(laid.current_hunk(), Some(1));
         laid.offset += 40.0;
         assert_eq!(laid.stepped_now(), None);
-    }
-
-    #[test]
-    fn the_picker_says_the_scope_and_its_count_and_each_scope_its_empty_words() {
-        use crate::changes::git::{DefaultBranch, Repository};
-        let mut engine = Engine::default();
-        let root = Path::new("/p");
-        engine.watch_root(root, || None);
-        let words = |engine: &Engine, count| {
-            let (_, picker, empty) = scope_words(engine, root, count);
-            (picker, empty)
-        };
-        assert_eq!(
-            words(&engine, 4),
-            (
-                "New · 4".to_owned(),
-                "Nothing new from your agents.".to_owned()
-            )
-        );
-        let main = DefaultBranch {
-            name: "main".into(),
-            reference: "refs/heads/main".into(),
-        };
-        let repository = Repository {
-            uncommitted: Default::default(),
-            branch: Some((main, Default::default())),
-        };
-        engine.git_read(root, Some(repository));
-        assert!(view::choose(&mut engine, root, Scope::Uncommitted));
-        assert_eq!(
-            words(&engine, 0),
-            (
-                "Uncommitted · 0".to_owned(),
-                "No uncommitted changes.".to_owned()
-            )
-        );
-        assert!(view::choose(&mut engine, root, Scope::Branch));
-        assert_eq!(
-            words(&engine, 2),
-            ("vs main · 2".to_owned(), "No changes vs main.".to_owned())
-        );
     }
 
     #[test]
@@ -2401,12 +2137,11 @@ mod tests {
         assert_eq!(asked(&press(NrKey::Other, 'x')), Some(Asked::Fold(false)));
         assert_eq!(asked(&held(NR_HELD_OPTION, 'x')), Some(Asked::Fold(true)));
         assert_eq!(asked(&held(NR_HELD_COMMAND, 'x')), None);
-        // ⌘1 to ⌘3 choose the scope.
+        // ⌘1 to ⌘4 pass on.
         let command = |key| held(NR_HELD_COMMAND, key);
-        assert_eq!(asked(&command('1')), Some(Asked::Scope(Scope::New)));
-        assert_eq!(asked(&command('2')), Some(Asked::Scope(Scope::Uncommitted)));
-        assert_eq!(asked(&command('3')), Some(Asked::Scope(Scope::Branch)));
-        assert_eq!(asked(&command('4')), None);
+        for number in ['1', '2', '3', '4'] {
+            assert_eq!(asked(&command(number)), None);
+        }
         // ⌘Y keeps and ⌘⌥Z undoes the current hunk; with ⇧, the file in view.
         assert_eq!(asked(&command('y')), Some(Asked::Keep(Reach::Hunk)));
         let shift = NR_HELD_COMMAND | NR_HELD_SHIFT;
@@ -2419,12 +2154,5 @@ mod tests {
         assert_eq!(asked(&command('z')), Some(Asked::Restore));
         assert_eq!(asked(&held(shift, 'z')), None);
         assert_eq!(asked(&held(NR_HELD_COMMAND | NR_HELD_CONTROL, 'y')), None);
-    }
-
-    #[test]
-    fn the_picker_s_menu_ids_name_each_scope_once() {
-        let ids: Vec<&str> = SCOPE_ENTRIES.iter().map(|(id, _, _)| *id).collect();
-        assert_eq!(ids, ["scope:new", "scope:uncommitted", "scope:branch"]);
-        assert!(!ids.contains(&KEEP_ALL_ENTRY) && !ids.contains(&UNDO_ALL_ENTRY));
     }
 }

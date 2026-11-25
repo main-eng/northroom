@@ -1,8 +1,8 @@
 //! What the Changes tab does to the files on disk: Undo puts a file, or one hunk of it, back as
-//! it is diffed from (the version an agent started from in New, the last commit in
-//! Uncommitted), and ⌘Z right after puts the Undo back (`restore`). Undo asks nothing first:
-//! before it writes over a file, the file's version then goes to the system Trash, as the
-//! drive's own deletes do, and its bytes to the store, so nothing is lost for good (ADR-0002).
+//! it is diffed from (the version an agent started from, or what the person last kept), and ⌘Z
+//! right after puts the Undo back (`restore`). Undo asks nothing first: before it writes over a
+//! file, the file's version then goes to the system Trash, as the drive's own deletes do, and
+//! its bytes to the store, so nothing is lost for good (ADR-0002).
 
 use crate::changes::diff::{self, Hunk};
 use crate::changes::store::{Hash, Store};
@@ -123,24 +123,6 @@ pub fn undo_hunk(
         before: Some(before),
         after: Some(store.put(undone.as_bytes())?),
     })
-}
-
-/// Undoes every file of `changes` in `root` (Undo all), stopping at the first that fails.
-/// Returns what was undone, for ⌘Z, and the failure.
-pub fn undo_files(
-    root: &Path,
-    changes: &[FileChange],
-    store: &Store,
-    trash: Option<Trash>,
-) -> (Vec<Undone>, Result<(), ActionError>) {
-    let mut undone = Vec::new();
-    for change in changes {
-        match undo_file(root, change, store, trash) {
-            Ok(file) => undone.push(file),
-            Err(error) => return (undone, Err(error)),
-        }
-    }
-    (undone, Ok(()))
 }
 
 /// Puts back what `undone` replaced, as ⌘Z right after an Undo does; refuses when the file
@@ -391,37 +373,6 @@ mod tests {
         ));
         assert_eq!(at.read(), "other\n");
         assert!(ActionError::ContextChanged.say("en").contains("changed"));
-    }
-
-    #[test]
-    fn undo_all_undoes_every_file_and_command_z_puts_them_all_back() {
-        let at = setup();
-        let trash = |path: &Path| at.bin.trash(path);
-        let root = at.folder.path();
-        fs::write(root.join("a.txt"), "a!").expect("write");
-        fs::write(root.join("b.txt"), "b!").expect("write");
-        let changes = [
-            FileChange {
-                path: "a.txt".into(),
-                before: kept(&at.store, "a"),
-                after: kept(&at.store, "a!"),
-            },
-            FileChange {
-                path: "b.txt".into(),
-                before: None,
-                after: kept(&at.store, "b!"),
-            },
-        ];
-        let (undone, done) = undo_files(root, &changes, &at.store, Some(&trash));
-        done.expect("undone");
-        assert_eq!(at.read(), "a");
-        assert!(!root.join("b.txt").exists());
-        assert_eq!(*at.bin.took.borrow(), ["a!", "b!"]);
-        for file in undone.iter().rev() {
-            restore(file, &at.store, Some(&trash)).expect("restore");
-        }
-        assert_eq!(at.read(), "a!");
-        assert_eq!(fs::read_to_string(root.join("b.txt")).expect("b"), "b!");
     }
 
     #[test]

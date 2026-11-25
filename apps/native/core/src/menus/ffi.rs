@@ -217,8 +217,6 @@ pub enum NrMenu {
     Tab,
     /// The title bar sessions button's menu (`menu_sessions`).
     Sessions,
-    /// A Changes tab's scope picker (`changes::ffi::menu_changes_scope`).
-    ChangesScope,
 }
 
 fn bar_state(update_label: &str) -> menus::BarState<'_> {
@@ -644,7 +642,6 @@ pub unsafe extern "C" fn nr_menu_run(which: NrMenu, id: *const c_char) -> NrMenu
             (_, Some(file)) => end_session_or_ask(file),
             _ => menus::bar_command(&id).map_or(Effect::Nothing, run_bar),
         },
-        NrMenu::ChangesScope => outcome_effect(crate::changes::ffi::run_scope_entry(&id)),
         NrMenu::PageBlock => menus::page_block_command(&id).map_or(Effect::Nothing, |command| {
             crate::ffi::run_page_block_menu(command);
             Effect::Page
