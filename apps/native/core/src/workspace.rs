@@ -621,8 +621,6 @@ const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
     "ppt", "pps", "pot",
     // Documents the page view cannot read: legacy Word.
     "doc",
-    // Spreadsheets the table cannot read: legacy Excel.
-    "xls",
     // Fonts.
     "ttf", "otf", "ttc", "otc", "dfont",
     // 3D scenes Model I/O reads.

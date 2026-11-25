@@ -8,3 +8,4 @@ pub mod opendocument;
 pub mod spreadsheet;
 pub(crate) mod sqlite;
 pub mod workbook;
+pub mod xls;

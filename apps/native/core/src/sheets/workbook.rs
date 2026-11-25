@@ -53,7 +53,7 @@ fn extension_of(path: &std::path::Path) -> Option<String> {
 /// calendar file's, which show as tables too.
 pub fn is_workbook_name(name: &str) -> bool {
     let extension = extension_of(std::path::Path::new(name)).unwrap_or_default();
-    matches!(extension.as_str(), "xlsx" | "xlsm" | "ods")
+    matches!(extension.as_str(), "xlsx" | "xlsm" | "xls" | "ods")
         || crate::sheets::directory::is_directory_name(&extension)
 }
 
@@ -319,7 +319,7 @@ fn decode_escaped_characters(text: &str) -> String {
 const GENERAL: &str = "General";
 
 /// Excel's built-in format codes by id; custom codes start at 164.
-fn built_in_format(id: f64) -> Option<&'static str> {
+pub(crate) fn built_in_format(id: f64) -> Option<&'static str> {
     if id.fract() != 0.0 || !(0.0..=49.0).contains(&id) {
         return None;
     }
@@ -1400,6 +1400,9 @@ pub fn read(path: &std::path::Path) -> Result<Workbook> {
     let bytes = std::fs::read(path)
         .map_err(|error| WorkbookError(format!("The workbook could not be read ({error})")))?;
     let extension = extension_of(path).unwrap_or_default();
+    if extension == "xls" {
+        return crate::sheets::xls::parse(&bytes);
+    }
     if crate::sheets::directory::is_directory_name(&extension) {
         return Ok(crate::sheets::directory::read(
             &extension,
