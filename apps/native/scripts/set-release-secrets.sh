@@ -7,6 +7,8 @@ set -eu
 repo=main-eng/northroom
 p12=${1:-}
 [ -f "$p12" ] || { echo "usage: set-release-secrets.sh <Developer ID .p12 file>" >&2; exit 2; }
+# The values are typed in hidden, which needs a real terminal (not Claude Code's ! prompt).
+[ -t 0 ] || { echo "run this in a Terminal window: it asks for each value hidden" >&2; exit 2; }
 
 base64 -i "$p12" | gh secret set APPLE_CERTIFICATE -R "$repo"
 echo "APPLE_CERTIFICATE set from $p12"
