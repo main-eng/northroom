@@ -17,6 +17,7 @@ pub mod board;
 pub mod changes;
 pub mod columns;
 pub mod controls;
+pub mod deck;
 pub mod details;
 pub mod html;
 pub mod list;
@@ -211,6 +212,7 @@ pub fn opened(
         NrOpenedViewKind::Table => {
             made(cx.new(|cx| table::Table::new(window, cx)), "TableFileView")
         }
+        NrOpenedViewKind::Deck => made(cx.new(|cx| deck::Deck::new(window, cx)), "DeckFileView"),
         NrOpenedViewKind::Model => {
             made(cx.new(|cx| model::Model::new(window, cx)), "ModelFileView")
         }

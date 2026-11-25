@@ -10,6 +10,7 @@ pub mod changes;
 pub mod colour_picker;
 pub mod columns;
 pub mod commands;
+pub mod deck;
 pub mod diagnostics;
 pub mod dialog;
 mod digest;

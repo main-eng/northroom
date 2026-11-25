@@ -113,6 +113,8 @@ pub enum NrOpenedViewKind {
     Source,
     /// The file's preview and details.
     Details,
+    /// A presentation's slides.
+    Deck,
 }
 
 fn view_kind(view: Option<OpenedView>) -> NrOpenedViewKind {
@@ -124,6 +126,7 @@ fn view_kind(view: Option<OpenedView>) -> NrOpenedViewKind {
         Some(OpenedView::Pdf) => NrOpenedViewKind::Pdf,
         Some(OpenedView::SystemPreview) => NrOpenedViewKind::SystemPreview,
         Some(OpenedView::Table) => NrOpenedViewKind::Table,
+        Some(OpenedView::Deck) => NrOpenedViewKind::Deck,
         Some(OpenedView::Model) => NrOpenedViewKind::Model,
         Some(OpenedView::Source) => NrOpenedViewKind::Source,
         Some(OpenedView::Details) => NrOpenedViewKind::Details,
@@ -139,6 +142,7 @@ fn view_of(kind: NrOpenedViewKind) -> Option<OpenedView> {
         NrOpenedViewKind::Pdf => OpenedView::Pdf,
         NrOpenedViewKind::SystemPreview => OpenedView::SystemPreview,
         NrOpenedViewKind::Table => OpenedView::Table,
+        NrOpenedViewKind::Deck => OpenedView::Deck,
         NrOpenedViewKind::Model => OpenedView::Model,
         NrOpenedViewKind::Source => OpenedView::Source,
         NrOpenedViewKind::Details => OpenedView::Details,
@@ -189,6 +193,7 @@ pub extern "C" fn nr_opened_view() -> NrOpenedView {
                 || opened_workbook_path().is_some()
                 || opened_database_path().is_some()
         }
+        OpenedView::Deck => crate::deck::ffi::opened_deck().is_some(),
         OpenedView::Model => !owned(nr_opened_model_path()).is_empty(),
         OpenedView::Source => text_form() == Some(TextForm::Source),
         OpenedView::Terminal | OpenedView::Details => false,

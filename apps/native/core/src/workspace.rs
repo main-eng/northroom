@@ -613,12 +613,12 @@ pub fn is_system_preview_file(path: &Path) -> bool {
 }
 
 /// Formats Quick Look previews that Northroom has no view for. Formats the app draws itself
-/// (pages, text, tables, PDFs, decodable pictures, media, `.glb`) are excluded.
+/// (pages, text, tables, decks, PDFs, decodable pictures, media, `.glb`) are excluded.
 // One kind of file per line, under its comment.
 #[rustfmt::skip]
 const SYSTEM_PREVIEW_EXTENSIONS: &[&str] = &[
-    // Presentations: PowerPoint, Keynote and OpenDocument.
-    "pptx", "pptm", "ppt", "ppsx", "pps", "potx", "pot", "key", "odp",
+    // Presentations the deck cannot read: legacy PowerPoint, Keynote and OpenDocument.
+    "ppt", "pps", "pot", "key", "odp",
     // Documents: Word, rich text, Pages and OpenDocument.
     "docx", "docm", "doc", "dotx", "rtf", "rtfd", "pages", "odt",
     // Spreadsheets the table cannot read: legacy Excel and Numbers.
@@ -653,6 +653,8 @@ pub enum FileRead {
     /// An Excel or OpenDocument workbook up to `workbook::FILE_MAX_BYTES`, by name: a table
     /// when opened.
     Workbook,
+    /// A PowerPoint presentation up to `pptx::FILE_MAX_BYTES`, by name: slides when opened.
+    Deck,
     /// A SQLite database, by contents (`database::is_database`): tables when opened. The
     /// string is the top of its first table for the card (empty when there is no table or it is
     /// unreadable).
@@ -671,9 +673,11 @@ impl FileRead {
     /// icon, the glyph stays.
     pub fn shows_system_thumbnail(&self) -> bool {
         match self {
-            FileRead::Pdf | FileRead::SystemPreview | FileRead::Workbook | FileRead::External => {
-                true
-            }
+            FileRead::Pdf
+            | FileRead::SystemPreview
+            | FileRead::Workbook
+            | FileRead::Deck
+            | FileRead::External => true,
             FileRead::Media(_) | FileRead::Text(_) | FileRead::Html(_) | FileRead::Database(_) => {
                 false
             }
@@ -739,12 +743,22 @@ fn read_by_name(path: &Path, length_bytes: u64) -> Option<FileRead> {
             FileRead::External
         });
     }
-    let workbook = path
-        .file_name()
-        .is_some_and(|name| crate::sheets::workbook::is_workbook_name(&name.to_string_lossy()));
-    // A workbook too large to show as a table opens in its own application.
-    workbook.then_some(if length_bytes <= crate::sheets::workbook::FILE_MAX_BYTES {
-        FileRead::Workbook
+    read_document(path, length_bytes)
+}
+
+/// How a presentation or workbook, by name, is read: as its own kind when small enough to
+/// show, else as a file with only its details. `None` for any other name.
+fn read_document(path: &Path, length_bytes: u64) -> Option<FileRead> {
+    let name = path.file_name()?.to_string_lossy();
+    let (shown, max_bytes) = if crate::deck::pptx::is_presentation_name(&name) {
+        (FileRead::Deck, crate::deck::pptx::FILE_MAX_BYTES)
+    } else if crate::sheets::workbook::is_workbook_name(&name) {
+        (FileRead::Workbook, crate::sheets::workbook::FILE_MAX_BYTES)
+    } else {
+        return None;
+    };
+    Some(if length_bytes <= max_bytes {
+        shown
     } else {
         FileRead::External
     })
@@ -785,6 +799,7 @@ pub fn read_text_file(path: &Path) -> Option<String> {
         | FileRead::Pdf
         | FileRead::SystemPreview
         | FileRead::Workbook
+        | FileRead::Deck
         | FileRead::Database(_)
         | FileRead::External => None,
     }
@@ -2624,6 +2639,8 @@ mod tests {
             FileRead::Media(Media::Model)
         );
         assert_eq!(read_file(&write("book.xlsx", b"text")), FileRead::Workbook);
+        assert_eq!(read_file(&write("book.ods", b"text")), FileRead::Workbook);
+        assert_eq!(read_file(&write("Pitch.PPTX", b"text")), FileRead::Deck);
         // A system-preview file uses the previewer however plain its bytes, else opens
         // externally. Its text is never read as text.
         let previewed = if cfg!(target_os = "macos") {
@@ -2632,7 +2649,7 @@ mod tests {
             FileRead::External
         };
         for name in [
-            "Pitch.PPTX",
+            "Pitch.ppt",
             "Pitch.key",
             "Letter.docx",
             "Brand.otf",

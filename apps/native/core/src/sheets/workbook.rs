@@ -1646,7 +1646,7 @@ pub(crate) fn read_part(archive: &ZipArchive, path: &str) -> Result<Option<XmlEl
     }
 }
 
-fn require_part(archive: &ZipArchive, path: &str) -> Result<XmlElement> {
+pub(crate) fn require_part(archive: &ZipArchive, path: &str) -> Result<XmlElement> {
     read_part(archive, path)?
         .ok_or_else(|| WorkbookError(format!("The workbook has no \"{path}\" part.")))
 }
@@ -1712,7 +1712,10 @@ fn read_relationship(
 
 /// The relationships of `part` (the package's own when empty) as id, type and target path, in
 /// first-seen order.
-fn read_relationships(archive: &ZipArchive, part: &str) -> Result<Vec<(String, String, String)>> {
+pub(crate) fn read_relationships(
+    archive: &ZipArchive,
+    part: &str,
+) -> Result<Vec<(String, String, String)>> {
     let directory = directory_of(part);
     let mut relationships: Vec<(String, String, String)> = Vec::new();
     let Some(root) = read_part(archive, &relationships_path(part, directory))? else {
@@ -1733,7 +1736,7 @@ fn read_relationships(archive: &ZipArchive, part: &str) -> Result<Vec<(String, S
     Ok(relationships)
 }
 
-fn find_relationship<'a>(
+pub(crate) fn find_relationship<'a>(
     relationships: &'a [(String, String, String)],
     suffix: &str,
 ) -> Option<&'a str> {

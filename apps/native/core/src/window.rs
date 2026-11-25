@@ -39,6 +39,8 @@ pub enum OpenedView {
     SystemPreview,
     /// Delimited text or a workbook, as its table.
     Table,
+    /// A presentation, as its slides.
+    Deck,
     /// A 3D model's still.
     Model,
     /// Source code and any other text, as it is.
@@ -49,12 +51,13 @@ pub enum OpenedView {
 
 impl OpenedView {
     /// The views tried, in order, for a file that is not a terminal.
-    const TRIED: [Self; 7] = [
+    const TRIED: [Self; 8] = [
         Self::Html,
         Self::Page,
         Self::Pdf,
         Self::SystemPreview,
         Self::Table,
+        Self::Deck,
         Self::Model,
         Self::Source,
     ];
@@ -81,6 +84,7 @@ impl OpenedView {
             Self::Pdf
             | Self::SystemPreview
             | Self::Table
+            | Self::Deck
             | Self::Model
             | Self::Source
             | Self::Details => false,
@@ -258,6 +262,7 @@ mod tests {
             OpenedView::Pdf,
             OpenedView::SystemPreview,
             OpenedView::Table,
+            OpenedView::Deck,
             OpenedView::Model,
             OpenedView::Source,
             OpenedView::Details,
