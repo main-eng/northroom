@@ -5,7 +5,7 @@
 //! `Label artwork.psd` are sample files the sample-files script writes.
 
 use northroom_core::deck::{
-    flow, iwork, odp, picture, pptx, Align, Anchor, Colour, Deck, Fit, Form, Item, ReadError,
+    flow, iwork, odp, picture, ppt, pptx, Align, Anchor, Colour, Deck, Fit, Form, Item, ReadError,
     Shape, Slide, Source,
 };
 use northroom_core::geometry::Rect;
@@ -327,4 +327,45 @@ fn an_apple_document_draws_the_preview_it_carries() {
         [Source::Entry("QuickLook/Thumbnail.jpg".to_owned())]
     );
     assert!(iwork::read(&fixture("Pitch deck.pptx")).is_err());
+}
+
+#[test]
+fn a_powerpoint_97_presentation_reads_text_held_in_shapes_and_in_the_slide_list() {
+    let deck = ppt::read(&fixture("made.ppt")).expect("read");
+    assert_eq!(
+        (deck.width, deck.height, deck.slides.len()),
+        (720.0, 540.0, 2)
+    );
+    let first = shapes(&deck.slides[0]);
+    let title = &first[0].text.as_ref().expect("text").paragraphs[0];
+    assert_eq!(
+        (title.align, title.runs[0].text.as_str(), title.runs[0].size),
+        (Align::Center, "Harbor Monthly", 40.0)
+    );
+    assert_eq!(first[0].frame, Rect::new(54.0, 167.75, 612.0, 115.75));
+    let styled = &first[1].text.as_ref().expect("text").paragraphs[0].runs;
+    let looks: Vec<(&str, bool, f64, Colour)> = styled
+        .iter()
+        .map(|run| (run.text.as_str(), run.bold, run.size, run.colour))
+        .collect();
+    assert_eq!(
+        looks,
+        [
+            ("Roasted", true, 20.0, hex("1F6F4A")),
+            (" every Monday", false, 28.0, Colour::BLACK)
+        ]
+    );
+    assert_eq!(
+        (first[2].form, first[2].fill),
+        (Form::Oval, Some(hex("1F6F4A")))
+    );
+    let second = shapes(&deck.slides[1]);
+    assert_eq!(words(second[0]), "Plans");
+    let body = &second[1].text.as_ref().expect("text").paragraphs;
+    let marks: Vec<Option<&str>> = body
+        .iter()
+        .map(|paragraph| paragraph.bullet.as_deref())
+        .collect();
+    assert_eq!(marks, [Some("•"), Some("•"), Some("•")]);
+    assert_eq!(words(second[1]), "Solo|Pair|Household");
 }

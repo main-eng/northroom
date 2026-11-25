@@ -18,6 +18,7 @@ mod odf;
 pub mod odp;
 pub mod odt;
 pub mod picture;
+pub mod ppt;
 pub mod pptx;
 pub mod rtf;
 
@@ -69,6 +70,8 @@ pub fn read_bytes(path: &Path) -> Result<Vec<u8>> {
 pub enum Kind {
     /// PowerPoint: `.pptx` and its macro, show and template forms.
     Presentation,
+    /// PowerPoint 97–2003: `.ppt` and its show and template forms.
+    LegacyPresentation,
     /// Word: `.docx` and its macro and template forms.
     WordDocument,
     /// Word 97–2003: `.doc` and its template form.
@@ -100,6 +103,7 @@ impl Kind {
         match self {
             Kind::AppleDocument => iwork::is_document(path),
             Kind::Presentation
+            | Kind::LegacyPresentation
             | Kind::WordDocument
             | Kind::LegacyWordDocument
             | Kind::OpenDocumentText
@@ -115,6 +119,7 @@ impl Kind {
         match self {
             Kind::Photoshop | Kind::RawPhoto | Kind::AppleDocument => PICTURE_MAX_BYTES,
             Kind::Presentation
+            | Kind::LegacyPresentation
             | Kind::WordDocument
             | Kind::LegacyWordDocument
             | Kind::OpenDocumentText
@@ -131,6 +136,7 @@ impl Kind {
             .to_ascii_lowercase();
         Some(match extension.as_str() {
             "pptx" | "pptm" | "ppsx" | "ppsm" | "potx" | "potm" => Kind::Presentation,
+            "ppt" | "pps" | "pot" => Kind::LegacyPresentation,
             "docx" | "docm" | "dotx" | "dotm" => Kind::WordDocument,
             "doc" | "dot" => Kind::LegacyWordDocument,
             "odt" | "ott" => Kind::OpenDocumentText,
@@ -150,6 +156,7 @@ impl Kind {
 pub fn read(path: &Path, kind: Kind, measure: &mut crate::dialog::layout::Measure) -> Result<Deck> {
     match kind {
         Kind::Presentation => pptx::read(path),
+        Kind::LegacyPresentation => ppt::read(path),
         Kind::WordDocument => Ok(flow::paginate(docx::read(path)?, measure)),
         Kind::LegacyWordDocument => Ok(flow::paginate(doc::read(path)?, measure)),
         Kind::OpenDocumentText => Ok(flow::paginate(odt::read(path)?, measure)),
@@ -404,7 +411,7 @@ mod tests {
     fn a_name_says_whether_it_is_drawn_as_pages() {
         assert_eq!(Kind::of_name("Pitch deck.PPTX"), Some(Kind::Presentation));
         assert_eq!(Kind::of_name("show.ppsx"), Some(Kind::Presentation));
-        assert_eq!(Kind::of_name("old.ppt"), None);
+        assert_eq!(Kind::of_name("old.ppt"), Some(Kind::LegacyPresentation));
         assert_eq!(Kind::of_name("pptx"), None);
     }
 
