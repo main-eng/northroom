@@ -9,7 +9,9 @@ use crate::remote::pairing::Invite;
 use crate::remote::protocol::{Item, Listing, Piece, Pressed};
 use crate::remote::screen::Screen;
 use crate::remote::service::{Desk, Out, Service};
+use crate::remote::tables::{Head, Row};
 use crate::sessions::Running;
+use crate::sheets::layout::Table;
 use crate::terminal::cells::GridSize;
 use crate::terminal::input::Modifiers;
 use crate::Relock;
@@ -52,11 +54,20 @@ struct PictureRead {
     bytes: Arc<Vec<u8>>,
 }
 
+/// The file last read as a table for a device, kept so each window of rows asked for reads it
+/// once per version.
+struct TableRead {
+    path: PathBuf,
+    version: Version,
+    table: Arc<Table>,
+}
+
 /// The app's running terminals (`App::sessions`) and its drive's files.
 #[derive(Default)]
 struct AppDesk {
     opened: Mutex<Option<Opened>>,
     picture: Mutex<Option<PictureRead>>,
+    table: Mutex<Option<TableRead>>,
 }
 
 /// The path of the drive's file `file`.
@@ -98,6 +109,25 @@ impl AppDesk {
             deck: Arc::clone(&deck),
         });
         Some((path, version, deck))
+    }
+
+    /// The drive's file `file` as a table, and its path.
+    fn table_of(&self, file: &str) -> Option<(PathBuf, Arc<Table>)> {
+        let path = path_of(file)?;
+        let version = version_of(&path)?;
+        let mut read = self.table.relock();
+        if let Some(known) = read.as_ref() {
+            if known.path == path && known.version == version {
+                return Some((path, Arc::clone(&known.table)));
+            }
+        }
+        let table = Arc::new(crate::remote::tables::read(&path, version.0)?);
+        *read = Some(TableRead {
+            path: path.clone(),
+            version,
+            table: Arc::clone(&table),
+        });
+        Some((path, table))
     }
 
     /// The bytes of the picture numbered `picture` on `file`'s pages.
@@ -180,6 +210,31 @@ impl Desk for AppDesk {
                 items: entries.iter().map(Item::of).collect(),
             })
         })?
+    }
+
+    fn table(&self, file: &str) -> Option<Vec<Head>> {
+        let (_, table) = self.table_of(file)?;
+        crate::remote::tables::heads(&table)
+    }
+
+    fn rows(&self, file: &str, sheet: usize, from: usize, count: usize) -> Option<Vec<Row>> {
+        let (path, table) = self.table_of(file)?;
+        match table.as_ref() {
+            Table::Sheets(workbook) => {
+                let sheet = workbook.sheets.get(sheet)?;
+                Some(crate::remote::tables::rows_held(sheet, from, count))
+            }
+            // A database's rows are read as they are asked for.
+            Table::Database(_) => {
+                let rows = crate::sheets::database::rows(&path, sheet, from..from + count);
+                Some(
+                    rows.iter()
+                        .map(|row| crate::remote::tables::row_of(row))
+                        .collect(),
+                )
+            }
+            Table::Unreadable(_) => None,
+        }
     }
 
     fn pages(&self, file: &str) -> Option<Pages> {

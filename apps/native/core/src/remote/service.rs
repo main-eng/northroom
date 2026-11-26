@@ -9,6 +9,7 @@ use crate::remote::protocol::{
     parse_ask, parse_key, Ask, Listing, Piece, Pressed, Refusal, Session, Tell,
 };
 use crate::remote::screen::Screen;
+use crate::remote::tables::{Head, Row, ROWS_MOST};
 use crate::sessions::{self, Running};
 use crate::terminal::cells::GridSize;
 use std::collections::HashMap;
@@ -48,6 +49,10 @@ pub trait Desk {
     /// Up to `length` bytes from byte `from` of `file`, or of the picture numbered `picture` on
     /// its pages; `None` when it can't be read.
     fn read(&self, file: &str, picture: Option<usize>, from: u64, length: usize) -> Option<Piece>;
+    /// The sheets `file` is shown as; `None` when it is not shown as a table or can't be read.
+    fn table(&self, file: &str) -> Option<Vec<Head>>;
+    /// Up to `count` rows of sheet `sheet` of `file` from row `from`; `None` as for `table`.
+    fn rows(&self, file: &str, sheet: usize, from: usize, count: usize) -> Option<Vec<Row>>;
     /// `file`'s pages; `None` when it is not shown as pages or can't be read as them.
     fn pages(&self, file: &str) -> Option<Pages>;
     /// What page `page` of `file` draws laid out `width` points wide; `None` as for `pages`.
@@ -137,6 +142,35 @@ fn piece(wanted: Wanted, length: usize, desk: &dyn Desk) -> Tell {
             data: crate::update::sha512::base64(&bytes),
         },
         None => Tell::NoFile { file, picture },
+    }
+}
+
+/// `file`'s sheets, or that it is no table.
+fn table(file: String, desk: &dyn Desk) -> Tell {
+    match desk.table(&file) {
+        Some(sheets) => Tell::Table { file, sheets },
+        None => Tell::NoTable { file },
+    }
+}
+
+/// The rows of a sheet a device asked for.
+struct Window {
+    sheet: usize,
+    from: usize,
+    count: usize,
+}
+
+/// A window of a sheet's rows, no more than one message holds, or that `file` is no table.
+fn rows(file: String, window: Window, desk: &dyn Desk) -> Tell {
+    let Window { sheet, from, count } = window;
+    match desk.rows(&file, sheet, from, count.min(ROWS_MOST)) {
+        Some(rows) => Tell::Rows {
+            file,
+            sheet,
+            from,
+            rows,
+        },
+        None => Tell::NoTable { file },
     }
 }
 
@@ -332,6 +366,16 @@ impl Service {
                     from,
                 };
                 vec![Out::Tell(link, piece(wanted, length, desk))]
+            }
+            Ask::Table { file } => vec![Out::Tell(link, table(file, desk))],
+            Ask::Rows {
+                file,
+                sheet,
+                from,
+                count,
+            } => {
+                let window = Window { sheet, from, count };
+                vec![Out::Tell(link, rows(file, window, desk))]
             }
             Ask::Pages { file } => vec![Out::Tell(link, pages(file, desk))],
             Ask::Page { file, page, width } => {

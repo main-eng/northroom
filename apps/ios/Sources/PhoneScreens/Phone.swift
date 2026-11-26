@@ -41,6 +41,21 @@ public final class Phone {
         case notPaged
     }
 
+    /// Whether a file is shown as a table, once the computer has said.
+    public enum Tabled: Equatable {
+        case sheets([SheetHead])
+        case notTable
+    }
+
+    /// One sheet of a file.
+    public struct SheetKey: Hashable, Sendable {
+        public var file: String
+        public var sheet: Int
+    }
+
+    /// The rows one `rows` asks for.
+    public static let rowsAsked = 100
+
     /// One picture on a file's pages.
     public struct PictureKey: Hashable, Sendable {
         public var file: String
@@ -74,6 +89,10 @@ public final class Phone {
     public private(set) var folders: [String: Folder] = [:]
     /// The files fetched or on their way, by id.
     public private(set) var fetches: [String: Fetch] = [:]
+    /// Which files are shown as tables, by id.
+    public private(set) var tabled: [String: Tabled] = [:]
+    /// The rows that have come of each sheet, by their number.
+    public private(set) var rows: [SheetKey: [Int: [TableCell?]]] = [:]
     /// Which files are shown as pages, by id.
     public private(set) var paged: [String: Paged] = [:]
     /// What each page asked for draws.
@@ -90,6 +109,8 @@ public final class Phone {
     private var watching: (session: String, columns: Int, lines: Int)?
     /// Where each file on its way is being written.
     private var arriving: [String: (handle: FileHandle, url: URL)] = [:]
+    /// The first row of each window of rows asked for, by sheet.
+    private var rowsAsked: [SheetKey: Set<Int>] = [:]
     /// The bytes so far of each picture on its way.
     private var arrivingPictures: [PictureKey: Data] = [:]
     /// The last key sent, which the next one waits for.
@@ -132,6 +153,9 @@ public final class Phone {
         sessions = []
         folders = [:]
         fetches.keys.forEach(discard)
+        tabled = [:]
+        rows = [:]
+        rowsAsked = [:]
         paged = [:]
         marks = [:]
         pictures = [:]
@@ -218,6 +242,11 @@ public final class Phone {
         case .marks(let file, let page, _, let drawn):
             marks[PageKey(file: file, page: page)] = drawn
         case .noPages(let file): paged[file] = .notPaged
+        case .table(let file, let sheets): tabled[file] = .sheets(sheets)
+        case .rows(let file, let sheet, let from, let came):
+            let key = SheetKey(file: file, sheet: sheet)
+            for (offset, row) in came.enumerated() { rows[key, default: [:]][from + offset] = row }
+        case .noTable(let file): tabled[file] = .notTable
         default: break
         }
     }
@@ -336,6 +365,28 @@ public final class Phone {
     private func failed(_ file: String) {
         try? arriving.removeValue(forKey: file)?.handle.close()
         fetches[file] = .failed
+    }
+
+    // MARK: Tables
+
+    /// Asks whether `file` is shown as a table. `tabled` gains the answer.
+    public func askTable(of file: String) {
+        send(.table(file: file))
+    }
+
+    /// Asks for the window of rows that holds `row`, unless it was asked for.
+    public func askRows(around row: Int, sheet: Int, of file: String) {
+        let key = SheetKey(file: file, sheet: sheet)
+        let from = row / Phone.rowsAsked * Phone.rowsAsked
+        guard rowsAsked[key, default: []].insert(from).inserted else { return }
+        send(.rows(file: file, sheet: sheet, from: from, count: Phone.rowsAsked))
+    }
+
+    /// Lets go of everything known of `file`'s tables.
+    public func discardTable(of file: String) {
+        tabled[file] = nil
+        rows = rows.filter { $0.key.file != file }
+        rowsAsked = rowsAsked.filter { $0.key.file != file }
     }
 
     // MARK: Pages

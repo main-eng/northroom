@@ -2,6 +2,7 @@ use super::*;
 use crate::remote::devices::FILE;
 use crate::remote::pages::{Drawn, Pages};
 use crate::remote::protocol::{Item, Piece};
+use crate::remote::tables::Shown;
 use crate::terminal::activity::Activity;
 use crate::terminal::input::Key as Pressable;
 use std::cell::RefCell;
@@ -113,6 +114,33 @@ impl Desk for FakeDesk {
         Some(Piece {
             size: held.len() as u64,
             bytes: held[start..end].to_vec(),
+        })
+    }
+
+    /// The table `t1` has one sheet of two columns and 500 rows.
+    fn table(&self, file: &str) -> Option<Vec<Head>> {
+        (file == "t1").then(|| {
+            vec![Head {
+                name: "Prices".to_owned(),
+                columns: vec!["A".to_owned(), "B".to_owned()],
+                widths: vec![120.0, 56.0],
+                rows: 500,
+            }]
+        })
+    }
+
+    /// Each row of `t1` holds its own number.
+    fn rows(&self, file: &str, _sheet: usize, from: usize, count: usize) -> Option<Vec<Row>> {
+        (file == "t1").then(|| {
+            (from..(from + count).min(500))
+                .map(|row| {
+                    vec![Some(Shown {
+                        text: row.to_string(),
+                        align: None,
+                        bold: false,
+                    })]
+                })
+                .collect()
         })
     }
 
@@ -449,6 +477,43 @@ fn a_document_is_its_pages_their_marks_and_its_pictures() {
     assert_eq!(
         told(fixture.ask(1, r#"{"type":"pages","file":"p1"}"#)),
         r#"{"type":"no-pages","file":"p1"}"#
+    );
+}
+
+#[test]
+fn a_table_is_its_sheets_and_a_window_of_rows_no_longer_than_a_message_holds() {
+    let mut fixture = fixture(&[]);
+    fixture.paired(1);
+    let out = fixture.ask(1, r#"{"type":"table","file":"t1"}"#);
+    assert_eq!(
+        String::from_utf8(match &out[..] {
+            [Out::Tell(1, tell)] => tell.encoded(),
+            other => panic!("expected one message: {other:?}"),
+        })
+        .unwrap(),
+        r#"{"type":"table","file":"t1","sheets":[{"name":"Prices","columns":["A","B"],"widths":[120.0,56.0],"rows":500}]}"#
+    );
+    let out = fixture.ask(
+        1,
+        r#"{"type":"rows","file":"t1","sheet":0,"from":10,"count":100000}"#,
+    );
+    let [Out::Tell(1, Tell::Rows { from: 10, rows, .. })] = &out[..] else {
+        panic!("expected rows: {out:?}");
+    };
+    assert_eq!(rows.len(), ROWS_MOST);
+    assert_eq!(
+        rows[0][0].as_ref().map(|cell| cell.text.as_str()),
+        Some("10")
+    );
+    let out = fixture.ask(1, r#"{"type":"table","file":"p1"}"#);
+    assert_eq!(
+        out,
+        [Out::Tell(
+            1,
+            Tell::NoTable {
+                file: "p1".to_owned()
+            }
+        )]
     );
 }
 

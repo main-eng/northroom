@@ -50,6 +50,8 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
 | `{"type":"list","folder":"<id>"}`                           | List a folder, or the top of the drive when `folder` is absent. Answered with `folder` or `no-folder`.                     |
 | `{"type":"read","file":"<id>","from":0,"length":1048576}`   | Read up to `length` bytes of a file from byte `from` (0 when absent). Answered with `bytes` or `no-file`.                  |
 | `{"type":"read","file":"<id>","picture":2,"from":0,"length":1048576}` | The same, of the picture numbered `picture` on the file's pages.                                                 |
+| `{"type":"table","file":"<id>"}`                            | Ask whether a file is shown as a table. Answered with `table` or `no-table`.                                               |
+| `{"type":"rows","file":"<id>","sheet":0,"from":0,"count":100}` | Ask for up to `count` rows (at most 200) of a sheet from row `from`. The first sheet and row are 0. Answered with `rows`. |
 | `{"type":"pages","file":"<id>"}`                            | Ask whether a file is shown as pages. Answered with `pages` or `no-pages`.                                                 |
 | `{"type":"page","file":"<id>","page":0,"width":390}`        | Ask what a page draws laid out `width` points wide (100 to 4000). The first page is 0. Answered with `marks`.             |
 | `{"type":"press","session":"<id>","key":"enter"}`           | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
@@ -75,6 +77,9 @@ read, is answered with `refused` and the link closes.
 | `{"type":"pages","file":"<id>","width":612,"height":792,"count":3}` | The file is shown as `count` pages, each `width` × `height` points.             |
 | `{"type":"marks","file":"<id>","page":0,"width":390,"marks":[…]}` | What a page draws, back to front, laid out `width` points wide.                   |
 | `{"type":"no-pages","file":"<id>"}`               | The file is not a kind shown as pages, or could not be read as one.                               |
+| `{"type":"table","file":"<id>","sheets":[…]}`     | The file is shown as these sheets.                                                                |
+| `{"type":"rows","file":"<id>","sheet":0,"from":0,"rows":[…]}` | Rows of a sheet from row `from`. Fewer than asked for means the sheet ends there.     |
+| `{"type":"no-table","file":"<id>"}`               | The file is not a kind shown as a table, or could not be read as one.                             |
 
 A session:
 
@@ -131,6 +136,31 @@ from the page's top left, and scales them to its screen (a page `width` points w
   `mono`), so a device that sets it in the same faces breaks no line differently.
 - A `figure` is a filled path as SVG writes one (`M`, `L`, `Q`, `C`, `Z`), filled by the
   nonzero rule.
+
+## Tables
+
+Delimited text (`.csv`, `.tsv`), an Excel or OpenDocument workbook, a SQLite database, contacts
+(`.vcf`), events (`.ics`) and an archive's listing are shown as a table: sheets of rows of
+cells. The computer reads the file, so a device reads none of these formats.
+
+A sheet, as `table` lists it:
+
+```json
+{ "name": "Plans", "columns": ["A", "B", "C"], "widths": [120, 96, 96], "rows": 4 }
+```
+
+`columns` are the headers: column letters, or a database table's column names. `widths` are in
+points, as the computer shows the columns.
+
+A row, as `rows` sends it, is its cells by column. An empty cell is `null`, and the empty cells
+a row ends in are left out:
+
+```json
+[{ "text": "Weekday", "bold": true }, null, { "text": "$18", "align": "end" }]
+```
+
+`align` is `center` or `end`, absent for a cell at the start of its column. `bold` is true when
+present.
 
 A screen:
 

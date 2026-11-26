@@ -56,6 +56,21 @@ struct PhoneLinkTests {
             return
         }
         #expect(drawn.first?.text == "Hi" && drawn.first?.lineSize == 12 && drawn.first?.weight == 700)
+        #expect(
+            text(.rows(file: "t1", sheet: 0, from: 100, count: 100))
+                == #"{"count":100,"file":"t1","from":100,"sheet":0,"type":"rows"}"#)
+        let rows = Tell(
+            Data(
+                #"{"type":"rows","file":"t1","sheet":0,"from":1,"rows":[[{"text":"Morning Tide"},null,{"text":"46","align":"end"}]]}"#
+                    .utf8))
+        #expect(
+            rows
+                == .rows(
+                    file: "t1", sheet: 0, from: 1,
+                    [[
+                        TableCell(text: "Morning Tide", align: nil, bold: nil), nil,
+                        TableCell(text: "46", align: "end", bold: nil),
+                    ]]))
         let folder = Tell(
             Data(#"{"type":"folder","name":"Drive","items":[{"id":"f1","name":"Work","kind":"folder"}]}"#.utf8))
         #expect(

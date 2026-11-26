@@ -4,7 +4,7 @@
 //!
 //! This module holds the rules: which device may connect (`devices`, `pairing`), what each
 //! message means (`protocol`, written down for other people's devices in `docs/phone-link.md`),
-//! what a watched terminal looks like (`screen`), what a file's pages look like (`pages`) and
+//! what a watched terminal looks like (`screen`), what a file's pages and tables look like (`pages`, `tables`) and
 //! what to answer (`service`). `northroom-link`
 //! only carries the bytes.
 
@@ -17,3 +17,4 @@ pub mod protocol;
 pub mod run;
 pub mod screen;
 pub mod service;
+pub mod tables;

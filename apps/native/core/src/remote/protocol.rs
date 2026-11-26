@@ -5,6 +5,7 @@
 
 use crate::remote::pages::Drawn;
 use crate::remote::screen::Screen;
+use crate::remote::tables::{Head, Row};
 use crate::sessions::Running;
 use crate::terminal::activity::Activity;
 use crate::terminal::input::Key;
@@ -38,6 +39,17 @@ pub enum Ask {
         #[serde(default)]
         from: u64,
         length: usize,
+    },
+    /// The sheets `file` is shown as. Answered with `table`, or `no-table` when it is not a
+    /// kind shown as a table or can't be read as one.
+    Table { file: String },
+    /// Up to `count` rows of sheet `sheet` of `file` from row `from` (the first is 0). Answered
+    /// with `rows`, or `no-table`.
+    Rows {
+        file: String,
+        sheet: usize,
+        from: usize,
+        count: usize,
     },
     /// How many pages `file` has and their size. Answered with `pages`, or `no-pages` when it
     /// is not a kind shown as pages or can't be read as one.
@@ -229,6 +241,18 @@ pub enum Tell {
     },
     /// `file` is not shown as pages, or could not be read as them.
     NoPages { file: String },
+    /// `file` is shown as these sheets.
+    Table { file: String, sheets: Vec<Head> },
+    /// Rows of sheet `sheet` of `file` from row `from`. Fewer than asked for means the sheet
+    /// ends there.
+    Rows {
+        file: String,
+        sheet: usize,
+        from: usize,
+        rows: Vec<Row>,
+    },
+    /// `file` is not shown as a table, or could not be read as one.
+    NoTable { file: String },
     /// The folder a `list` named is not in the drive.
     NoFolder {
         #[serde(skip_serializing_if = "Option::is_none")]

@@ -16,6 +16,10 @@ public enum Ask: Equatable, Sendable {
     /// Reads up to `length` bytes from byte `from` of `file`, or of the picture numbered
     /// `picture` on its pages.
     case read(file: String, picture: Int? = nil, from: Int, length: Int)
+    /// Asks which sheets `file` is shown as.
+    case table(file: String)
+    /// Asks for up to `count` rows of sheet `sheet` of `file` from row `from`.
+    case rows(file: String, sheet: Int, from: Int, count: Int)
     /// Asks how many pages `file` has and their size.
     case pages(file: String)
     /// Asks what page `page` of `file` draws laid out `width` points wide.
@@ -42,6 +46,9 @@ public enum Ask: Equatable, Sendable {
             var read: [String: Any] = ["type": "read", "file": file, "from": from, "length": length]
             if let picture { read["picture"] = picture }
             fields = read
+        case .table(let file): fields = ["type": "table", "file": file]
+        case .rows(let file, let sheet, let from, let count):
+            fields = ["type": "rows", "file": file, "sheet": sheet, "from": from, "count": count]
         case .pages(let file): fields = ["type": "pages", "file": file]
         case .page(let file, let page, let width):
             fields = ["type": "page", "file": file, "page": page, "width": Int(width.rounded())]
@@ -109,6 +116,31 @@ public struct Item: Codable, Hashable, Identifiable, Sendable {
         case "terminal": name + ".nterm"
         default: name
         }
+    }
+}
+
+/// One sheet of a table without its rows.
+public struct SheetHead: Decodable, Equatable, Sendable {
+    public var name: String
+    /// Each column's header.
+    public var columns: [String]
+    /// Each column's width in points, as the computer shows it.
+    public var widths: [Double]
+    /// How many rows the sheet has.
+    public var rows: Int
+}
+
+/// One cell of a table as it is shown.
+public struct TableCell: Decodable, Equatable, Sendable {
+    public var text: String
+    /// `center` or `end`; absent for a cell at the start of its column.
+    public var align: String?
+    public var bold: Bool?
+
+    public init(text: String, align: String? = nil, bold: Bool? = nil) {
+        self.text = text
+        self.align = align
+        self.bold = bold
     }
 }
 
@@ -197,6 +229,12 @@ public enum Tell: Equatable, Sendable {
     case marks(file: String, page: Int, width: Double, [Mark])
     /// `file` is not shown as pages.
     case noPages(file: String)
+    /// `file` is shown as these sheets.
+    case table(file: String, [SheetHead])
+    /// Rows of sheet `sheet` of `file` from row `from`, each its cells by column.
+    case rows(file: String, sheet: Int, from: Int, [[TableCell?]])
+    /// `file` is not shown as a table.
+    case noTable(file: String)
 
     private struct Wire: Decodable {
         var type: String
@@ -210,6 +248,9 @@ public enum Tell: Equatable, Sendable {
         var width: Double?
         var height: Double?
         var marks: [Mark]?
+        var sheets: [SheetHead]?
+        var sheet: Int?
+        var rows: [[TableCell?]]?
         var folder: String?
         var name: String?
         var items: [Item]?
@@ -253,6 +294,15 @@ public enum Tell: Equatable, Sendable {
         case ("no-pages", _, _):
             guard let file = wire.file else { return nil }
             self = .noPages(file: file)
+        case ("table", _, _):
+            guard let file = wire.file else { return nil }
+            self = .table(file: file, wire.sheets ?? [])
+        case ("rows", _, _):
+            guard let file = wire.file, let sheet = wire.sheet else { return nil }
+            self = .rows(file: file, sheet: sheet, from: wire.from ?? 0, wire.rows ?? [])
+        case ("no-table", _, _):
+            guard let file = wire.file else { return nil }
+            self = .noTable(file: file)
         default: return nil
         }
     }

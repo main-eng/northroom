@@ -2,6 +2,7 @@ use super::*;
 use crate::remote::pages::{Drawn, Pages};
 use crate::remote::protocol::{Listing, Piece};
 use crate::remote::screen::Run;
+use crate::remote::tables::{Head, Row};
 use crate::terminal::activity::Activity;
 use northroom_link::{Address, Client};
 use std::net::SocketAddr;
@@ -75,6 +76,14 @@ impl Desk for OneTerminal {
     }
 
     fn pages(&self, _file: &str) -> Option<Pages> {
+        None
+    }
+
+    fn table(&self, _file: &str) -> Option<Vec<Head>> {
+        None
+    }
+
+    fn rows(&self, _file: &str, _sheet: usize, _from: usize, _count: usize) -> Option<Vec<Row>> {
         None
     }
 

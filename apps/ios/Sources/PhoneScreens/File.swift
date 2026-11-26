@@ -2,19 +2,26 @@ import AVKit
 import PhoneLink
 import SwiftUI
 
-/// One file. A kind the computer shows as pages (a PDF, a document, slides) is drawn from what
-/// the computer says each page draws; any other is brought to this device and shown by its kind.
+/// One file. A kind the computer shows as pages (a PDF, a document, slides) or as a table (a
+/// spreadsheet, a database) is drawn from what the computer says it shows; any other is brought
+/// to this device and shown by its kind.
 struct FileScreen: View {
     let item: Item
     @Environment(Phone.self) private var phone
 
+    /// The kinds this device shows from the file's own bytes, with nothing to ask first.
+    private static let fetchedKinds: Set<String> = ["video", "audio", "page"]
+
     var body: some View {
         Group {
-            switch phone.paged[item.id] {
-            case .pages(let width, let height, let count):
+            if phone.fetches[item.id] != nil {
+                fetched
+            } else if case .pages(let width, let height, let count) = phone.paged[item.id] {
                 PagesView(file: item.id, pageWidth: width, pageHeight: height, count: count)
-            case .notPaged: fetched
-            case nil: ProgressView()
+            } else if case .sheets(let sheets) = phone.tabled[item.id] {
+                TableView(file: item.id, sheets: sheets)
+            } else {
+                ProgressView()
             }
         }
         .navigationTitle(item.name)
@@ -22,13 +29,25 @@ struct FileScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
         #endif
-        .task { phone.askPages(of: item.id) }
+        .task {
+            if FileScreen.fetchedKinds.contains(item.kind) {
+                phone.fetch(item)
+            } else {
+                phone.askPages(of: item.id)
+            }
+        }
+        // Not pages: a picture is fetched, anything else may be a table.
         .onChange(of: phone.paged[item.id]) { _, paged in
-            if paged == .notPaged { phone.fetch(item) }
+            guard paged == .notPaged else { return }
+            if item.kind == "image" { phone.fetch(item) } else { phone.askTable(of: item.id) }
+        }
+        .onChange(of: phone.tabled[item.id]) { _, tabled in
+            if tabled == .notTable { phone.fetch(item) }
         }
         .onDisappear {
             phone.discard(item.id)
             phone.discardPages(of: item.id)
+            phone.discardTable(of: item.id)
         }
     }
 
@@ -47,13 +66,18 @@ struct FileScreen: View {
 
 /// How a kind of file is shown.
 private enum Showing {
-    case picture, film, page, text, unknown
+    case picture, film, page, web, text, unknown
+
+    /// The kinds the system's web view draws: a drawing in SVG, and a live HTML page.
+    private static let webExtensions: Set<String> = ["svg", "html", "htm"]
 
     /// Plain files this size or smaller are read as text when they are text.
     private static let textMostBytes = 2 * 1024 * 1024
 
     init(_ item: Item, at url: URL) {
+        let fileExtension = (item.fileExtension ?? "").lowercased()
         switch item.kind {
+        case _ where Showing.webExtensions.contains(fileExtension): self = .web
         case "image": self = .picture
         case "video", "audio": self = .film
         case "page": self = .page
@@ -72,6 +96,7 @@ private struct FileView: View {
         switch Showing(item, at: url) {
         case .picture: Picture(url: url)
         case .film: Film(url: url)
+        case .web: WebPage(url: url)
         case .page: PageText(text: (try? String(contentsOf: url, encoding: .utf8)) ?? "")
         case .text: PlainText(text: (try? String(contentsOf: url, encoding: .utf8)) ?? "")
         case .unknown:
@@ -109,17 +134,56 @@ private struct Picture: View {
     }
 }
 
-/// A film or a sound, played by the system's player.
+/// A film or a sound, played by the system's player, when this device's system can play its
+/// kind.
 private struct Film: View {
     let url: URL
     @State private var player: AVPlayer?
+    /// Whether the system can play the file; `nil` until it has looked.
+    @State private var playable: Bool?
 
     var body: some View {
-        VideoPlayer(player: player)
-            .onAppear { player = AVPlayer(url: url) }
-            .onDisappear { player?.pause() }
+        Group {
+            switch playable {
+            case true?: VideoPlayer(player: player)
+            case false?:
+                ContentUnavailableView(
+                    "This phone can't play this kind", systemImage: "play.slash",
+                    description: Text(url.lastPathComponent))
+            case nil: ProgressView()
+            }
+        }
+        .task {
+            let can = (try? await AVURLAsset(url: url).load(.isPlayable)) ?? false
+            if can { player = AVPlayer(url: url) }
+            playable = can
+        }
+        .onDisappear { player?.pause() }
     }
 }
+
+#if canImport(UIKit)
+    import WebKit
+
+    /// A drawing in SVG or a live HTML page, drawn by the system's web view from this device's
+    /// copy of the file. It reaches nothing but that file.
+    private struct WebPage: UIViewRepresentable {
+        let url: URL
+
+        func makeUIView(context: Context) -> WKWebView {
+            let view = WKWebView()
+            view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            return view
+        }
+
+        func updateUIView(_ view: WKWebView, context: Context) {}
+    }
+#else
+    private struct WebPage: View {
+        let url: URL
+        var body: some View { PlainText(text: (try? String(contentsOf: url, encoding: .utf8)) ?? "") }
+    }
+#endif
 
 /// Text as it is written, in the terminal's type.
 private struct PlainText: View {
