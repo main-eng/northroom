@@ -139,7 +139,6 @@ fn table() -> Table {
     events::register(&mut table);
     crate::screens::columns::register(&mut table);
     crate::screens::board::register(&mut table);
-    crate::screens::changes::register(&mut table);
     crate::screens::html::register(&mut table);
     crate::screens::title_bar::register(&mut table);
     crate::menu_bar::register(&mut table);

@@ -26,12 +26,12 @@ reason it was rejected.
 - List every file except `.DS_Store`. No allowlist, no conversion, no starter files. New abilities arrive as new file kinds.
 - Nothing is overwritten or deleted for good. With no system trash, delete refuses.
 - One person, one drive. No teams, no search index.
-- Change review (a Changes tab) keeps a pruned, content-addressed snapshot store in the app's data folder (14 days, at most 2 GB), never beside the files and never in the person's repository. Beside it, a small JSON record per root keeps what the list needs across restarts (each listed file's baseline and credited terminal files, and what the person kept of each file); its entries expire with the store's 14 days, and pruning spares the snapshots a record names. A repository marks where a root's changes are gathered; the tab shows only what the terminals changed since the person last kept it, and never runs `git` or writes to the repository. Undo writes the person's files only after moving their current version to the system Trash.
 - **Why:** plain files work with every agent and tool. Anything stored beside them drifts when an agent changes them. Holding no content means nothing to sell, secure or delete.
 - **Rejected:**
   - A catalog beside the drive: it drifts.
   - Hosted storage: quotas, deletion, and files leave the computer.
   - An app-owned store or custom formats: the folder stops being the truth, and models don't know the format.
+  - A Changes tab that listed and diffed what the terminals changed, with a snapshot store in the app's data folder: built, then removed on 2026-11-26 because the owner found it wasn't needed.
 
 ## ADR-0003: No authoring format of our own; agents use their own tools
 
@@ -58,7 +58,7 @@ reason it was rejected.
 - No built-in assistant, skills, models or MCP server.
 - A `.nterm` file names nothing to run. Opening a received one starts only the person's shell.
 - Never pass on the app's environment (on Windows the emulator library adds the app's variables the fresh environment does not name, as other terminals do), read agent credentials, edit agent settings, or write into PATH or folders.
-- Known limits: Claude Code older than 2.1.280 ignores the plugin. Codex shows approvals only through OSC 9. Codex can't be hooked without editing its config (no environment-only hooks or `notify`), so its changes are credited by timing only. Agents inside tmux or ssh aren't seen.
+- Known limits: Claude Code older than 2.1.280 ignores the plugin. Codex shows approvals only through OSC 9. Codex can't be hooked without editing its config (no environment-only hooks or `notify`), so what it is doing is read from its title and notifications only. Agents inside tmux or ssh aren't seen.
 - **Why:** people already pay for their agent. The terminal works for every vendor; not every agent speaks MCP. Bundled models freeze at release.
 - **Rejected:**
   - A built-in assistant or vendor-SDK chat: our cost, plus vendor approval.
@@ -204,6 +204,6 @@ reason it was rejected.
 
 ## Open
 
-- **Phone link (ADR-0016).** Built: pairing by QR code, the sessions list (shells at their prompt too), a full-screen terminal typed into directly with scrolling, starting a terminal, browsing the drive, and opening files (pages, tables, pictures, film and sound, pages and text, SVG and HTML). Checked end to end in the simulator against the running app, and by the owner on an iPhone on the home network. Not yet tried: a connection from outside the home network, and on any phone the SVG and HTML view and the "can't play" message. Northroom > Forget Phone lists the paired phones and forgets one once confirmed. Still to build: selecting and finding text in a document; a password prompt for a locked PDF; film kinds the phone's system can't play (Matroska, WebM, Ogg, Opus) and playing a film before it has all arrived; 3D models; the Changes tab. To decide: which relays ship as the default. iroh's public relays are not meant for production, and a relay of our own is a server (ADR-0006).
+- **Phone link (ADR-0016).** Built: pairing by QR code, the sessions list (shells at their prompt too), a full-screen terminal typed into directly with scrolling, starting a terminal, browsing the drive, and opening files (pages, tables, pictures, film and sound, pages and text, SVG and HTML). Checked end to end in the simulator against the running app, and by the owner on an iPhone on the home network. Not yet tried: a connection from outside the home network, and on any phone the SVG and HTML view and the "can't play" message. Northroom > Forget Phone lists the paired phones and forgets one once confirmed. Still to build: selecting and finding text in a document; a password prompt for a locked PDF; film kinds the phone's system can't play (Matroska, WebM, Ogg, Opus) and playing a film before it has all arrived; 3D models. To decide: which relays ship as the default. iroh's public relays are not meant for production, and a relay of our own is a server (ADR-0006).
 - **Cloud cleanup.** Done on 2026-11-21 except the download Worker (`northroom-server`), its container and its one secret, which go once GitHub releases serve downloads. Then apply `northroom-infra`; its first apply turns on the www redirect, firewall and rate limit.
 - **Decide what makes Northroom 10x better** before the next release.

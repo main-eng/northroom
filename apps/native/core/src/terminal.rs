@@ -147,17 +147,10 @@ struct Shared {
     pointer: Mutex<Pointer>,
     /// What the session runs, again when Return restarts it.
     launch: Launch,
-    /// Where the session's turns are reported (`changes`).
-    turns: crate::changes::turns::TurnTap,
 }
 
 impl Shared {
-    fn new(
-        launch: Launch,
-        palette: Palette,
-        view: ViewSize,
-        turns: crate::changes::turns::TurnTap,
-    ) -> Self {
+    fn new(launch: Launch, palette: Palette, view: ViewSize) -> Self {
         Self {
             state: Mutex::new(State {
                 shown: true,
@@ -179,7 +172,6 @@ impl Shared {
             engine: Mutex::new(None),
             pointer: Mutex::new(Pointer::default()),
             launch,
-            turns,
         }
     }
 
@@ -206,7 +198,6 @@ impl Shared {
             launch,
             Palette::on([17, 17, 17], [238, 238, 240], [60, 60, 90]),
             view,
-            crate::changes::turns::TurnTap::default(),
         ))
     }
 
@@ -269,27 +260,14 @@ impl Shared {
         });
     }
 
-    /// Applies what the program reported about itself and passes what matters to its turns on
-    /// to the changes. A turn that ends while the session is on screen counts as seen.
+    /// Applies what the program reported about itself. A turn that ends while the session is
+    /// on screen counts as seen.
     fn heard(&self, changes: &crate::terminal::activity::Changes) {
-        use crate::changes::turns::Signal;
-        let (changed, unhooked) = {
+        let changed = {
             let mut state = self.state.relock();
             let watched = state.is_watched();
-            let changed = state.session.observe(changes, watched);
-            let unhooked = (changed && !state.session.hooked()).then_some(state.session.activity);
-            (changed, unhooked)
+            state.session.observe(changes, watched)
         };
-        if let Some(activity) = changes.activity {
-            self.turns.send(Signal::Hook(activity));
-        }
-        for edit in &changes.edits {
-            self.turns
-                .send(Signal::Edited(std::path::PathBuf::from(edit)));
-        }
-        if let Some(activity) = unhooked {
-            self.turns.send(Signal::Unhooked(activity));
-        }
         if changed {
             crate::notify_changed();
         }
@@ -357,16 +335,9 @@ pub struct Terminal {
 
 impl Terminal {
     /// Starts a new session of `launch` on screen in `view`, showing `shown_first` before the
-    /// shell's own output (`transcript::shown`; empty for nothing). Its turns are reported
-    /// through `turns`.
-    pub fn start(
-        view: ViewSize,
-        launch: Launch,
-        palette: Palette,
-        turns: crate::changes::turns::TurnTap,
-        shown_first: &[u8],
-    ) -> Self {
-        let shared = Arc::new(Shared::new(launch, palette, view, turns));
+    /// shell's own output (`transcript::shown`; empty for nothing).
+    pub fn start(view: ViewSize, launch: Launch, palette: Palette, shown_first: &[u8]) -> Self {
+        let shared = Arc::new(Shared::new(launch, palette, view));
         let engine = Arc::new(Engine::new(&shared, grid_size(view)));
         *shared.engine.relock() = Some(Arc::clone(&engine));
         if !shown_first.is_empty() {
@@ -530,12 +501,6 @@ impl Terminal {
             let mut state = self.shared.state.relock();
             state.session.seen();
             state.blink_from = Instant::now();
-            // Without hooks, Return is the best sign a turn starts.
-            if !state.awaiting && bytes.contains(&b'\r') && !state.session.hooked() {
-                self.shared
-                    .turns
-                    .send(crate::changes::turns::Signal::Entered);
-            }
             if state.awaiting {
                 let restart = bytes.contains(&b'\r');
                 if restart {
@@ -880,13 +845,7 @@ mod tests {
             height: 240,
             cell: CELL,
         };
-        let terminal = Terminal::start(
-            view,
-            launch,
-            palette,
-            crate::changes::turns::TurnTap::default(),
-            &[],
-        );
+        let terminal = Terminal::start(view, launch, palette, &[]);
         let started = Instant::now();
         let mut typed = false;
         loop {

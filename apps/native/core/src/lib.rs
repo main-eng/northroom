@@ -7,7 +7,6 @@ pub mod app_ffi;
 pub mod archive;
 pub mod board;
 mod calendar;
-pub mod changes;
 pub mod colour_picker;
 pub mod columns;
 pub mod commands;
@@ -106,8 +105,6 @@ pub(crate) struct App {
     pub board_frames: Mutex<Vec<board::Frame>>,
     /// The open page's file id, and the text last read or written.
     pub page_file: Mutex<Option<(String, String)>>,
-    /// What terminals changed in their folders (`changes`), started on first use.
-    pub changes: OnceLock<changes::service::Service>,
 }
 
 static APP: OnceLock<App> = OnceLock::new();
@@ -170,7 +167,6 @@ pub(crate) fn start() {
         board_rows: Mutex::new(Vec::new()),
         board_frames: Mutex::new(Vec::new()),
         page_file: Mutex::new(None),
-        changes: OnceLock::new(),
         watcher: Mutex::new(None),
         files: Mutex::new(ffi::NrFileSystem::NONE),
         changed: Mutex::new(None),

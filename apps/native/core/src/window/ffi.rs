@@ -49,8 +49,6 @@ pub use crate::columns::View as NrFolderView;
 pub struct NrShellView {
     /// The active tab is the Settings tab, shown in the folder's place.
     pub settings: bool,
-    /// The active tab is a Changes tab, shown in the folder's place (`changes::ffi`).
-    pub changes: bool,
     pub folder: NrFolderView,
     /// How many columns are drawn: none for a board or list, or while a file opened from them
     /// fills the tab.
@@ -61,7 +59,6 @@ pub struct NrShellView {
 pub extern "C" fn nr_shell_view() -> NrShellView {
     NrShellView {
         settings: crate::ffi::nr_settings_tab() >= 0,
-        changes: crate::changes::ffi::nr_changes_shown(),
         folder: crate::ffi::folder_view(),
         columns: with_columns(|columns| columns.drawn_columns()).unwrap_or(0),
     }
@@ -229,8 +226,7 @@ pub struct NrWindowLayout {
 }
 
 /// Lays out a `width` × `height` window with `columns` columns, the open file in view `opened`
-/// (as `NrOpenedView::view`), settings when shown, and `changes` when the active tab is a
-/// Changes tab.
+/// (as `NrOpenedView::view`), and settings when shown.
 #[no_mangle]
 pub extern "C" fn nr_window_layout(
     width: f64,
@@ -238,7 +234,6 @@ pub extern "C" fn nr_window_layout(
     columns: usize,
     opened: NrOpenedViewKind,
     settings: bool,
-    changes: bool,
 ) -> NrWindowLayout {
     let laid = crate::window::layout(
         width,
@@ -247,7 +242,6 @@ pub extern "C" fn nr_window_layout(
             columns,
             opened: view_of(opened),
             settings,
-            changes,
         },
     );
     let (reveal_start, reveal_end) = laid.reveal.unwrap_or((0.0, 0.0));
@@ -370,8 +364,6 @@ pub struct NrTitleBar {
     pub sessions: NrRect,
     pub sessions_glyph: NrRect,
     pub sessions_words_x: f64,
-    /// The review button, left of the sessions button.
-    pub review: NrRect,
     /// How far the tabs are scrolled.
     pub offset: f64,
     /// How many tabs `nr_title_bar_tab` returns.
@@ -391,7 +383,6 @@ fn bar_of(layout: &crate::window::title_bar::Layout, carried: Option<usize>) -> 
         sessions: rect(layout.sessions),
         sessions_glyph: rect(layout.sessions_glyph),
         sessions_words_x: layout.sessions_words_x,
-        review: rect(layout.review),
         offset: layout.offset,
         tab_count: layout.tabs.len(),
         carried: carried.map_or(-1, |tab| tab as i64),
@@ -546,8 +537,6 @@ pub enum NrBarControl {
     Update,
     /// The sessions button.
     Sessions,
-    /// The review button, which opens the Changes tab (`nr_changes_open_current`).
-    Review,
     /// A tab's cross.
     Close,
     /// "+".
@@ -654,7 +643,6 @@ pub extern "C" fn nr_title_bar_hit(x: f64, y: f64) -> NrTitleBarHit {
         Control::Forward => (NrBarControl::Forward, -1),
         Control::Update => (NrBarControl::Update, -1),
         Control::Sessions => (NrBarControl::Sessions, -1),
-        Control::Review => (NrBarControl::Review, -1),
         Control::Close(tab) => (NrBarControl::Close, tab as i64),
         Control::Plus => (NrBarControl::Plus, -1),
         Control::Tab(tab) => (NrBarControl::Tab, tab as i64),
@@ -681,13 +669,11 @@ pub unsafe extern "C" fn nr_title_bar_tooltip(
         crate::ffi::nr_history_can_go_forward(),
     );
     let sessions = crate::sessions::ffi::sessions_summary();
-    let review = crate::changes::ffi::review_title();
     let tips = crate::window::title_bar::Tips {
         can_go_back: back,
         can_go_forward: forward,
         update: &update,
         sessions: &sessions,
-        review: &review,
     };
     let said = with_title_bar(|bar| bar.tooltip(x, y, &tips));
     let (place, words) = said.map_or((None, String::new()), |(place, words)| (Some(place), words));

@@ -28,6 +28,9 @@ const START_FOLDER: &str = "Northroom";
 /// The settings' folder, in the platform's folder for programs' settings.
 const SETTINGS_FOLDER: &str = "northroom";
 const SETTINGS_FOLDER_WINDOWS: &str = "Northroom";
+/// Where change review kept its snapshots and records, in the app's folder. 1.4.0 was the last
+/// version to use it (ADR-0002).
+const CHANGE_REVIEW_FOLDER: &str = "changes";
 
 /// The platform's folders the app's own go in: on a Mac `~/Library/Application Support`,
 /// `~/Library/Logs` and `~/Library/Caches`.
@@ -132,6 +135,16 @@ fn settings_folder(set: &impl Fn(&str) -> Option<PathBuf>) -> PathBuf {
         .join(SETTINGS_FOLDER)
 }
 
+/// Removes what change review left in the app's folder `support`: that one folder and nothing
+/// beside it. A link in its place is removed, not followed, and no folder there is no failure.
+/// This step can go once nobody still runs a version from before it.
+pub fn remove_change_review_data(support: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(support.join(CHANGE_REVIEW_FOLDER)) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 static PATHS: Mutex<Option<Paths>> = Mutex::new(None);
 
 /// Resolves the app's folders over the platform's `bases` for this process's environment.
@@ -208,6 +221,38 @@ mod tests {
             paths.scene_host,
             std::env::temp_dir().join("northroom-scene-host")
         );
+    }
+
+    #[test]
+    fn what_change_review_left_is_removed_and_nothing_beside_it() {
+        let support = tempfile::tempdir().expect("support");
+        let left = support.path().join("changes");
+        std::fs::create_dir_all(left.join("objects/ab")).expect("store");
+        std::fs::write(left.join("objects/ab/cd"), "kept once").expect("object");
+        std::fs::write(left.join("records.json"), "{}").expect("record");
+        std::fs::write(support.path().join("selection.json"), "{}").expect("beside");
+        std::fs::create_dir(support.path().join("changes-of-mine")).expect("beside");
+        remove_change_review_data(support.path()).expect("removed");
+        assert!(!left.exists());
+        assert!(support.path().join("selection.json").is_file());
+        assert!(support.path().join("changes-of-mine").is_dir());
+        // The next launch finds nothing to remove.
+        remove_change_review_data(support.path()).expect("nothing there");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_link_where_change_review_kept_its_data_is_removed_not_followed() {
+        let (support, elsewhere) = (
+            tempfile::tempdir().expect("support"),
+            tempfile::tempdir().expect("elsewhere"),
+        );
+        std::fs::write(elsewhere.path().join("mine.txt"), "mine").expect("file");
+        let link = support.path().join("changes");
+        std::os::unix::fs::symlink(elsewhere.path(), &link).expect("link");
+        remove_change_review_data(support.path()).expect("removed");
+        assert!(link.symlink_metadata().is_err());
+        assert!(elsewhere.path().join("mine.txt").is_file());
     }
 
     #[test]

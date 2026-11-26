@@ -227,9 +227,7 @@ fn bar_state<'a>(
         phones,
         update_label,
         update_enabled: crate::update::ffi::menu_enabled(),
-        folder_shows: with_columns(|_| ()).is_some()
-            && crate::ffi::nr_settings_tab() < 0
-            && !crate::changes::ffi::nr_changes_shown(),
+        folder_shows: with_columns(|_| ()).is_some() && crate::ffi::nr_settings_tab() < 0,
         drive_changeable: crate::paths::get().fixed_drive.is_none(),
         view: crate::ffi::folder_view(),
         language: language(),
@@ -272,10 +270,6 @@ fn run_bar(command: BarCommand) -> Effect {
         BarCommand::CheckForUpdates => Effect::CheckForUpdates,
         BarCommand::ShowSettings => {
             nr_settings_open();
-            Effect::Changed
-        }
-        BarCommand::ShowChanges => {
-            crate::changes::ffi::nr_changes_open_current();
             Effect::Changed
         }
         BarCommand::ChooseDrive => Effect::ChooseDrive,
@@ -392,7 +386,6 @@ fn menu_file(entry: Entry) -> menus::File {
         terminal: entry.kind == EntryKind::Terminal,
         running: entry.kind == EntryKind::Terminal
             && crate::ffi::session_activity(&entry.id).is_some(),
-        folder: entry.kind == EntryKind::Folder,
         protection: entry
             .protection
             .map(|protection| crate::strings::text(language(), protection.words())),
@@ -547,22 +540,7 @@ fn run_folder(menu: &FolderMenu, command: FolderCommand) -> Effect {
             columns.create_terminal(column, language())
         })),
         FolderCommand::Import => Effect::Import(menus::import_button(language())),
-        FolderCommand::ShowChanges => show_changes(menu),
     }
-}
-
-/// Opens the Changes tab of the folder the menu was opened on: the clicked folder, else the
-/// folder of its column.
-fn show_changes(menu: &FolderMenu) -> Effect {
-    let folder = match menu.which {
-        NrMenu::Card | NrMenu::File => paths_of(std::slice::from_ref(&menu.clicked)).pop(),
-        _ => crate::ffi::column_folder(menu.column),
-    };
-    let Some(folder) = folder else {
-        return Effect::Nothing;
-    };
-    crate::changes::ffi::open_folder(&folder);
-    Effect::Changed
 }
 
 // MARK: The list header's options
@@ -762,31 +740,6 @@ pub extern "C" fn nr_unlock_forget_asked() {
 fn ask(ask: Ask, prompt: Prompt) -> Effect {
     *PROMPT.relock() = Some((ask, prompt));
     Effect::Prompt
-}
-
-/// An effect that does nothing.
-pub(crate) fn nothing() -> NrMenuEffect {
-    hand_over(Effect::Nothing)
-}
-
-/// A notice titled `title` that says `words`.
-pub(crate) fn failed(title: &'static str, words: String) -> NrMenuEffect {
-    hand_over(Effect::Toast(title, words))
-}
-
-/// What a Changes tab's action came to (`changes::ffi::Outcome`): a redraw, nothing, or a
-/// notice of why it failed.
-fn outcome_effect(outcome: crate::changes::ffi::Outcome) -> Effect {
-    match outcome {
-        Ok(true) => Effect::Changed,
-        Ok(false) => Effect::Nothing,
-        Err(failed) => Effect::Toast(failed.title, failed.words),
-    }
-}
-
-/// `outcome_effect` for the FFI.
-pub(crate) fn outcome(outcome: crate::changes::ffi::Outcome) -> NrMenuEffect {
-    hand_over(outcome_effect(outcome))
 }
 
 /// Opens a rename dialog for file `id` in a column's folder, for views without inline rename.

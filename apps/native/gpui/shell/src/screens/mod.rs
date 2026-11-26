@@ -1,7 +1,6 @@
 //! The window's screens. Each is its own GPUI view, placed at the frame the core lays out for it
 //! (`nr_window_layout`): the title bar, the folder as a list or board, its columns, settings, the
-//! Changes tab, the welcome screen when no folder is chosen, and the open file in its view
-//! (`nr_opened_view`).
+//! welcome screen when no folder is chosen, and the open file in its view (`nr_opened_view`).
 //!
 //! A screen implements `Screen`. It reads its content from the core (`reload`), takes a frame
 //! (`place`), may take keyboard focus (`keys`) and reports its state to checks (`probe`,
@@ -14,7 +13,6 @@
 //! and a line in `script::table`.
 
 pub mod board;
-pub mod changes;
 pub mod columns;
 pub mod controls;
 pub mod deck;

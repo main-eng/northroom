@@ -605,14 +605,7 @@ fn start_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> Term
     let environment: Vec<(String, String)> = std::env::vars().collect();
     let palette = terminal_palette();
     // Read before the sessions' lock, which the columns' lock never waits under.
-    let (drive, metadata) = with_columns(|columns| {
-        let workspace = columns.workspace();
-        (
-            workspace.root().to_path_buf(),
-            workspace.metadata_directory().to_path_buf(),
-        )
-    })
-    .unzip();
+    let metadata = with_columns(|columns| columns.workspace().metadata_directory().to_path_buf());
     // The terminal file decides the folder; the person decides what runs (ADR-0005).
     let shell = choose_shell(std::env::var("SHELL").ok().as_deref());
     let directory = path
@@ -629,14 +622,13 @@ fn start_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> Term
         }
     };
     let launch = build_launch(&directory, &environment, &shell, &session);
-    let turns = crate::changes::ffi::follow_terminal(id, path, &directory, drive.as_deref());
     // The terminal's output from before the last quit shows above the new shell, once.
     let restored = metadata
         .as_deref()
         .and_then(|metadata| crate::terminal::transcript::take(metadata, id))
         .map(|text| crate::terminal::transcript::shown(&text, interface_language()))
         .unwrap_or_default();
-    let started = Terminal::start(view, launch, palette, turns, &restored);
+    let started = Terminal::start(view, launch, palette, &restored);
     // An agent open in it at the last quit opens its conversation again: the command is typed
     // once the shell waits at its prompt.
     let resume = metadata
@@ -1147,11 +1139,6 @@ fn platform_file_index(index: NrFileIndex) -> crate::workspace::FileIndex {
         (written > 0)
             .then(|| crate::workspace::Indexed::parse(&String::from_utf8_lossy(&buffer[..written])))
     })
-}
-
-/// The trash the drive deletes into, for the Changes tab's reverts.
-pub(crate) fn drive_trash() -> Option<crate::workspace::Trash> {
-    run_trash(app().files.relock().trash)
 }
 
 /// The trash this run deletes into: a check's own folder, none for any other check, else the
@@ -1756,15 +1743,6 @@ fn take_opened_elsewhere() -> String {
 }
 
 /// Why a column's folder takes no new files; `None` when it does.
-/// The folder column `column` shows.
-pub(crate) fn column_folder(column: usize) -> Option<PathBuf> {
-    with_columns(|columns| {
-        let location = columns.columns().get(column)?.location.clone();
-        columns.workspace().require_directory(&location).ok()
-    })
-    .flatten()
-}
-
 pub(crate) fn folder_refusal(column: usize) -> Option<&'static str> {
     let protection = with_columns(|columns| {
         let location = columns.columns().get(column)?.location.clone();
@@ -2463,18 +2441,13 @@ pub extern "C" fn nr_tabs_active() -> usize {
     with_columns(|columns| columns.active_tab()).unwrap_or(0)
 }
 
-/// The name a tab shows: the file or folder it holds, "Changes" for a Changes tab, "Settings"
-/// for the Settings tab, or for a tab filled by one terminal, the task its session reports. Valid until the next call to this
+/// The name a tab shows: the file or folder it holds, "Settings" for the Settings tab, or for a
+/// tab filled by one terminal, the task its session reports. Valid until the next call to this
 /// function.
 #[no_mangle]
 pub extern "C" fn nr_tab_title(index: usize) -> NrText {
     static TITLE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
     let (title, terminal) = with_columns(|columns| {
-        if columns.tab_changes(index).is_some() {
-            let words =
-                crate::strings::text(interface_language(), crate::strings::key::CHANGES_TITLE);
-            return (words.to_owned(), None);
-        }
         if columns.tab_kind(index) == 7 {
             let words =
                 crate::strings::text(interface_language(), crate::strings::key::SETTINGS_TITLE);
@@ -2563,33 +2536,26 @@ pub extern "C" fn nr_tab_reopen_closed() {
             eprintln!("the closed tab did not reopen: {error}");
         }
     });
-    crate::changes::ffi::tab_reopened();
     watch_open_columns();
 }
 
 /// Closes a tab. The last one stays open. A terminal in it that runs nothing but its shell,
 /// and that no other tab shows, ends with it (`session_at_rest`); an agent or a program at
-/// work runs on and stays in the sessions list. A Changes tab's root is no longer watched for
-/// it.
+/// work runs on and stays in the sessions list.
 #[no_mangle]
 pub extern "C" fn nr_tab_close(index: usize) {
-    let (terminals, changes) = with_columns(|columns| {
+    let terminals: Vec<String> = with_columns(|columns| {
         if !columns.can_close_tab(index) {
-            return (Vec::new(), None);
+            return Vec::new();
         }
         let terminals = columns.tab_terminal_ids(index);
-        let changes = columns.tab_changes(index).map(Path::to_path_buf);
         columns.close_tab(index);
-        let ended = terminals
+        terminals
             .into_iter()
             .filter(|id| !columns.shows_terminal(id))
-            .collect();
-        (ended, changes)
+            .collect()
     })
     .unwrap_or_default();
-    if let Some(root) = changes {
-        crate::changes::ffi::tab_closed(&root);
-    }
     for id in terminals {
         if session_at_rest(&id) {
             end_session(&id);
@@ -3028,19 +2994,6 @@ pub unsafe extern "C" fn nr_opened_syntax_call(code: *const c_char) -> NrText {
             .and_then(|title| crate::highlight::call(&code, crate::list::name_extension(&title)))
             .unwrap_or_default(),
     )
-}
-
-/// As `nr_opened_syntax_call`, for `code` from any file with `extension` (`list::name_extension`,
-/// as `nr_changes_diff_load` gives it): the expression that colours it, or empty when it stays
-/// plain. Valid until the next call that lends text.
-///
-/// # Safety
-/// `extension` and `code` must be NUL-terminated strings.
-#[no_mangle]
-pub unsafe extern "C" fn nr_syntax_call(extension: *const c_char, code: *const c_char) -> NrText {
-    // SAFETY: the caller passes NUL-terminated strings.
-    let (extension, code) = unsafe { (text_of(extension), text_of(code)) };
-    lend(crate::highlight::call(&code, &extension).unwrap_or_default())
 }
 
 /// A stretch of coloured source (`highlight::Run`). `colored` false: the text is the shell's
@@ -4733,7 +4686,6 @@ pub(crate) fn end_session(id: &str) {
     if let Some(session) = session {
         session.stop();
     }
-    crate::changes::ffi::unfollow_terminal(id);
     with_columns(|columns| columns.close_tabs_of(id));
     trash_if_throwaway(id);
     watch_open_columns();
@@ -4814,7 +4766,6 @@ pub extern "C" fn nr_terminals_quit() {
         session.stop();
     }
     for id in ended {
-        crate::changes::ffi::unfollow_terminal(&id);
         // A throwaway terminal goes to the Trash, and its output with it.
         if trash_if_throwaway(&id) {
             if let Some(metadata) = &metadata {
@@ -4823,7 +4774,6 @@ pub extern "C" fn nr_terminals_quit() {
             }
         }
     }
-    crate::changes::ffi::save_now();
 }
 
 /// Keeps the command that resumes terminal `id`'s agent, or clears it for `None`

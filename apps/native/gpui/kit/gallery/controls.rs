@@ -314,7 +314,6 @@ impl Stage {
             0,
             NrOpenedViewKind::None,
             true,
-            nr_changes_shown(),
         )
         .content;
         let laid = settings_window(&page, content.width, content.height, &sizes);

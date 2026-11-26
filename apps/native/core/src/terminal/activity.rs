@@ -224,8 +224,6 @@ pub struct Changes {
     pub notification: Option<String>,
     /// The activity a launch hook reported last, if any.
     pub activity: Option<Activity>,
-    /// The files the hook reported the agent edited, in order.
-    pub edits: Vec<String>,
     /// The agent's conversation id the hook reported last, checked (`resume::is_conversation_id`).
     pub conversation: Option<String>,
     /// The folder the agent runs in, as the hook reported it last: an absolute path.
@@ -237,7 +235,6 @@ const OSC_MAX_CHARS: usize = 4096;
 const TITLE_MAX_CHARS: usize = 512;
 const ACTIVITY_OSC: &str = "6973";
 const ACTIVITY_PREFIX: &str = "northroom;activity=";
-const EDIT_PREFIX: &str = "northroom;edit=";
 const SESSION_PREFIX: &str = "northroom;session=";
 const SESSION_FOLDER_PREFIX: &str = "northroom;session-dir=";
 
@@ -338,16 +335,11 @@ impl Signals {
     }
 }
 
-/// What Northroom's hook reported in one OSC 6973: an activity, a file the agent edited, or
-/// the agent's conversation and its folder. An id or folder that is not one is left out.
+/// What Northroom's hook reported in one OSC 6973: an activity, or the agent's conversation
+/// and its folder. An id or folder that is not one is left out.
 fn read_hook(text: &str, changes: &mut Changes) {
     if let Some(activity) = text.strip_prefix(ACTIVITY_PREFIX).and_then(Activity::named) {
         changes.activity = Some(activity);
-    } else if let Some(path) = text
-        .strip_prefix(EDIT_PREFIX)
-        .filter(|path| !path.is_empty())
-    {
-        changes.edits.push(path.to_owned());
     } else if let Some(id) = text
         .strip_prefix(SESSION_PREFIX)
         .filter(|id| crate::terminal::resume::is_conversation_id(id))
@@ -463,11 +455,6 @@ impl Session {
             });
         }
         titled
-    }
-
-    /// Whether the program reports through Northroom's hooks.
-    pub fn hooked(&self) -> bool {
-        self.hooked
     }
 
     /// Sets the foreground agent to `agent`: a different one, or none once the person is back at
@@ -719,15 +706,12 @@ mod tests {
                 .activity,
             None
         );
-        // The hook's edits come with the activity, in order, split across chunks too.
-        let first = signals.observe("\u{1b}]6973;northroom;activity=working\u{7}\u{1b}]6973;northroom;edit=/p/a b.rs\u{7}\u{1b}]6973;north");
-        assert_eq!(first.activity, Some(Activity::Working));
-        assert_eq!(first.edits, ["/p/a b.rs"]);
-        assert_eq!(signals.observe("room;edit=/p/c.rs\u{7}").edits, ["/p/c.rs"]);
-        assert!(signals
-            .observe("\u{1b}]6973;northroom;edit=\u{7}")
-            .edits
-            .is_empty());
+        // A sequence split across chunks is read once it ends.
+        assert_eq!(signals.observe("\u{1b}]6973;north").activity, None);
+        assert_eq!(
+            signals.observe("room;activity=working\u{7}").activity,
+            Some(Activity::Working)
+        );
         let long = format!("\u{1b}]0;{}\u{7}", "x".repeat(5000));
         assert_eq!(
             signals.observe(&long).title,

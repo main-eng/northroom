@@ -34,6 +34,13 @@ pub unsafe extern "C" fn nr_paths_open(
         logs: PathBuf::from(logs),
         caches: PathBuf::from(caches),
     });
+    // Off the launch's thread: the folder held up to 2 GB.
+    let support = crate::paths::get().support;
+    std::thread::spawn(move || {
+        if let Err(error) = crate::paths::remove_change_review_data(&support) {
+            eprintln!("what change review left was not removed: {error}");
+        }
+    });
 }
 
 /// An app folder (`paths::Paths`).

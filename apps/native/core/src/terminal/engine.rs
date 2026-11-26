@@ -510,7 +510,6 @@ impl std::io::Read for TappedPty {
         changes.title = None;
         if changes.notification.is_some()
             || changes.activity.is_some()
-            || !changes.edits.is_empty()
             || changes.conversation.is_some()
             || changes.conversation_folder.is_some()
         {

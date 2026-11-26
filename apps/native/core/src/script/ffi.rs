@@ -161,7 +161,6 @@ enum Shell {
     TerminalTyping,
     Trace,
     Window(String),
-    ChangesSay,
 }
 
 /// The kind of step the shell performs (`NrScriptStep::kind`).
@@ -230,8 +229,6 @@ pub enum NrScriptKind {
     /// Set the app's appearance as the system would (`number` 0 light, 1 dark, -1 follow the
     /// system again).
     Look,
-    /// Report what the Changes tab lists and diffs.
-    ChangesSay,
 }
 
 /// An event a step makes (`NrScriptStep::event`).
@@ -399,7 +396,6 @@ fn handed(shell: Shell) -> Handed {
         },
         Shell::MenuBar => H::kind(NrScriptKind::MenuBar),
         Shell::MenuKeys => H::kind(NrScriptKind::MenuKeys),
-        Shell::ChangesSay => H::kind(NrScriptKind::ChangesSay),
         Shell::TrayMenu => H::kind(NrScriptKind::TrayMenu),
         Shell::Gutter { plus } => H {
             number: i64::from(plus),
@@ -646,8 +642,6 @@ fn run_step(runner: &mut Runner, step: Step) -> Shell {
         Step::CloseTab => nr_tab_close(nr_tabs_active()),
         Step::FirstTab => nr_tab_select(0),
         Step::Settings => nr_settings_open(),
-        Step::Changes => crate::changes::ffi::nr_changes_open_current(),
-        Step::ChangesSay => return Shell::ChangesSay,
         Step::MenuBar => return Shell::MenuBar,
         Step::MenuKeys => return Shell::MenuKeys,
         Step::Gutter { plus } => return Shell::Gutter { plus },

@@ -50,12 +50,9 @@ pub unsafe trait Zeroed {}
 
 // SAFETY: each is the core's `#[repr(C)]` struct of numbers, flags, raw pointers, `NrText`,
 // `NrRect`, `NrColor` and enums whose first variant is 0 (`NrFileKind::Folder`,
-// `NrDetailsShows::Glyph`, `NrChangesStatus::Added`, `NrChangesRowShows::Header`).
+// `NrDetailsShows::Glyph`).
 unsafe impl Zeroed for NrText {}
 unsafe impl Zeroed for NrRect {}
-unsafe impl Zeroed for northroom_core::changes::ffi::NrChangesFile {}
-unsafe impl Zeroed for northroom_core::changes::ffi::NrChangesFrames {}
-unsafe impl Zeroed for northroom_core::changes::ffi::NrChangesRow {}
 unsafe impl Zeroed for northroom_core::ffi::NrDetails {}
 unsafe impl Zeroed for northroom_core::ffi::NrFileRow {}
 unsafe impl Zeroed for northroom_core::ffi::NrListRow {}

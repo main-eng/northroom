@@ -29,9 +29,7 @@ pub fn quote_shell_word(word: &str) -> String {
 /// an escape sequence the core reads and the screen ignores, so no socket or port is needed,
 /// and does nothing outside a Northroom terminal. Claude Code runs hooks without a terminal, so
 /// the hook uses the terminal of its nearest ancestor that has one. It prints nothing for
-/// Claude to read. After a tool that edits a file it also reports the file's path, read from
-/// the event's JSON with the shell's own patterns (the first `"file_path":"` is the tool's, as
-/// quotes inside JSON strings are escaped), for the Changes tab.
+/// Claude to read.
 pub fn activity_hook_script() -> String {
     [
         "#!/bin/sh",
@@ -47,15 +45,10 @@ pub fn activity_hook_script() -> String {
         "    esac",
         "  done",
         "}",
-        "edited=",
         "case \"$1\" in",
         "  SessionStart) activity=idle ;;",
         "  UserPromptSubmit) activity=working ;;",
-        "  PostToolUse) activity=working",
-        "    case $(field tool_name) in",
-        "      Edit|Write|MultiEdit) edited=$(field file_path) ;;",
-        "      NotebookEdit) edited=$(field notebook_path) ;;",
-        "    esac ;;",
+        "  PostToolUse) activity=working ;;",
         "  PreToolUse) case \"$input\" in *AskUserQuestion*) activity=needs-you ;; *) activity=working ;; esac ;;",
         "  PermissionRequest) activity=needs-you ;;",
         "  Notification) case \"$input\" in *permission_prompt*|*agent_needs_input*) activity=needs-you ;; *) exit 0 ;; esac ;;",
@@ -79,10 +72,6 @@ pub fn activity_hook_script() -> String {
         "case \"$folder\" in *\\\\*) folder= ;; esac",
         "[ -z \"$session\" ] || printf '\\033]6973;northroom;session=%s\\007' \"$session\" > \"$terminal\" 2>/dev/null",
         "[ -z \"$folder\" ] || printf '\\033]6973;northroom;session-dir=%s\\007' \"$folder\" > \"$terminal\" 2>/dev/null",
-        "# An escaped path is left out rather than reported wrong.",
-        "case \"$edited\" in *\\\\*) edited= ;; esac",
-        "edited=$(printf '%s' \"$edited\" | tr -d '\\007\\033')",
-        "[ -z \"$edited\" ] || printf '\\033]6973;northroom;edit=%s\\007' \"$edited\" > \"$terminal\" 2>/dev/null",
         "exit 0",
         "",
     ]
@@ -348,44 +337,22 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn after_an_edit_the_hook_reports_the_edited_file() {
+    fn every_event_says_which_conversation_it_is_and_where() {
         let directory = tempfile::tempdir().expect("directory");
-        let at = directory.path();
-        let edited =
-            |input: &str| report_changes(at, "PostToolUse", input, TerminalContext::Northroom);
-        let edit = edited(
-            r#"{"session_id":"s","cwd":"/p","tool_name":"Edit","tool_input":{"file_path":"/p/my file.rs","old_string":"say \"file_path\":\"/wrong\"","new_string":"b"},"tool_response":{"filePath":"/p/my file.rs"}}"#,
+        let used = report_changes(
+            directory.path(),
+            "PostToolUse",
+            r#"{"session_id":"s","cwd":"/p","tool_name":"Edit","tool_input":{"file_path":"/p/my file.rs"}}"#,
+            TerminalContext::Northroom,
         );
-        assert_eq!(edit.activity, Some(Activity::Working));
-        assert_eq!(edit.edits, ["/p/my file.rs"]);
-        // Every event also says which conversation it is and where, to resume it later.
+        assert_eq!(used.activity, Some(Activity::Working));
+        // To resume it later (`terminal::resume`).
         assert_eq!(
             (
-                edit.conversation.as_deref(),
-                edit.conversation_folder.as_deref()
+                used.conversation.as_deref(),
+                used.conversation_folder.as_deref()
             ),
             (Some("s"), Some("/p"))
-        );
-        assert_eq!(
-            edited(r#"{"tool_name": "Write", "tool_input": {"file_path": "/p/new.md"}}"#).edits,
-            ["/p/new.md"]
-        );
-        assert_eq!(
-            edited(r#"{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"/p/n.ipynb"}}"#)
-                .edits,
-            ["/p/n.ipynb"]
-        );
-        // Another tool reports no file, nor does a path with an escape in it.
-        let bash =
-            edited(r#"{"tool_name":"Bash","tool_input":{"command":"echo \"file_path\":\"/x\""}}"#);
-        assert_eq!(
-            (bash.activity, bash.edits.len()),
-            (Some(Activity::Working), 0)
-        );
-        assert!(
-            edited(r#"{"tool_name":"Edit","tool_input":{"file_path":"/p/a\"b"}}"#)
-                .edits
-                .is_empty()
         );
     }
 

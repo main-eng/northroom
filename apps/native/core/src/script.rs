@@ -359,10 +359,6 @@ pub enum Step {
     FirstTab,
     /// Opens Settings (`settings`).
     Settings,
-    /// Opens the Changes tab as the menu bar's Show Changes does (`changes`).
-    Changes,
-    /// Reports what the Changes tab lists and diffs (`changessay`).
-    ChangesSay,
     /// Reports the menu bar's titles, one menu per line.
     MenuBar,
     /// Reports every menu bar shortcut.
@@ -490,8 +486,6 @@ impl Step {
             "close" => Self::CloseTab,
             "first" => Self::FirstTab,
             "settings" => Self::Settings,
-            "changes" => Self::Changes,
-            "changessay" => Self::ChangesSay,
             "menubar" => Self::MenuBar,
             "menukeys" => Self::MenuKeys,
             "blockmenu" => Self::Gutter { plus: false },
@@ -1267,8 +1261,6 @@ mod tests {
             ("list", Step::View(View::List)),
             ("columns", Step::View(View::Columns)),
             ("settings", Step::Settings),
-            ("changes", Step::Changes),
-            ("changessay", Step::ChangesSay),
             ("tab", Step::NewTab),
             ("menubar", Step::MenuBar),
             ("htmlprobe", Step::HtmlProbe),

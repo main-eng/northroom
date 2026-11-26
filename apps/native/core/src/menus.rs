@@ -364,8 +364,6 @@ const FORGET_PHONE_ID: &str = "forget-phone:";
 pub enum BarCommand {
     CheckForUpdates,
     ShowSettings,
-    /// Opens the Changes tab of the root with the latest turn, else of the folder on screen.
-    ShowChanges,
     /// Opens the system folder picker to choose another drive.
     ChooseDrive,
     /// Show the QR code a phone pairs with (ADR-0016).
@@ -505,7 +503,6 @@ pub fn menu_bar(state: BarState) -> Vec<Menu> {
             views
                 .chain([
                     Entry::separator(),
-                    Entry::item("changes", say(key::MENU_SHOW_CHANGES)).enabled(state.folder_shows),
                     Entry::item("reload", say(key::MENU_RELOAD)).keys(Shortcut::command('r')),
                     Entry::system(Role::FullScreen, say(key::MENU_TOGGLE_FULL_SCREEN))
                         .keys(Shortcut::with('f', COMMAND | CONTROL)),
@@ -602,7 +599,6 @@ pub fn bar_command(id: &str) -> Option<BarCommand> {
     Some(match id {
         "updates" => BarCommand::CheckForUpdates,
         "settings" => BarCommand::ShowSettings,
-        "changes" => BarCommand::ShowChanges,
         "change-drive" => BarCommand::ChooseDrive,
         "connect-phone" => BarCommand::ConnectPhone,
         "board" => BarCommand::ShowView(View::Board),
@@ -703,8 +699,6 @@ pub struct File {
     pub terminal: bool,
     /// A terminal file with a running session, which its menu can end.
     pub running: bool,
-    /// A folder, whose changes its menu can show.
-    pub folder: bool,
 }
 
 /// View ▸ as Board, as List, as Columns, at the end of every drive menu. The three choices form
@@ -794,9 +788,8 @@ pub fn file_menu(group: &[File], view: View, desktop: Desktop, language: &str) -
     Menu::new("", entries).wide(192.0)
 }
 
-/// Open and Open in New Tab for one file, with End Session for a running terminal and Show
-/// Changes for a folder; Open alone for terminals selected together, which open side by side
-/// in one tab.
+/// Open and Open in New Tab for one file, with End Session for a running terminal; Open alone
+/// for terminals selected together, which open side by side in one tab.
 fn opening_entries(group: &[File], language: &str) -> Vec<Entry> {
     let say = |key: Key| strings::text(language, key);
     let open = || Entry::item("open", say(key::MENU_OPEN)).icon(Glyph::FolderOpen);
@@ -811,19 +804,7 @@ fn opening_entries(group: &[File], language: &str) -> Vec<Entry> {
     if file.running {
         opening.push(Entry::item("end-session", say(key::MENU_END_SESSION)).icon(Glyph::Close));
     }
-    if file.folder {
-        opening.push(show_changes_entry(language));
-    }
     opening
-}
-
-/// Show Changes, which opens the Changes tab of a folder's root.
-fn show_changes_entry(language: &str) -> Entry {
-    Entry::item(
-        "show-changes",
-        strings::text(language, key::MENU_SHOW_CHANGES),
-    )
-    .icon(Glyph::Diff)
 }
 
 /// The files a row's menu is about: the selected group when the clicked row is part of it,
@@ -870,8 +851,6 @@ pub fn background_menu(
                 .enabled(clipboard == Clipboard::Files),
         ]);
     }
-    entries.push(Entry::separator());
-    entries.push(show_changes_entry(language));
     entries.extend(view_entries(view, language));
     entries.push(sort_entry(sorted_by, language));
     Menu::new("", entries).wide(176.0)
@@ -933,8 +912,6 @@ pub enum FolderCommand {
     Import,
     /// Copies the clipboard's files into the folder.
     Paste,
-    /// Opens the Changes tab of the folder clicked, or of the folder of the menu.
-    ShowChanges,
 }
 
 /// The action for folder menu entry `id`.
@@ -967,7 +944,6 @@ pub fn folder_command(id: &str) -> Option<FolderCommand> {
         "new-terminal" => FolderCommand::NewTerminal,
         "import" => FolderCommand::Import,
         "paste" => FolderCommand::Paste,
-        "show-changes" => FolderCommand::ShowChanges,
         _ => return None,
     })
 }
@@ -1254,8 +1230,7 @@ const SESSIONS_MENU_MAX_HEIGHT: f64 = 560.0;
 /// The menu of the title bar's sessions button: every running session under its group heading
 /// (`sessions::grouped`), each heading showing a count. Waiting sessions come first, so while
 /// one waits the first heading shows the next-session shortcut, which works while the menu is
-/// open. With no session running it says so. At least 300 pt wide. Review changes is the title
-/// bar's own button beside it (`title_bar::Control::Review`), not a row here.
+/// open. With no session running it says so. At least 300 pt wide.
 pub fn sessions_menu(running: &[crate::sessions::Running], language: &str) -> Menu {
     use crate::sessions::{grouped, next};
     let mut entries = Vec::new();
@@ -1526,7 +1501,6 @@ mod tests {
             beside: Beside::TakesFiles,
             terminal: false,
             running: false,
-            folder: false,
         }
     }
 
@@ -1608,7 +1582,7 @@ mod tests {
             [
                 "Northroom: About Northroom | Check for Updates… | - | Settings… | Change Drive Folder… | Connect Phone… | - | Services | - | Hide Northroom | Hide Others | Show All | - | Quit Northroom",
                 "Edit: Undo | Redo | - | Cut | Copy | Paste | Paste and Match Style | Delete | Select All | - | Speech",
-                "View: as Board | as List | as Columns | - | Show Changes | Reload | Toggle Full Screen",
+                "View: as Board | as List | as Columns | - | Reload | Toggle Full Screen",
                 "Window: Minimize | Zoom | - | Bring All to Front",
                 "Help: Open Diagnostic Logs | - | Northroom Help",
             ]
@@ -1705,10 +1679,8 @@ mod tests {
             bar_command("next-session"),
             Some(BarCommand::ShowNextSession)
         );
-        // With no session running the menu says so. Review changes is not in it: it is the
-        // title bar's own button.
+        // With no session running the menu says so.
         assert_eq!(titles(&sessions_menu(&[], "en"))[0], "No agents running");
-        assert!(menu.find("changes").is_none());
         // The menu bar icon's menu lists the waiting sessions above its own rows.
         let tray = tray("Check for Updates…", true, &running, "en");
         assert_eq!(
@@ -2097,17 +2069,11 @@ mod tests {
                 "Import…",
                 "Paste",
                 "-",
-                "Show Changes",
-                "-",
                 "View",
                 "Sort By"
             ]
         );
         assert!(separators_are_tidy(&open));
-        assert_eq!(
-            folder_command("show-changes"),
-            Some(FolderCommand::ShowChanges)
-        );
         let paste = open.find("paste").expect("paste");
         assert_eq!(
             (paste.enabled, paste.shortcut.as_str(), paste.icon),
@@ -2134,15 +2100,7 @@ mod tests {
         );
         assert_eq!(
             titles(&protected),
-            [
-                "New page",
-                "New folder",
-                "-",
-                "Show Changes",
-                "-",
-                "View",
-                "Sort By"
-            ]
+            ["New page", "New folder", "-", "View", "Sort By"]
         );
         let sort = open.entries.last().and_then(|entry| entry.submenu.as_ref());
         let sort = sort.expect("Sort By");
@@ -2451,16 +2409,6 @@ mod tests {
             folder_command("end-session"),
             Some(FolderCommand::EndSession)
         );
-        let folder = File {
-            folder: true,
-            ..file("f", None)
-        };
-        let menu = file_menu(&[folder], View::List, Desktop::Mac, "en");
-        assert_eq!(
-            titles(&menu)[..3],
-            ["Open", "Open in New Tab", "Show Changes"]
-        );
-        assert_eq!(bar_command("changes"), Some(BarCommand::ShowChanges));
         let stopped = File {
             terminal: true,
             ..file("t", None)

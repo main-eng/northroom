@@ -1,12 +1,11 @@
-//! The window content: title bar, folder list or board, columns, settings, a Changes tab,
-//! welcome and the open file, each its own screen (`screens`), with overlays above (`overlay`).
+//! The window content: title bar, folder list or board, columns, settings, welcome and the
+//! open file, each its own screen (`screens`), with overlays above (`overlay`).
 //! It keeps no core state. It syncs the screens when the core's revision changes (`sync`), places them per
 //! `nr_window_layout`, and handles what screens ask (`asked`). Focus is GPUI's; keys no view
 //! takes go to the window (`keys`).
 
 use crate::overlay::Overlay;
 use crate::screens::board::Board;
-use crate::screens::changes::Changes;
 use crate::screens::columns::Columns;
 use crate::screens::list::ListScreen;
 use crate::screens::onboarding::Onboarding;
@@ -42,10 +41,6 @@ pub struct Workspace {
     pub board: Option<Entity<Board>>,
     pub columns: Entity<Columns>,
     pub settings: Option<Entity<Settings>>,
-    /// The Changes tab's screen, kept while another tab is active so it is as it was left.
-    changes: Option<Entity<Changes>>,
-    /// The active tab is a Changes tab, so its screen shows.
-    changes_shown: bool,
     pub onboarding: Option<Entity<Onboarding>>,
     pub opened: Option<Opened>,
     pub overlay: Overlay,
@@ -72,8 +67,6 @@ impl Workspace {
             board: None,
             columns: columns.clone(),
             settings: None,
-            changes: None,
-            changes_shown: false,
             onboarding: None,
             opened: None,
             overlay: Overlay::new(cx),
@@ -168,9 +161,6 @@ impl Workspace {
         if let Some(settings) = &self.settings {
             all.push(settings);
         }
-        if let Some(changes) = self.shown_changes() {
-            all.push(changes);
-        }
         if let Some(onboarding) = &self.onboarding {
             all.push(onboarding);
         }
@@ -220,8 +210,7 @@ impl Workspace {
         ready
     }
 
-    /// Creates or drops settings, list and board to match `shown`, shows or hides the Changes
-    /// tab's screen, and reloads those that stay.
+    /// Creates or drops settings, list and board to match `shown`, and reloads those that stay.
     fn sync_folder_views(
         &mut self,
         shown: &NrShellView,
@@ -236,7 +225,6 @@ impl Workspace {
         if let Some(settings) = &self.settings {
             settings.update(cx, |settings, cx| settings.reload(window, cx));
         }
-        self.sync_changes(shown.changes, window, cx);
         let as_list = shown.folder == NrFolderView::List;
         match (as_list, self.list.is_some()) {
             (true, false) => self.list = Some(self.made(ListScreen::new, window, cx)),
@@ -255,31 +243,6 @@ impl Workspace {
         if let Some(board) = &self.board {
             board.update(cx, |board, cx| board.reload(window, cx));
         }
-    }
-
-    /// Shows the Changes tab's screen while its tab is active, made the first time and given the
-    /// keys each time it shows. Hidden, it is kept as it was.
-    fn sync_changes(&mut self, shown: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let showing = shown && !self.changes_shown;
-        self.changes_shown = shown;
-        if !shown {
-            return;
-        }
-        if self.changes.is_none() {
-            self.changes = Some(self.made(Changes::new, window, cx));
-        }
-        let Some(changes) = &self.changes else {
-            return;
-        };
-        changes.update(cx, |changes, cx| changes.reload(window, cx));
-        if showing && let Some(keys) = changes.keys(cx) {
-            window.focus(&keys, cx);
-        }
-    }
-
-    /// The Changes tab's screen while its tab is active.
-    pub fn shown_changes(&self) -> Option<&Entity<Changes>> {
-        self.changes.as_ref().filter(|_| self.changes_shown)
     }
 
     /// Replaces the file view when the shown file changes: another file, another tab, or the
@@ -326,9 +289,6 @@ impl Workspace {
             .update(cx, |menus, cx| menus.read_again(window, cx));
         if let Some(settings) = &self.settings {
             settings.update(cx, |settings, cx| settings.reload(window, cx));
-        }
-        if let Some(changes) = self.shown_changes() {
-            changes.update(cx, |changes, cx| changes.reload(window, cx));
         }
         cx.notify();
     }
@@ -392,7 +352,6 @@ impl Workspace {
                 .as_ref()
                 .map_or(NrOpenedViewKind::None, |opened| opened.kind),
             self.settings.is_some(),
-            self.changes_shown,
         )
     }
 
@@ -449,9 +408,6 @@ impl Workspace {
 
     /// The centre of the row or card named `title`, in window points.
     pub fn point_of(&self, title: &str, cx: &App) -> Option<Point<Pixels>> {
-        if let Some(changes) = self.shown_changes() {
-            return changes.point_of(title, cx);
-        }
         let folder = self
             .list
             .as_ref()
@@ -495,8 +451,6 @@ impl Workspace {
             opened.name
         } else if self.settings.is_some() {
             "SettingsView"
-        } else if self.changes_shown {
-            "ChangesView"
         } else if !laid.columns_hidden && contains(&rect(&laid.columns_scroll), at) {
             "ColumnView"
         } else if self.list.is_some() {
@@ -519,9 +473,6 @@ impl Workspace {
         }
         if let Some(settings) = &self.settings {
             settings.place(content, laid, cx);
-        }
-        if let Some(changes) = self.shown_changes() {
-            changes.place(content, laid, cx);
         }
         if let Some(list) = &self.list {
             list.place(content, laid, cx);
@@ -559,7 +510,7 @@ impl Render for Workspace {
         self.sync(window, cx);
         let laid = self.layout(window);
         self.place_screens(&laid, cx);
-        // Back to front: folder, columns and shown file, settings or a Changes tab, title bar,
+        // Back to front: folder, columns and shown file, settings, title bar,
         // welcome, then overlays.
         let mut shown: Vec<AnyView> = Vec::new();
         if !laid.folder_hidden {
@@ -590,7 +541,6 @@ impl Render for Workspace {
         }
         let mut above: Vec<AnyView> = Vec::new();
         above.extend(self.settings.as_ref().map(|settings| settings.view()));
-        above.extend(self.shown_changes().map(|changes| changes.view()));
         above.push(self.bar.view());
         above.extend(self.onboarding.as_ref().map(|onboarding| onboarding.view()));
         // A full-screen video replaces everything. The player draws in window coordinates, so it

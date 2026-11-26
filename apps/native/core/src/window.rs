@@ -87,16 +87,8 @@ pub struct Holds {
     pub columns: usize,
     /// The open file's view, if any.
     pub opened: Option<OpenedView>,
+    /// Settings show in the folder's place.
     pub settings: bool,
-    /// The active tab is a Changes tab, which holds it in place of the folder.
-    pub changes: bool,
-}
-
-impl Holds {
-    /// Whether settings or a Changes tab show in the folder's place.
-    fn covers_folder(self) -> bool {
-        self.settings || self.changes
-    }
 }
 
 /// Frames in window points from the top-left, except the columns and a file beside them, which
@@ -114,7 +106,7 @@ pub struct Layout {
     /// The open file's frame, in the columns' content when `beside`.
     pub opened: Frame,
     pub beside: bool,
-    /// The list and board are hidden because a file, settings or a Changes tab replace them.
+    /// The list and board are hidden because a file or settings replace them.
     pub folder_hidden: bool,
     pub columns_hidden: bool,
     pub opened_hidden: bool,
@@ -130,7 +122,7 @@ pub struct Layout {
 /// Its own column stays visible beside it for navigation; earlier columns scroll off to the
 /// left and scroll back.
 pub fn layout(width: f64, height: f64, holds: Holds) -> Layout {
-    let covered = holds.covers_folder();
+    let covered = holds.settings;
     let top = TITLE_BAR_HEIGHT;
     let below = height - top;
     let content = Frame {
@@ -251,7 +243,6 @@ mod tests {
             columns,
             opened,
             settings: false,
-            changes: false,
         }
     }
 
@@ -373,19 +364,6 @@ mod tests {
                 height: 750.0
             }
         );
-    }
-
-    #[test]
-    fn a_changes_tab_shows_in_the_folder_s_place() {
-        let shown = layout(
-            1280.0,
-            800.0,
-            Holds {
-                changes: true,
-                ..holds(2, Some(OpenedView::Details))
-            },
-        );
-        assert!(shown.folder_hidden && shown.columns_hidden && shown.opened_hidden);
     }
 
     #[test]

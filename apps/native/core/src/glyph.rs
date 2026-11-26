@@ -70,12 +70,10 @@ pub enum Glyph {
     CircleNotch,
     MagnifyingGlass,
     ArrowCircleUp,
-    Diff,
-    ArrowUUpLeft,
 }
 
 impl Glyph {
-    pub const ALL: [Glyph; 60] = [
+    pub const ALL: [Glyph; 58] = [
         Glyph::ArrowLeft,
         Glyph::ArrowRight,
         Glyph::House,
@@ -134,8 +132,6 @@ impl Glyph {
         Glyph::CircleNotch,
         Glyph::MagnifyingGlass,
         Glyph::ArrowCircleUp,
-        Glyph::Diff,
-        Glyph::ArrowUUpLeft,
     ];
 
     /// The name a shell knows the glyph by.
@@ -199,8 +195,6 @@ impl Glyph {
             Glyph::CircleNotch => "circleNotch",
             Glyph::MagnifyingGlass => "magnifyingGlass",
             Glyph::ArrowCircleUp => "arrowCircleUp",
-            Glyph::Diff => "diff",
-            Glyph::ArrowUUpLeft => "arrowUUpLeft",
         }
     }
 
@@ -363,11 +357,6 @@ impl Glyph {
             Glyph::ArrowCircleUp => {
                 r##"<circle cx="12" cy="12" r="10"/><path d="m16 12l-4-4l-4 4m4 4V8"/>"##
             }
-            Glyph::Diff => r##"<path d="M12 3v14M5 10h14M5 21h14"/>"##,
-            // Lucide's undo-2 and check-check.
-            Glyph::ArrowUUpLeft => {
-                r##"<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>"##
-            } // Lucide's square: the empty box of a toggle that is off (CheckSquare when on).
         }
     }
 
