@@ -44,6 +44,18 @@ struct PhoneLinkTests {
         #expect(
             Tell(Data(#"{"type":"bytes","file":"p1","from":0,"size":12,"data":"aGVsbG8="}"#.utf8))
                 == .bytes(file: "p1", from: 0, size: 12, Data("hello".utf8)))
+        #expect(
+            text(.page(file: "d1", page: 2, width: 390))
+                == #"{"file":"d1","page":2,"type":"page","width":390}"#)
+        let marks = Tell(
+            Data(
+                ##"{"type":"marks","file":"d1","page":0,"width":390.0,"marks":[{"mark":"words","text":"Hi","x":1.5,"top":2.0,"height":14.0,"size":12.0,"weight":700.0,"line_size":12.0,"colour":"#000000ff"}]}"##
+                    .utf8))
+        guard case .marks("d1", 0, 390, let drawn) = marks else {
+            Issue.record("the marks were not read")
+            return
+        }
+        #expect(drawn.first?.text == "Hi" && drawn.first?.lineSize == 12 && drawn.first?.weight == 700)
         let folder = Tell(
             Data(#"{"type":"folder","name":"Drive","items":[{"id":"f1","name":"Work","kind":"folder"}]}"#.utf8))
         #expect(

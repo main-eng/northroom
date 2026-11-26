@@ -1,5 +1,6 @@
 use super::*;
 use crate::remote::devices::FILE;
+use crate::remote::pages::{Drawn, Pages};
 use crate::remote::protocol::{Item, Piece};
 use crate::terminal::activity::Activity;
 use crate::terminal::input::Key as Pressable;
@@ -100,14 +101,38 @@ impl Desk for FakeDesk {
             .push(format!("keys {session} {text}"));
     }
 
-    /// The page `p1` holds "hello, phone".
-    fn read(&self, file: &str, from: u64, length: usize) -> Option<Piece> {
-        const PAGE: &[u8] = b"hello, phone";
-        let start = usize::try_from(from).ok()?.min(PAGE.len());
-        let end = start.saturating_add(length).min(PAGE.len());
-        (file == "p1").then(|| Piece {
-            size: PAGE.len() as u64,
-            bytes: PAGE[start..end].to_vec(),
+    /// The page `p1` holds "hello, phone", and picture 0 of the document `d1` holds "png".
+    fn read(&self, file: &str, picture: Option<usize>, from: u64, length: usize) -> Option<Piece> {
+        let held: &[u8] = match (file, picture) {
+            ("p1", None) => b"hello, phone",
+            ("d1", Some(0)) => b"png",
+            _ => return None,
+        };
+        let start = usize::try_from(from).ok()?.min(held.len());
+        let end = start.saturating_add(length).min(held.len());
+        Some(Piece {
+            size: held.len() as u64,
+            bytes: held[start..end].to_vec(),
+        })
+    }
+
+    /// The document `d1` has two pages.
+    fn pages(&self, file: &str) -> Option<Pages> {
+        (file == "d1").then_some(Pages {
+            width: 612.0,
+            height: 792.0,
+            count: 2,
+        })
+    }
+
+    /// Each page of `d1` draws one picture as wide as the page.
+    fn marks(&self, file: &str, _page: usize, width: f64) -> Option<Vec<Drawn>> {
+        (file == "d1").then(|| {
+            vec![Drawn::Picture {
+                frame: [0.0, 0.0, width, width],
+                picture: 0,
+                crop: [0.0; 4],
+            }]
         })
     }
 
@@ -394,6 +419,36 @@ fn a_file_is_read_a_piece_at_a_time_as_base64() {
     assert_eq!(
         told(fixture.ask(1, r#"{"type":"read","file":"nope","length":5}"#)),
         r#"{"type":"no-file","file":"nope"}"#
+    );
+}
+
+#[test]
+fn a_document_is_its_pages_their_marks_and_its_pictures() {
+    let mut fixture = fixture(&[]);
+    fixture.paired(1);
+    let told = |out: Vec<Out>| match out.as_slice() {
+        [Out::Tell(1, tell)] => String::from_utf8(tell.encoded()).unwrap(),
+        other => panic!("expected one message: {other:?}"),
+    };
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"pages","file":"d1"}"#)),
+        r#"{"type":"pages","file":"d1","width":612.0,"height":792.0,"count":2}"#
+    );
+    // A width no page can be is held to one that can.
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"page","file":"d1","page":1,"width":5}"#)),
+        concat!(
+            r#"{"type":"marks","file":"d1","page":1,"width":100.0,"marks":"#,
+            r#"[{"mark":"picture","frame":[0.0,0.0,100.0,100.0],"picture":0,"crop":[0.0,0.0,0.0,0.0]}]}"#
+        )
+    );
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"read","file":"d1","picture":0,"length":9}"#)),
+        r#"{"type":"bytes","file":"d1","picture":0,"from":0,"size":3,"data":"cG5n"}"#
+    );
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"pages","file":"p1"}"#)),
+        r#"{"type":"no-pages","file":"p1"}"#
     );
 }
 

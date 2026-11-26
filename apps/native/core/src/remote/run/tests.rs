@@ -1,4 +1,5 @@
 use super::*;
+use crate::remote::pages::{Drawn, Pages};
 use crate::remote::protocol::{Listing, Piece};
 use crate::remote::screen::Run;
 use crate::terminal::activity::Activity;
@@ -63,7 +64,21 @@ impl Desk for OneTerminal {
         None
     }
 
-    fn read(&self, _file: &str, _from: u64, _length: usize) -> Option<Piece> {
+    fn read(
+        &self,
+        _file: &str,
+        _picture: Option<usize>,
+        _from: u64,
+        _length: usize,
+    ) -> Option<Piece> {
+        None
+    }
+
+    fn pages(&self, _file: &str) -> Option<Pages> {
+        None
+    }
+
+    fn marks(&self, _file: &str, _page: usize, _width: f64) -> Option<Vec<Drawn>> {
         None
     }
 }

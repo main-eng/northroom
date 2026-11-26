@@ -13,8 +13,13 @@ public enum Ask: Equatable, Sendable {
     case keys(session: String, text: String)
     /// Lists what is in `folder`, or at the top of the drive for `nil`.
     case list(folder: String?)
-    /// Reads up to `length` bytes of `file` from byte `from`.
-    case read(file: String, from: Int, length: Int)
+    /// Reads up to `length` bytes from byte `from` of `file`, or of the picture numbered
+    /// `picture` on its pages.
+    case read(file: String, picture: Int? = nil, from: Int, length: Int)
+    /// Asks how many pages `file` has and their size.
+    case pages(file: String)
+    /// Asks what page `page` of `file` draws laid out `width` points wide.
+    case page(file: String, page: Int, width: Double)
     case press(session: String, key: PressedKey)
     /// Moves through earlier output by `lines`, towards older output when positive.
     case scroll(session: String, lines: Int)
@@ -33,8 +38,13 @@ public enum Ask: Equatable, Sendable {
         case .keys(let session, let text): fields = ["type": "keys", "session": session, "text": text]
         case .list(let folder?): fields = ["type": "list", "folder": folder]
         case .list(nil): fields = ["type": "list"]
-        case .read(let file, let from, let length):
-            fields = ["type": "read", "file": file, "from": from, "length": length]
+        case .read(let file, let picture, let from, let length):
+            var read: [String: Any] = ["type": "read", "file": file, "from": from, "length": length]
+            if let picture { read["picture"] = picture }
+            fields = read
+        case .pages(let file): fields = ["type": "pages", "file": file]
+        case .page(let file, let page, let width):
+            fields = ["type": "page", "file": file, "page": page, "width": Int(width.rounded())]
         case .press(let session, let key):
             fields = ["type": "press", "session": session, "key": key.rawValue]
         case .scroll(let session, let lines):
@@ -102,6 +112,42 @@ public struct Item: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// One thing a page draws, in points from the page's top left. Which fields it has depends on
+/// `mark`: `fill`, `outline`, `picture`, `words` or `figure`.
+public struct Mark: Decodable, Equatable, Sendable {
+    public var mark: String
+    /// Left, top, width and height.
+    public var frame: [Double]?
+    /// `box`, `rounded`, `oval`, `line` or `rising-line`.
+    public var form: String?
+    public var radius: Double?
+    /// `#rrggbbaa`.
+    public var colour: String?
+    /// An outline's thickness.
+    public var width: Double?
+    public var picture: Int?
+    /// The share cut from a picture's left, top, right and bottom.
+    public var crop: [Double]?
+    public var text: String?
+    public var x: Double?
+    public var top: Double?
+    public var height: Double?
+    public var size: Double?
+    public var weight: Double?
+    public var mono: Bool?
+    public var slanted: Bool?
+    /// The size of the text whose baseline the line shares.
+    public var lineSize: Double?
+    /// A figure's path, as SVG writes one.
+    public var path: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case mark, frame, form, radius, colour, width, picture, crop, text, x, top, height, size
+        case weight, mono, slanted, path
+        case lineSize = "line_size"
+    }
+}
+
 /// Text in one look, starting at `column`.
 public struct Run: Codable, Equatable, Sendable {
     public var column: Int
@@ -140,10 +186,17 @@ public enum Tell: Equatable, Sendable {
     case folder(folder: String?, name: String, items: [Item])
     /// The folder a `list` named is not in the drive.
     case noFolder(folder: String?)
-    /// Bytes of `file` from byte `from`, and the whole file's `size`.
-    case bytes(file: String, from: Int, size: Int, Data)
-    /// The file a `read` named can't be read.
-    case noFile(file: String)
+    /// Bytes of `file`, or of the picture numbered `picture` on its pages, from byte `from`,
+    /// and the whole's `size`.
+    case bytes(file: String, picture: Int? = nil, from: Int, size: Int, Data)
+    /// What a `read` named can't be read.
+    case noFile(file: String, picture: Int? = nil)
+    /// `file` is shown as `count` pages, each `width` × `height` points.
+    case pages(file: String, width: Double, height: Double, count: Int)
+    /// What page `page` of `file` draws, back to front, laid out `width` points wide.
+    case marks(file: String, page: Int, width: Double, [Mark])
+    /// `file` is not shown as pages.
+    case noPages(file: String)
 
     private struct Wire: Decodable {
         var type: String
@@ -151,6 +204,12 @@ public enum Tell: Equatable, Sendable {
         var from: Int?
         var size: Int?
         var data: String?
+        var picture: Int?
+        var page: Int?
+        var count: Int?
+        var width: Double?
+        var height: Double?
+        var marks: [Mark]?
         var folder: String?
         var name: String?
         var items: [Item]?
@@ -178,10 +237,22 @@ public enum Tell: Equatable, Sendable {
             guard let file = wire.file, let data = Data(base64Encoded: wire.data ?? "") else {
                 return nil
             }
-            self = .bytes(file: file, from: wire.from ?? 0, size: wire.size ?? 0, data)
+            self = .bytes(
+                file: file, picture: wire.picture, from: wire.from ?? 0, size: wire.size ?? 0, data)
         case ("no-file", _, _):
             guard let file = wire.file else { return nil }
-            self = .noFile(file: file)
+            self = .noFile(file: file, picture: wire.picture)
+        case ("pages", _, _):
+            guard let file = wire.file, let width = wire.width, let height = wire.height else {
+                return nil
+            }
+            self = .pages(file: file, width: width, height: height, count: wire.count ?? 0)
+        case ("marks", _, _):
+            guard let file = wire.file, let page = wire.page else { return nil }
+            self = .marks(file: file, page: page, width: wire.width ?? 0, wire.marks ?? [])
+        case ("no-pages", _, _):
+            guard let file = wire.file else { return nil }
+            self = .noPages(file: file)
         default: return nil
         }
     }

@@ -258,13 +258,14 @@ struct TerminalText: View {
 }
 
 extension Color {
-    /// A colour from `#rrggbb`.
+    /// A colour from `#rrggbb` or `#rrggbbaa`.
     init?(hex: String?) {
-        guard let hex, hex.hasPrefix("#"), hex.utf8.count == 7,
-            let value = UInt32(hex.dropFirst(), radix: 16)
+        guard let hex, hex.hasPrefix("#"), [7, 9].contains(hex.utf8.count),
+            var value = UInt32(hex.dropFirst(), radix: 16)
         else { return nil }
+        if hex.utf8.count == 7 { value = value << 8 | 0xff }
         self.init(
-            red: Double(value >> 16 & 0xff) / 255, green: Double(value >> 8 & 0xff) / 255,
-            blue: Double(value & 0xff) / 255)
+            red: Double(value >> 24 & 0xff) / 255, green: Double(value >> 16 & 0xff) / 255,
+            blue: Double(value >> 8 & 0xff) / 255, opacity: Double(value & 0xff) / 255)
     }
 }

@@ -30,6 +30,7 @@ final class PairAndAnswerTests: XCTestCase {
             keep("2 file open")
             app.navigationBars.buttons.firstMatch.tap()
         }
+        openFiles(in: app)
         app.buttons["Sessions"].tap()
 
         // Opens a session that is running, or starts one.
@@ -49,6 +50,24 @@ final class PairAndAnswerTests: XCTestCase {
         app.typeText("echo typed on the phone\n")
         sleep(3)
         keep("4 answered")
+    }
+
+    /// Opens each file `NR_OPEN_FILES` names (paths from the top of the drive, `;` between
+    /// them) and keeps a picture of it.
+    @MainActor
+    private func openFiles(in app: XCUIApplication) {
+        let wanted = ProcessInfo.processInfo.environment["NR_OPEN_FILES"] ?? ""
+        for path in wanted.split(separator: ";") {
+            let names = path.split(separator: "/").map(String.init)
+            for name in names {
+                let row = app.cells.staticTexts[name]
+                XCTAssertTrue(row.waitForExistence(timeout: 10), "\(name) is listed")
+                row.tap()
+            }
+            sleep(6)
+            keep("file \(names.last ?? "")")
+            for _ in names { app.navigationBars.buttons.firstMatch.tap() }
+        }
     }
 
     @MainActor

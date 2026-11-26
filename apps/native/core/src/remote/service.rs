@@ -3,6 +3,7 @@
 //! are checked without a network or a terminal.
 
 use crate::remote::devices::{Devices, Key};
+use crate::remote::pages::{normalize_width, Drawn, Pages};
 use crate::remote::pairing::Offer;
 use crate::remote::protocol::{
     parse_ask, parse_key, Ask, Listing, Piece, Pressed, Refusal, Session, Tell,
@@ -44,8 +45,13 @@ pub trait Desk {
     fn keys(&self, session: &str, text: &str);
     /// What is in `folder`, or at the top of the drive for `None`; `None` when it is not there.
     fn folder(&self, folder: Option<&str>) -> Option<Listing>;
-    /// Up to `length` bytes of `file` from byte `from`; `None` when it can't be read.
-    fn read(&self, file: &str, from: u64, length: usize) -> Option<Piece>;
+    /// Up to `length` bytes from byte `from` of `file`, or of the picture numbered `picture` on
+    /// its pages; `None` when it can't be read.
+    fn read(&self, file: &str, picture: Option<usize>, from: u64, length: usize) -> Option<Piece>;
+    /// `file`'s pages; `None` when it is not shown as pages or can't be read as them.
+    fn pages(&self, file: &str) -> Option<Pages>;
+    /// What page `page` of `file` draws laid out `width` points wide; `None` as for `pages`.
+    fn marks(&self, file: &str, page: usize, width: f64) -> Option<Vec<Drawn>>;
     fn press(&self, session: &str, pressed: Pressed);
     /// Moves `session`'s terminal by `lines` as the wheel does, towards older output when
     /// positive.
@@ -53,7 +59,7 @@ pub trait Desk {
 }
 
 /// Something to send or do on a link.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Out {
     Tell(u64, Tell),
     Close(u64),
@@ -108,16 +114,60 @@ fn listing(folder: Option<String>, desk: &dyn Desk) -> Tell {
     }
 }
 
-/// Up to `length` bytes of `file` from `from`, or that it can't be read.
-fn piece(file: String, from: u64, length: usize, desk: &dyn Desk) -> Tell {
-    match desk.read(&file, from, length.min(READ_MOST_BYTES)) {
+/// Where a `read` starts: in a file, or in a picture on its pages.
+struct Wanted {
+    file: String,
+    picture: Option<usize>,
+    from: u64,
+}
+
+/// Up to `length` bytes of what is `wanted`, or that it can't be read.
+fn piece(wanted: Wanted, length: usize, desk: &dyn Desk) -> Tell {
+    let Wanted {
+        file,
+        picture,
+        from,
+    } = wanted;
+    match desk.read(&file, picture, from, length.min(READ_MOST_BYTES)) {
         Some(Piece { size, bytes }) => Tell::Bytes {
             file,
+            picture,
             from,
             size,
             data: crate::update::sha512::base64(&bytes),
         },
-        None => Tell::NoFile { file },
+        None => Tell::NoFile { file, picture },
+    }
+}
+
+/// `file`'s pages, or that it has none to show.
+fn pages(file: String, desk: &dyn Desk) -> Tell {
+    match desk.pages(&file) {
+        Some(Pages {
+            width,
+            height,
+            count,
+        }) => Tell::Pages {
+            file,
+            width,
+            height,
+            count,
+        },
+        None => Tell::NoPages { file },
+    }
+}
+
+/// What a page of `file` draws at a width a page can be, or that the file has no pages.
+fn page_marks(file: String, page: usize, width: f64, desk: &dyn Desk) -> Tell {
+    let width = normalize_width(width);
+    match desk.marks(&file, page, width) {
+        Some(marks) => Tell::Marks {
+            file,
+            page,
+            width,
+            marks,
+        },
+        None => Tell::NoPages { file },
     }
 }
 
@@ -270,8 +320,22 @@ impl Service {
                 Vec::new()
             }
             Ask::List { folder } => vec![Out::Tell(link, listing(folder, desk))],
-            Ask::Read { file, from, length } => {
-                vec![Out::Tell(link, piece(file, from, length, desk))]
+            Ask::Read {
+                file,
+                picture,
+                from,
+                length,
+            } => {
+                let wanted = Wanted {
+                    file,
+                    picture,
+                    from,
+                };
+                vec![Out::Tell(link, piece(wanted, length, desk))]
+            }
+            Ask::Pages { file } => vec![Out::Tell(link, pages(file, desk))],
+            Ask::Page { file, page, width } => {
+                vec![Out::Tell(link, page_marks(file, page, width, desk))]
             }
             Ask::Start => self.start(link, desk),
             Ask::Scroll { session, lines } => {

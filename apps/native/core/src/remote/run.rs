@@ -2,7 +2,9 @@
 //! rules (`service`) against the app's own terminals, and a few times a second sends each device
 //! what changed.
 
+use crate::deck::{Deck, Kind};
 use crate::remote::devices::{Devices, Key, FILE};
+use crate::remote::pages::{Drawn, Pages};
 use crate::remote::pairing::Invite;
 use crate::remote::protocol::{Item, Listing, Piece, Pressed};
 use crate::remote::screen::Screen;
@@ -12,6 +14,7 @@ use crate::terminal::cells::GridSize;
 use crate::terminal::input::Modifiers;
 use crate::Relock;
 use northroom_link::{Event, Host, Relays, Secret};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,8 +28,113 @@ const RELAY_ASKED_EVERY: Duration = Duration::from_millis(25);
 /// What Control-C sends.
 const INTERRUPT: &[u8] = &[3];
 
-/// The app's running terminals (`App::sessions`).
-struct AppDesk;
+/// A file's size and when it last changed, which say whether what was read of it still holds.
+type Version = (u64, Option<std::time::SystemTime>);
+
+fn version_of(path: &Path) -> Option<Version> {
+    let details = std::fs::metadata(path).ok()?;
+    Some((details.len(), details.modified().ok()))
+}
+
+/// The file last read as pages for a device, kept so each page asked for reads it once per
+/// version.
+struct Opened {
+    path: PathBuf,
+    version: Version,
+    deck: Arc<Deck>,
+}
+
+/// The picture last read for a device, kept while its bytes are sent a piece at a time.
+struct PictureRead {
+    path: PathBuf,
+    version: Version,
+    picture: usize,
+    bytes: Arc<Vec<u8>>,
+}
+
+/// The app's running terminals (`App::sessions`) and its drive's files.
+#[derive(Default)]
+struct AppDesk {
+    opened: Mutex<Option<Opened>>,
+    picture: Mutex<Option<PictureRead>>,
+}
+
+/// The path of the drive's file `file`.
+fn path_of(file: &str) -> Option<PathBuf> {
+    crate::ffi::with_columns(|columns| columns.workspace().path_of(file))?.ok()
+}
+
+/// Reads the file at `path` as pages when its name and contents say it is a kind shown as
+/// them, and it is no larger than that kind is drawn.
+fn read_deck(path: &Path, version: Version) -> Option<Deck> {
+    let kind = Kind::of_name(&path.file_name()?.to_string_lossy())?;
+    if !kind.claims(path) || version.0 > kind.max_bytes() {
+        return None;
+    }
+    match crate::deck::read(path, kind, &mut crate::text::typeset::width) {
+        Ok(deck) => Some(deck),
+        Err(failure) => {
+            eprintln!("a phone's file was not read as pages: {failure}");
+            None
+        }
+    }
+}
+
+impl AppDesk {
+    /// The drive's file `file` as pages, and its path.
+    fn deck_of(&self, file: &str) -> Option<(PathBuf, Version, Arc<Deck>)> {
+        let path = path_of(file)?;
+        let version = version_of(&path)?;
+        let mut opened = self.opened.relock();
+        if let Some(known) = opened.as_ref() {
+            if known.path == path && known.version == version {
+                return Some((path, version, Arc::clone(&known.deck)));
+            }
+        }
+        let deck = Arc::new(read_deck(&path, version)?);
+        *opened = Some(Opened {
+            path: path.clone(),
+            version,
+            deck: Arc::clone(&deck),
+        });
+        Some((path, version, deck))
+    }
+
+    /// The bytes of the picture numbered `picture` on `file`'s pages.
+    fn picture_of(&self, file: &str, picture: usize) -> Option<Arc<Vec<u8>>> {
+        let (path, version, deck) = self.deck_of(file)?;
+        let mut read = self.picture.relock();
+        if let Some(known) = read.as_ref() {
+            if known.path == path && known.version == version && known.picture == picture {
+                return Some(Arc::clone(&known.bytes));
+            }
+        }
+        let bytes = match deck.pictures.get(picture)?.read(&path) {
+            Ok(bytes) => Arc::new(bytes),
+            Err(failure) => {
+                eprintln!("a phone's picture was not read: {failure}");
+                return None;
+            }
+        };
+        *read = Some(PictureRead {
+            path,
+            version,
+            picture,
+            bytes: Arc::clone(&bytes),
+        });
+        Some(bytes)
+    }
+}
+
+/// Up to `length` of `bytes` from byte `from`.
+fn piece_of(bytes: &[u8], from: u64, length: usize) -> Piece {
+    let start = usize::try_from(from).map_or(bytes.len(), |from| from.min(bytes.len()));
+    let end = start.saturating_add(length).min(bytes.len());
+    Piece {
+        size: bytes.len() as u64,
+        bytes: bytes[start..end].to_vec(),
+    }
+}
 
 impl Desk for AppDesk {
     fn sessions(&self) -> Vec<Running> {
@@ -74,8 +182,22 @@ impl Desk for AppDesk {
         })?
     }
 
-    fn read(&self, file: &str, from: u64, length: usize) -> Option<Piece> {
-        let path = crate::ffi::with_columns(|columns| columns.workspace().path_of(file))?.ok()?;
+    fn pages(&self, file: &str) -> Option<Pages> {
+        let (_, _, deck) = self.deck_of(file)?;
+        Some(Pages::of(&deck))
+    }
+
+    fn marks(&self, file: &str, page: usize, width: f64) -> Option<Vec<Drawn>> {
+        let (_, _, deck) = self.deck_of(file)?;
+        Some(crate::remote::pages::marks(&deck, page, width))
+    }
+
+    fn read(&self, file: &str, picture: Option<usize>, from: u64, length: usize) -> Option<Piece> {
+        if let Some(picture) = picture {
+            let bytes = self.picture_of(file, picture)?;
+            return Some(piece_of(&bytes, from, length));
+        }
+        let path = path_of(file)?;
         match read_piece(&path, from, length) {
             Ok(piece) => Some(piece),
             Err(error) => {
@@ -105,7 +227,7 @@ impl Desk for AppDesk {
 
 /// Up to `length` bytes of the file at `path` from byte `from`, and the file's size. A folder
 /// is not a file to read.
-fn read_piece(path: &std::path::Path, from: u64, length: usize) -> std::io::Result<Piece> {
+fn read_piece(path: &Path, from: u64, length: usize) -> std::io::Result<Piece> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path)?;
     let details = file.metadata()?;
@@ -150,7 +272,7 @@ impl Link {
     /// Starts the link for the devices kept in `folder`, reachable through `relays`, serving
     /// the terminals of `desk`.
     pub fn start(
-        folder: &std::path::Path,
+        folder: &Path,
         relays: Relays,
         name: String,
         desk: impl Desk + Send + 'static,
@@ -184,7 +306,7 @@ impl Link {
             &paths.support,
             relays_of(&settings),
             computer_name(),
-            AppDesk,
+            AppDesk::default(),
         )
     }
 

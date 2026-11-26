@@ -4,6 +4,13 @@ import PhoneLink
 
 #if canImport(UIKit)
     import UIKit
+
+    /// A decoded picture, as this system holds one.
+    public typealias PlatformPicture = UIImage
+#else
+    import AppKit
+
+    public typealias PlatformPicture = NSImage
 #endif
 
 /// Everything the screens show, and the one link to the computer behind it.
@@ -28,6 +35,24 @@ public final class Phone {
         case failed
     }
 
+    /// Whether a file is shown as pages, once the computer has said.
+    public enum Paged: Equatable {
+        case pages(width: Double, height: Double, count: Int)
+        case notPaged
+    }
+
+    /// One picture on a file's pages.
+    public struct PictureKey: Hashable, Sendable {
+        public var file: String
+        public var picture: Int
+    }
+
+    /// One page of a file.
+    public struct PageKey: Hashable, Sendable {
+        public var file: String
+        public var page: Int
+    }
+
     /// The bytes one `read` asks for.
     private static let pieceBytes = 1024 * 1024
 
@@ -49,6 +74,12 @@ public final class Phone {
     public private(set) var folders: [String: Folder] = [:]
     /// The files fetched or on their way, by id.
     public private(set) var fetches: [String: Fetch] = [:]
+    /// Which files are shown as pages, by id.
+    public private(set) var paged: [String: Paged] = [:]
+    /// What each page asked for draws.
+    public private(set) var marks: [PageKey: [Mark]] = [:]
+    /// The pictures on pages that have come whole.
+    public private(set) var pictures: [PictureKey: PlatformPicture] = [:]
     /// Why the last pairing did not work, for the scan screen.
     public private(set) var notice: String?
     public private(set) var pairing = false
@@ -59,6 +90,8 @@ public final class Phone {
     private var watching: (session: String, columns: Int, lines: Int)?
     /// Where each file on its way is being written.
     private var arriving: [String: (handle: FileHandle, url: URL)] = [:]
+    /// The bytes so far of each picture on its way.
+    private var arrivingPictures: [PictureKey: Data] = [:]
     /// The last key sent, which the next one waits for.
     private var sending: Task<Void, Never>?
 
@@ -99,6 +132,10 @@ public final class Phone {
         sessions = []
         folders = [:]
         fetches.keys.forEach(discard)
+        paged = [:]
+        marks = [:]
+        pictures = [:]
+        arrivingPictures = [:]
         watching = nil
         screen = nil
     }
@@ -169,9 +206,18 @@ public final class Phone {
         case .folder(let folder, let name, let items):
             folders[folder ?? Phone.top] = .listed(name: name, items: items)
         case .noFolder(let folder): folders[folder ?? Phone.top] = .gone
-        case .bytes(let file, let from, let size, let data):
+        case .bytes(let file, let picture?, let from, let size, let data):
+            arrived(picture: PictureKey(file: file, picture: picture), from: from, size: size, data)
+        case .bytes(let file, nil, let from, let size, let data):
             arrived(file: file, from: from, size: size, data)
-        case .noFile(let file): failed(file)
+        case .noFile(let file, let picture?):
+            arrivingPictures[PictureKey(file: file, picture: picture)] = nil
+        case .noFile(let file, nil): failed(file)
+        case .pages(let file, let width, let height, let count):
+            paged[file] = .pages(width: width, height: height, count: count)
+        case .marks(let file, let page, _, let drawn):
+            marks[PageKey(file: file, page: page)] = drawn
+        case .noPages(let file): paged[file] = .notPaged
         default: break
         }
     }
@@ -292,12 +338,75 @@ public final class Phone {
         fetches[file] = .failed
     }
 
+    // MARK: Pages
+
+    /// Asks whether `file` is shown as pages. `paged` gains the answer.
+    public func askPages(of file: String) {
+        send(.pages(file: file))
+    }
+
+    /// Asks what page `page` of `file` draws `width` points wide, unless it is known.
+    public func askPage(_ page: Int, of file: String, width: Double) {
+        guard marks[PageKey(file: file, page: page)] == nil else { return }
+        send(.page(file: file, page: page, width: width))
+    }
+
+    /// Asks for a picture on `file`'s pages, unless it is here or on its way.
+    public func askPicture(_ picture: Int, of file: String) {
+        let key = PictureKey(file: file, picture: picture)
+        guard pictures[key] == nil, arrivingPictures[key] == nil else { return }
+        arrivingPictures[key] = Data()
+        send(.read(file: file, picture: picture, from: 0, length: Phone.pieceBytes))
+    }
+
+    /// Lets go of a page that left the screen and the pictures only it shows.
+    public func discardPage(_ page: Int, of file: String) {
+        guard let drawn = marks.removeValue(forKey: PageKey(file: file, page: page)) else { return }
+        let stillShown = Set(
+            marks.filter { $0.key.file == file }.values.joined().compactMap(\.picture))
+        for picture in drawn.compactMap(\.picture) where !stillShown.contains(picture) {
+            let key = PictureKey(file: file, picture: picture)
+            pictures[key] = nil
+            arrivingPictures[key] = nil
+        }
+    }
+
+    /// Lets go of everything known of `file`'s pages.
+    public func discardPages(of file: String) {
+        paged[file] = nil
+        marks = marks.filter { $0.key.file != file }
+        pictures = pictures.filter { $0.key.file != file }
+        arrivingPictures = arrivingPictures.filter { $0.key.file != file }
+    }
+
+    /// A piece of a picture came. The next is asked for, or the picture is whole.
+    private func arrived(picture key: PictureKey, from: Int, size: Int, _ data: Data) {
+        guard var bytes = arrivingPictures[key], from == bytes.count else { return }
+        bytes.append(data)
+        if data.isEmpty || bytes.count >= size {
+            arrivingPictures[key] = nil
+            pictures[key] = PlatformPicture(data: bytes)
+        } else {
+            arrivingPictures[key] = bytes
+            send(
+                .read(
+                    file: key.file, picture: key.picture, from: bytes.count,
+                    length: Phone.pieceBytes))
+        }
+    }
+
     /// Asks again for the next piece of each file that was on its way when the link ended.
     private func resumeFetches() {
         for (file, fetch) in fetches {
             if case .fetching(let received, _) = fetch {
                 send(.read(file: file, from: received, length: Phone.pieceBytes))
             }
+        }
+        for (key, bytes) in arrivingPictures {
+            send(
+                .read(
+                    file: key.file, picture: key.picture, from: bytes.count,
+                    length: Phone.pieceBytes))
         }
     }
 

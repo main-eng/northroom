@@ -2,20 +2,18 @@ import AVKit
 import PhoneLink
 import SwiftUI
 
-/// One file: brought to this device, then shown by its kind.
+/// One file. A kind the computer shows as pages (a PDF, a document, slides) is drawn from what
+/// the computer says each page draws; any other is brought to this device and shown by its kind.
 struct FileScreen: View {
     let item: Item
     @Environment(Phone.self) private var phone
 
     var body: some View {
         Group {
-            switch phone.fetches[item.id] {
-            case .ready(let url): FileView(item: item, url: url)
-            case .failed:
-                ContentUnavailableView("Can't read this file", systemImage: "exclamationmark.triangle")
-            case .fetching(let received, let size):
-                ProgressView(value: Double(received), total: Double(max(size, received, 1)))
-                    .padding(40)
+            switch phone.paged[item.id] {
+            case .pages(let width, let height, let count):
+                PagesView(file: item.id, pageWidth: width, pageHeight: height, count: count)
+            case .notPaged: fetched
             case nil: ProgressView()
             }
         }
@@ -24,8 +22,26 @@ struct FileScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
         #endif
-        .task { phone.fetch(item) }
-        .onDisappear { phone.discard(item.id) }
+        .task { phone.askPages(of: item.id) }
+        .onChange(of: phone.paged[item.id]) { _, paged in
+            if paged == .notPaged { phone.fetch(item) }
+        }
+        .onDisappear {
+            phone.discard(item.id)
+            phone.discardPages(of: item.id)
+        }
+    }
+
+    @ViewBuilder private var fetched: some View {
+        switch phone.fetches[item.id] {
+        case .ready(let url): FileView(item: item, url: url)
+        case .failed:
+            ContentUnavailableView("Can't read this file", systemImage: "exclamationmark.triangle")
+        case .fetching(let received, let size):
+            ProgressView(value: Double(received), total: Double(max(size, received, 1)))
+                .padding(40)
+        case nil: ProgressView()
+        }
     }
 }
 
@@ -89,11 +105,7 @@ private struct Picture: View {
     }
 
     private var picture: Image? {
-        #if canImport(UIKit)
-            UIImage(contentsOfFile: url.path).map(Image.init(uiImage:))
-        #else
-            NSImage(contentsOf: url).map(Image.init(nsImage:))
-        #endif
+        PlatformPicture(contentsOfFile: url.path).map(Image.init(picture:))
     }
 }
 

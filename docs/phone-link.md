@@ -49,6 +49,9 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
 | `{"type":"keys","session":"<id>","text":"…"}`               | Type text as keys pressed one after another, not as a paste.                                                               |
 | `{"type":"list","folder":"<id>"}`                           | List a folder, or the top of the drive when `folder` is absent. Answered with `folder` or `no-folder`.                     |
 | `{"type":"read","file":"<id>","from":0,"length":1048576}`   | Read up to `length` bytes of a file from byte `from` (0 when absent). Answered with `bytes` or `no-file`.                  |
+| `{"type":"read","file":"<id>","picture":2,"from":0,"length":1048576}` | The same, of the picture numbered `picture` on the file's pages.                                                 |
+| `{"type":"pages","file":"<id>"}`                            | Ask whether a file is shown as pages. Answered with `pages` or `no-pages`.                                                 |
+| `{"type":"page","file":"<id>","page":0,"width":390}`        | Ask what a page draws laid out `width` points wide (100 to 4000). The first page is 0. Answered with `marks`.             |
 | `{"type":"press","session":"<id>","key":"enter"}`           | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
 | `{"type":"scroll","session":"<id>","lines":3}`              | Move through earlier output as the computer's wheel does, towards older output when positive; at most 500 lines a message. |
 
@@ -68,7 +71,10 @@ read, is answered with `refused` and the link closes.
 | `{"type":"folder","folder":"<id>","name":"…","items":[…]}` | What a folder holds, in the drive's name order. `folder` is absent for the top of the drive. |
 | `{"type":"no-folder","folder":"<id>"}`            | The folder a `list` named is not in the drive.                                                    |
 | `{"type":"bytes","file":"<id>","from":0,"size":1204,"data":"…"}` | Bytes of a file from `from`, as base64, at most 1 MiB a message, and the whole file's `size`. A device asks again from where these end until it has `size` bytes. |
-| `{"type":"no-file","file":"<id>"}`                | The file a `read` named is not in the drive or can't be read.                                     |
+| `{"type":"no-file","file":"<id>"}`                | The file a `read` named is not in the drive or can't be read. `picture` is echoed when one was asked for. |
+| `{"type":"pages","file":"<id>","width":612,"height":792,"count":3}` | The file is shown as `count` pages, each `width` × `height` points.             |
+| `{"type":"marks","file":"<id>","page":0,"width":390,"marks":[…]}` | What a page draws, back to front, laid out `width` points wide.                   |
+| `{"type":"no-pages","file":"<id>"}`               | The file is not a kind shown as pages, or could not be read as one.                               |
 
 A session:
 
@@ -95,6 +101,36 @@ An item in a folder:
 absent for a folder. `name` is as the drive shows it: a page is without its `.md` and a terminal
 without its `.nterm`. `extension` is absent for a folder or a bare name. An id lasts while the computer's Northroom runs; list again after
 reconnecting.
+
+## Pages
+
+A PDF, a Word, PowerPoint, OpenDocument, RTF, Pages, Keynote or Numbers file, a Photoshop or
+camera raw picture and a font are shown as pages. The computer reads the file and says what
+each page draws, so a device reads none of these formats: it draws five kinds of mark, in points
+from the page's top left, and scales them to its screen (a page `width` points wide is
+`width × height ÷ width` of `pages` tall).
+
+```json
+{ "mark": "fill", "frame": [20, 40, 100, 60], "form": "rounded", "radius": 8, "colour": "#1f6b4aff" }
+{ "mark": "outline", "frame": [20, 40, 100, 60], "form": "box", "colour": "#000000ff", "width": 1 }
+{ "mark": "picture", "frame": [0, 0, 390, 220], "picture": 2, "crop": [0, 0, 0, 0] }
+{ "mark": "words", "text": "Harbor Monthly", "x": 24, "top": 300, "height": 34, "size": 28,
+  "weight": 700, "line_size": 28, "colour": "#111111ff" }
+{ "mark": "figure", "path": "M0 0L10 0Q10 5 5 5Z", "colour": "#111111ff" }
+```
+
+- A `frame` is left, top, width and height. A colour is `#rrggbbaa`.
+- `form` is `box`, `rounded` (with `radius`), `oval`, `line` (top left to bottom right) or
+  `rising-line`.
+- A `picture` is read with `read` and its `picture` number; its bytes are a PNG, JPEG or
+  another picture format. `crop` is the share cut from its left, top, right and bottom before
+  it fills the frame. A PDF page's drawing arrives as pictures.
+- `words` is one line of text in one look, in a line box `height` tall at `top`. Its baseline
+  is that of text `line_size` large centred in the box. `weight` is as CSS numbers it; `mono`
+  and `slanted` are true when present. The computer measured the text in Inter (Geist Mono for
+  `mono`), so a device that sets it in the same faces breaks no line differently.
+- A `figure` is a filled path as SVG writes one (`M`, `L`, `Q`, `C`, `Z`), filled by the
+  nonzero rule.
 
 A screen:
 

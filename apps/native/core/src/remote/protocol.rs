@@ -3,6 +3,7 @@
 //! change an older device can't read takes the link's next protocol number
 //! (`northroom_link::PROTOCOL`).
 
+use crate::remote::pages::Drawn;
 use crate::remote::screen::Screen;
 use crate::sessions::Running;
 use crate::terminal::activity::Activity;
@@ -11,7 +12,7 @@ use crate::workspace::{Entry, EntryKind};
 use serde::{Deserialize, Serialize};
 
 /// What a device asks.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Ask {
     /// Pair this device, proving it read the code this computer showed. `name` is what the
@@ -28,13 +29,25 @@ pub enum Ask {
     },
     /// Stop watching.
     Leave,
-    /// Read up to `length` bytes of `file` starting at byte `from`. Answered with `bytes`, or
-    /// `no-file` when it can't be read.
+    /// Read up to `length` bytes of `file` starting at byte `from`, or of the picture numbered
+    /// `picture` on its pages. Answered with `bytes`, or `no-file` when it can't be read.
     Read {
         file: String,
         #[serde(default)]
+        picture: Option<usize>,
+        #[serde(default)]
         from: u64,
         length: usize,
+    },
+    /// How many pages `file` has and their size. Answered with `pages`, or `no-pages` when it
+    /// is not a kind shown as pages or can't be read as one.
+    Pages { file: String },
+    /// What page `page` of `file` (the first is 0) draws when laid out `width` points wide.
+    /// Answered with `marks`, or `no-pages`.
+    Page {
+        file: String,
+        page: usize,
+        width: f64,
     },
     /// Make a terminal at the top of the drive and start its session. Answered with `started`.
     Start,
@@ -160,7 +173,7 @@ pub struct Listing {
 }
 
 /// What this computer tells a device.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Tell {
     /// The device may stay. `host` is this computer's name.
@@ -187,12 +200,35 @@ pub enum Tell {
     /// than asked for means the file ends there.
     Bytes {
         file: String,
+        /// The picture these are bytes of, when a picture was read.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        picture: Option<usize>,
         from: u64,
         size: u64,
         data: String,
     },
     /// The file a `read` named is not in the drive or can't be read.
-    NoFile { file: String },
+    NoFile {
+        file: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        picture: Option<usize>,
+    },
+    /// `file` is shown as `count` pages, each `width` × `height` points.
+    Pages {
+        file: String,
+        width: f64,
+        height: f64,
+        count: usize,
+    },
+    /// What page `page` of `file` draws, back to front, laid out `width` points wide.
+    Marks {
+        file: String,
+        page: usize,
+        width: f64,
+        marks: Vec<Drawn>,
+    },
+    /// `file` is not shown as pages, or could not be read as them.
+    NoPages { file: String },
     /// The folder a `list` named is not in the drive.
     NoFolder {
         #[serde(skip_serializing_if = "Option::is_none")]
