@@ -3,7 +3,7 @@ import Testing
 
 @testable import PhoneLink
 
-// Swift Testing, not XCTest: these run with the command-line tools alone (`swift test`).
+// Run with `swift test`, which needs Xcode.
 struct PhoneLinkTests {
     let key = String(repeating: "ab", count: 32)
 

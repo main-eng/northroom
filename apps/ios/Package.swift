@@ -10,7 +10,10 @@ let package = Package(
     name: "NorthroomPhone",
     // What iroh's Swift package asks for.
     platforms: [.iOS("17.5"), .macOS("14.5")],
-    products: [.library(name: "PhoneLink", targets: ["PhoneLink"])],
+    products: [
+        .library(name: "PhoneLink", targets: ["PhoneLink"]),
+        .library(name: "PhoneScreens", targets: ["PhoneScreens"]),
+    ],
     dependencies: [
         // Connections dialled by key, the same library the computer's side uses
         // (`crates/northroom-link`).
@@ -21,6 +24,8 @@ let package = Package(
             name: "PhoneLink",
             dependencies: [.product(name: "IrohLib", package: "iroh-swift")]
         ),
+        // The app's screens.
+        .target(name: "PhoneScreens", dependencies: ["PhoneLink"]),
         .executableTarget(name: "phone-link-check", dependencies: ["PhoneLink"]),
         .testTarget(name: "PhoneLinkTests", dependencies: ["PhoneLink"]),
     ]
