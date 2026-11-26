@@ -1,4 +1,5 @@
 use super::*;
+use crate::remote::protocol::Listing;
 use crate::remote::screen::Run;
 use crate::terminal::activity::Activity;
 use northroom_link::{Address, Client};
@@ -51,6 +52,14 @@ impl Desk for OneTerminal {
     fn scroll(&self, _session: &str, _lines: i32) {}
 
     fn start(&self) -> Option<String> {
+        None
+    }
+
+    fn keys(&self, _session: &str, text: &str) {
+        self.typed.relock().push(text.to_owned());
+    }
+
+    fn folder(&self, _folder: Option<&str>) -> Option<Listing> {
         None
     }
 }

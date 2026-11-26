@@ -4,7 +4,9 @@
 
 use crate::remote::devices::{Devices, Key};
 use crate::remote::pairing::Offer;
-use crate::remote::protocol::{parse_ask, parse_key, Ask, Pressed, Refusal, Session, Tell};
+use crate::remote::protocol::{
+    parse_ask, parse_key, Ask, Listing, Pressed, Refusal, Session, Tell,
+};
 use crate::remote::screen::Screen;
 use crate::sessions::{self, Running};
 use crate::terminal::cells::GridSize;
@@ -35,6 +37,10 @@ pub trait Desk {
     /// back the size of its view here.
     fn fit(&self, session: &str, grid: Option<GridSize>);
     fn paste(&self, session: &str, text: &str);
+    /// Types `text` into `session` as keys, not as a paste.
+    fn keys(&self, session: &str, text: &str);
+    /// What is in `folder`, or at the top of the drive for `None`; `None` when it is not there.
+    fn folder(&self, folder: Option<&str>) -> Option<Listing>;
     fn press(&self, session: &str, pressed: Pressed);
     /// Moves `session`'s terminal by `lines` as the wheel does, towards older output when
     /// positive.
@@ -82,6 +88,18 @@ fn normalize_grid(columns: usize, lines: usize) -> GridSize {
     GridSize {
         columns: columns.clamp(GRID_LEAST.columns, GRID_MOST.columns),
         lines: lines.clamp(GRID_LEAST.lines, GRID_MOST.lines),
+    }
+}
+
+/// What is in `folder`, or that it is not there.
+fn listing(folder: Option<String>, desk: &dyn Desk) -> Tell {
+    match desk.folder(folder.as_deref()) {
+        Some(Listing { name, items }) => Tell::Folder {
+            folder,
+            name,
+            items,
+        },
+        None => Tell::NoFolder { folder },
     }
 }
 
@@ -229,6 +247,11 @@ impl Service {
                 }
                 Vec::new()
             }
+            Ask::Keys { session, text } => {
+                desk.keys(&session, &text);
+                Vec::new()
+            }
+            Ask::List { folder } => vec![Out::Tell(link, listing(folder, desk))],
             Ask::Start => self.start(link, desk),
             Ask::Scroll { session, lines } => {
                 desk.scroll(&session, lines.clamp(-SCROLL_MOST_LINES, SCROLL_MOST_LINES));

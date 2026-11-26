@@ -7,6 +7,7 @@ use crate::remote::screen::Screen;
 use crate::sessions::Running;
 use crate::terminal::activity::Activity;
 use crate::terminal::input::Key;
+use crate::workspace::{Entry, EntryKind};
 use serde::{Deserialize, Serialize};
 
 /// What a device asks.
@@ -31,6 +32,14 @@ pub enum Ask {
     Start,
     /// Type `text` into `session`, as a paste.
     Type { session: String, text: String },
+    /// Type `text` into `session` as keys pressed one after another, not as a paste.
+    Keys { session: String, text: String },
+    /// List what is in `folder`, or at the top of the drive when it names none. Answered with
+    /// `folder`, or `no-folder` when it is not there.
+    List {
+        #[serde(default)]
+        folder: Option<String>,
+    },
     /// Press one key in `session`: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`,
     /// `right` or `interrupt` (Control-C).
     Press { session: String, key: String },
@@ -87,6 +96,50 @@ fn activity_word(activity: Activity) -> &'static str {
     }
 }
 
+/// One file or folder in a listed folder.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Item {
+    pub id: String,
+    /// The name as the drive shows it.
+    pub name: String,
+    /// `folder`, `page`, `terminal`, `image`, `video`, `audio` or `file`.
+    pub kind: &'static str,
+    /// A file's size in bytes; absent for a folder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+impl Item {
+    pub fn of(entry: &Entry) -> Self {
+        Self {
+            id: entry.id.clone(),
+            name: entry.title.clone(),
+            kind: kind_word(entry.kind),
+            size: entry.size_bytes,
+        }
+    }
+}
+
+/// The word a device reads for `kind`.
+fn kind_word(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::Folder => "folder",
+        EntryKind::Page => "page",
+        EntryKind::Terminal => "terminal",
+        EntryKind::Image => "image",
+        EntryKind::Video => "video",
+        EntryKind::Audio => "audio",
+        EntryKind::File => "file",
+    }
+}
+
+/// A folder's name and what is in it, in the drive's name order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listing {
+    pub name: String,
+    pub items: Vec<Item>,
+}
+
 /// What this computer tells a device.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -104,6 +157,18 @@ pub enum Tell {
     Gone { session: String },
     /// The session a `start` made, already in the `sessions` sent just before.
     Started { session: String },
+    /// What is in `folder`, or at the top of the drive when it names none.
+    Folder {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        folder: Option<String>,
+        name: String,
+        items: Vec<Item>,
+    },
+    /// The folder a `list` named is not in the drive.
+    NoFolder {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        folder: Option<String>,
+    },
 }
 
 impl Tell {

@@ -1,7 +1,7 @@
 import PhoneLink
 import SwiftUI
 
-/// The whole app: the scan screen until a computer is paired, then its sessions.
+/// The whole app: the scan screen until a computer is paired, then its sessions and its files.
 public struct Root: View {
     @State private var phone = Phone()
     @Environment(\.scenePhase) private var phase
@@ -13,7 +13,10 @@ public struct Root: View {
             if phone.computer == nil {
                 ScanScreen()
             } else {
-                SessionsScreen()
+                TabView {
+                    SessionsScreen().tabItem { Label("Sessions", systemImage: "terminal") }
+                    FilesScreen().tabItem { Label("Files", systemImage: "folder") }
+                }
             }
         }
         .environment(phone)

@@ -1,5 +1,6 @@
 use super::*;
 use crate::remote::devices::FILE;
+use crate::remote::protocol::Item;
 use crate::terminal::activity::Activity;
 use crate::terminal::input::Key as Pressable;
 use std::cell::RefCell;
@@ -91,6 +92,33 @@ impl Desk for FakeDesk {
         self.done
             .borrow_mut()
             .push(format!("paste {session} {text}"));
+    }
+
+    fn keys(&self, session: &str, text: &str) {
+        self.done
+            .borrow_mut()
+            .push(format!("keys {session} {text}"));
+    }
+
+    /// The top of the drive holds one folder, `f1`, which holds one page.
+    fn folder(&self, folder: Option<&str>) -> Option<Listing> {
+        let item = |id: &str, name: &str, kind, size| Item {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            kind,
+            size,
+        };
+        match folder {
+            None => Some(Listing {
+                name: "Drive".to_owned(),
+                items: vec![item("f1", "Work", "folder", None)],
+            }),
+            Some("f1") => Some(Listing {
+                name: "Work".to_owned(),
+                items: vec![item("p1", "Notes", "page", Some(12))],
+            }),
+            Some(_) => None,
+        }
     }
 
     fn press(&self, session: &str, pressed: Pressed) {
@@ -300,6 +328,36 @@ fn a_started_session_is_listed_before_the_device_is_told_which_it_is() {
     };
     assert_eq!(session, "s2");
     assert!(sessions.iter().any(|listed| listed.id == "s2"));
+}
+
+#[test]
+fn keys_are_typed_not_pasted() {
+    let mut fixture = fixture(&[("s1", Activity::Idle)]);
+    fixture.paired(1);
+    fixture.ask(1, r#"{"type":"keys","session":"s1","text":"ls"}"#);
+    assert_eq!(fixture.desk.done(), ["keys s1 ls"]);
+}
+
+#[test]
+fn a_folder_is_listed_from_the_top_of_the_drive_down() {
+    let mut fixture = fixture(&[]);
+    fixture.paired(1);
+    let told = |out: Vec<Out>| match out.as_slice() {
+        [Out::Tell(1, tell)] => String::from_utf8(tell.encoded()).unwrap(),
+        other => panic!("expected one message: {other:?}"),
+    };
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"list"}"#)),
+        r#"{"type":"folder","name":"Drive","items":[{"id":"f1","name":"Work","kind":"folder"}]}"#
+    );
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"list","folder":"f1"}"#)),
+        r#"{"type":"folder","folder":"f1","name":"Work","items":[{"id":"p1","name":"Notes","kind":"page","size":12}]}"#
+    );
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"list","folder":"gone"}"#)),
+        r#"{"type":"no-folder","folder":"gone"}"#
+    );
 }
 
 #[test]

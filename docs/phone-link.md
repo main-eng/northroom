@@ -1,7 +1,7 @@
 # Phone link
 
 How a phone, or any device, connects to a computer running Northroom: lists its running
-sessions, watches one terminal and types into it. Anyone may build a device or a host that
+sessions, watches one terminal, types into it and lists the drive's folders. Anyone may build a device or a host that
 speaks this. The rules are in `apps/native/core/src/remote/`, the connection in
 `apps/native/crates/northroom-link/`, and a working device in that crate's `Client`.
 
@@ -46,6 +46,8 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
 | `{"type":"leave"}`                                          | Stop watching. The terminal takes back the size of its view on the computer.                                               |
 | `{"type":"start"}`                                          | Make a terminal at the top of the drive and start its shell. Answered with `sessions`, then `started`.                     |
 | `{"type":"type","session":"<id>","text":"…"}`               | Type text, as a paste. It does not press Enter.                                                                            |
+| `{"type":"keys","session":"<id>","text":"…"}`               | Type text as keys pressed one after another, not as a paste.                                                               |
+| `{"type":"list","folder":"<id>"}`                           | List a folder, or the top of the drive when `folder` is absent. Answered with `folder` or `no-folder`.                     |
 | `{"type":"press","session":"<id>","key":"enter"}`           | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
 | `{"type":"scroll","session":"<id>","lines":3}`              | Move through earlier output as the computer's wheel does, towards older output when positive; at most 500 lines a message. |
 
@@ -62,6 +64,8 @@ read, is answered with `refused` and the link closes.
 | `{"type":"screen","session":"<id>","screen":{…}}` | The watched terminal's screen. Sent after `watch` and whenever it changes.                        |
 | `{"type":"gone","session":"<id>"}`                | The watched session ended.                                                                        |
 | `{"type":"started","session":"<id>"}`             | The session a `start` made. It is in the `sessions` sent just before.                             |
+| `{"type":"folder","folder":"<id>","name":"…","items":[…]}` | What a folder holds, in the drive's name order. `folder` is absent for the top of the drive. |
+| `{"type":"no-folder","folder":"<id>"}`            | The folder a `list` named is not in the drive.                                                    |
 
 A session:
 
@@ -77,6 +81,16 @@ A session:
 ```
 
 `activity` is `needs-you`, `finished`, `working` or `idle`. `agent` and `doing` may be empty.
+
+An item in a folder:
+
+```json
+{ "id": "…", "name": "Notes", "kind": "page", "size": 1204 }
+```
+
+`kind` is `folder`, `page`, `terminal`, `image`, `video`, `audio` or `file`. `size` is in bytes and
+absent for a folder. An id lasts while the computer's Northroom runs; list again after
+reconnecting.
 
 A screen:
 
@@ -109,4 +123,5 @@ A screen:
 - Scrolling moves the terminal's one view: the computer's window scrolls with the device, and
   typing shows the newest output again. A full-screen program gets the scroll as its own wheel
   or arrow keys.
-- There is no file browsing yet.
+- A folder is listed when asked; the computer does not say when it changes.
+- A file can be listed but not opened yet.

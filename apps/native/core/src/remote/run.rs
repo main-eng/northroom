@@ -4,7 +4,7 @@
 
 use crate::remote::devices::{Devices, Key, FILE};
 use crate::remote::pairing::Invite;
-use crate::remote::protocol::Pressed;
+use crate::remote::protocol::{Item, Listing, Pressed};
 use crate::remote::screen::Screen;
 use crate::remote::service::{Desk, Out, Service};
 use crate::sessions::Running;
@@ -51,6 +51,27 @@ impl Desk for AppDesk {
         if let Some(terminal) = crate::app().sessions.relock().get(session) {
             terminal.paste(text);
         }
+    }
+
+    fn keys(&self, session: &str, text: &str) {
+        if let Some(terminal) = crate::app().sessions.relock().get(session) {
+            terminal.input(text.as_bytes());
+        }
+    }
+
+    fn folder(&self, folder: Option<&str>) -> Option<Listing> {
+        let location = crate::workspace::Location {
+            folder_id: folder.map(str::to_owned),
+        };
+        crate::ffi::with_columns(|columns| {
+            let workspace = columns.workspace();
+            let name = workspace.folder_title(&location).ok()?;
+            let entries = workspace.all_contents(&location).ok()?;
+            Some(Listing {
+                name,
+                items: entries.iter().map(Item::of).collect(),
+            })
+        })?
     }
 
     fn press(&self, session: &str, pressed: Pressed) {

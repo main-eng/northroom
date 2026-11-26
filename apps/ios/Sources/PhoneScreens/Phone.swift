@@ -14,6 +14,15 @@ public final class Phone {
         case connecting, connected, unreachable
     }
 
+    /// A listed folder: its name and what is in it, or that it is gone.
+    public enum Folder: Equatable {
+        case listed(name: String, items: [Item])
+        case gone
+    }
+
+    /// The key `folders` keeps the top of the drive under.
+    public static let top = ""
+
     /// The computer this device is paired with. `nil` shows the scan screen.
     public private(set) var computer: Computer?
     public private(set) var state = State.connecting
@@ -24,6 +33,9 @@ public final class Phone {
     public private(set) var gone = false
     /// The session this device just started, for the sessions screen to open, once.
     public private(set) var started: String?
+    /// The folders listed so far, by id; the top of the drive is `Phone.top`. A folder that is
+    /// no longer in the drive is `.gone`.
+    public private(set) var folders: [String: Folder] = [:]
     /// Why the last pairing did not work, for the scan screen.
     public private(set) var notice: String?
     public private(set) var pairing = false
@@ -32,6 +44,8 @@ public final class Phone {
     private var link: Link?
     private var listening: Task<Void, Never>?
     private var watching: (session: String, columns: Int, lines: Int)?
+    /// The last key sent, which the next one waits for.
+    private var sending: Task<Void, Never>?
 
     public init() {
         computer = keep.computer
@@ -39,10 +53,12 @@ public final class Phone {
 
     // MARK: Pairing and connecting
 
-    /// Pairs with the computer a scanned or opened pairing link names.
+    /// Pairs with the computer a scanned or opened pairing link names. A computer paired before
+    /// is forgotten first: a new code is the person choosing this one.
     public func pair(link text: String) async {
-        guard !pairing, computer == nil, let invite = Invite(link: text) else { return }
+        guard !pairing, let invite = Invite(link: text) else { return }
         pairing = true
+        if computer != nil { await forget() }
         notice = nil
         await connect(to: Computer(invite: invite), code: invite.code)
         pairing = false
@@ -66,6 +82,7 @@ public final class Phone {
         keep.forget()
         computer = nil
         sessions = []
+        folders = [:]
         watching = nil
         screen = nil
     }
@@ -132,6 +149,9 @@ public final class Phone {
         case .screen(let session, let shown) where session == watching?.session: screen = shown
         case .gone(let session) where session == watching?.session: gone = true
         case .started(let session): started = session
+        case .folder(let folder, let name, let items):
+            folders[folder ?? Phone.top] = .listed(name: name, items: items)
+        case .noFolder(let folder): folders[folder ?? Phone.top] = .gone
         default: break
         }
     }
@@ -165,14 +185,6 @@ public final class Phone {
     }
 
     /// Types `text` into the watched session and presses Enter.
-    public func send(_ text: String) async {
-        guard let session = watching?.session else { return }
-        if !text.isEmpty {
-            try? await link?.ask(.type(session: session, text: text))
-        }
-        try? await link?.ask(.press(session: session, key: .enter))
-    }
-
     /// Moves the watched terminal through its earlier output, towards older output when
     /// `lines` is positive.
     public func scroll(lines: Int) async {
@@ -183,6 +195,34 @@ public final class Phone {
     public func press(_ key: PressedKey) async {
         guard let session = watching?.session else { return }
         try? await link?.ask(.press(session: session, key: key))
+    }
+
+    /// Types what the keyboard gave into the watched terminal, in the order it was typed.
+    public func typed(_ text: String) {
+        guard let session = watching?.session else { return }
+        send(text == "\n" ? .press(session: session, key: .enter) : .keys(session: session, text: text))
+    }
+
+    /// Erases the character before the cursor in the watched terminal.
+    public func erased() {
+        guard let session = watching?.session else { return }
+        send(.press(session: session, key: .backspace))
+    }
+
+    /// Sends `ask` after everything sent before it: keys must arrive in the order typed.
+    private func send(_ ask: Ask) {
+        let before = sending
+        sending = Task { [link] in
+            await before?.value
+            try? await link?.ask(ask)
+        }
+    }
+
+    // MARK: Files
+
+    /// Asks for what is in `folder`, or at the top of the drive for `nil`. `folders` gains it.
+    public func list(folder: String?) async {
+        try? await link?.ask(.list(folder: folder))
     }
 
     private static var deviceName: String {

@@ -34,6 +34,17 @@ struct PhoneLinkTests {
     @Test func asksAreTheJSONTheComputerReads() {
         #expect(text(.hello) == #"{"type":"hello"}"#)
         #expect(text(.start) == #"{"type":"start"}"#)
+        #expect(text(.list(folder: nil)) == #"{"type":"list"}"#)
+        #expect(
+            text(.keys(session: "s1", text: "ls"))
+                == #"{"session":"s1","text":"ls","type":"keys"}"#)
+        let folder = Tell(
+            Data(#"{"type":"folder","name":"Drive","items":[{"id":"f1","name":"Work","kind":"folder"}]}"#.utf8))
+        #expect(
+            folder
+                == .folder(
+                    folder: nil, name: "Drive",
+                    items: [Item(id: "f1", name: "Work", kind: "folder", size: nil)]))
         #expect(
             text(.watch(session: "s1", columns: 48, lines: 30))
                 == #"{"columns":48,"lines":30,"session":"s1","type":"watch"}"#)

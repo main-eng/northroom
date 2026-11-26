@@ -18,17 +18,27 @@ final class PairAndAnswerTests: XCTestCase {
         let open = XCUIApplication(bundleIdentifier: "com.apple.springboard").buttons["Open"]
         if open.waitForExistence(timeout: 5) { open.tap() }
 
-        let session = app.cells.firstMatch
-        XCTAssertTrue(session.waitForExistence(timeout: 30), "the computer's sessions are listed")
-        keep("2 sessions")
-        session.tap()
+        XCTAssertTrue(app.buttons["New Terminal"].waitForExistence(timeout: 30), "it paired")
+        app.buttons["Files"].tap()
+        XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 10), "the drive is listed")
+        keep("2 files")
+        app.buttons["Sessions"].tap()
 
-        let message = app.textFields["Message"]
-        XCTAssertTrue(message.waitForExistence(timeout: 10))
+        // Opens a session that is running, or starts one.
+        let session = app.cells.firstMatch
+        if session.waitForExistence(timeout: 5) {
+            keep("2 sessions")
+            session.tap()
+        } else {
+            app.buttons["New Terminal"].tap()
+        }
+
+        let terminal = app.otherElements["Terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
         sleep(3)
         keep("3 session")
-        message.tap()
-        message.typeText("echo typed on the phone\n")
+        terminal.tap()
+        app.typeText("echo typed on the phone\n")
         sleep(3)
         keep("4 answered")
     }

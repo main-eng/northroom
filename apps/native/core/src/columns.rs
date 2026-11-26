@@ -1599,9 +1599,7 @@ impl Columns {
     /// listed, for a session no view here shows yet (one a paired phone starts). Returns its id
     /// and path.
     pub fn create_terminal_at_top(&mut self, language: &str) -> DriveResult<(String, PathBuf)> {
-        let top = self.workspace.root().to_path_buf();
-        let location = self.workspace.location_at(&top)?;
-        let id = self.create_terminal_file(&location, language)?;
+        let id = self.create_terminal_file(&Location::ROOT, language)?;
         self.refresh()?;
         let path = self.workspace.path_of(&id)?;
         Ok((id, path))

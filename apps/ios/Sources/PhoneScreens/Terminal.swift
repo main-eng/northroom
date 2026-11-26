@@ -2,13 +2,13 @@ import CoreText
 import PhoneLink
 import SwiftUI
 
-/// One session: its terminal, fitted to this screen, and a place to answer it.
+/// One session: its terminal, filling the screen. A tap brings up the keyboard, which types
+/// straight into it, and a drag moves through earlier output.
 struct SessionScreen: View {
     let session: String
     @Environment(Phone.self) private var phone
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
-    @FocusState private var typing: Bool
+    @State private var typing = false
     /// The lines the finger's drag has scrolled so far.
     @State private var linesDragged = 0
 
@@ -17,17 +17,25 @@ struct SessionScreen: View {
             GeometryReader { space in
                 let grid = Cell.grid(in: space.size)
                 ZStack(alignment: .topLeading) {
-                    Color(hex: phone.screen?.ground) ?? Color.black
+                    ground
                     if let screen = phone.screen { TerminalText(screen: screen) }
                     if phone.state != .connected {
                         Reaching().frame(maxWidth: .infinity, maxHeight: .infinity)
                             .background(.regularMaterial)
                     }
+                    #if canImport(UIKit)
+                        KeyCatcher(
+                            active: $typing, typed: { phone.typed($0) }, erased: { phone.erased() }
+                        )
+                        .frame(width: 0, height: 0)
+                    #endif
                 }
                 .clipped()
                 .contentShape(Rectangle())
                 .onTapGesture { typing = true }
                 .gesture(scrolling)
+                .accessibilityElement()
+                .accessibilityIdentifier("Terminal")
                 // Waits out the keyboard's slide, then asks for the grid that fits.
                 .task(id: grid) {
                     try? await Task.sleep(for: .milliseconds(200))
@@ -35,17 +43,19 @@ struct SessionScreen: View {
                     await phone.watch(session: session, columns: grid.columns, lines: grid.lines)
                 }
             }
-            Divider()
-            keys
-            answer
+            // Keeps the text off the screen's edges.
+            .padding(.horizontal, 6)
+            if typing { keys }
         }
-        .navigationTitle(phone.sessions.first { $0.id == session }?.name ?? "")
+        .background(ground.ignoresSafeArea())
         #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar, .tabBar)
         #endif
         .onDisappear { Task { await phone.leave() } }
         .onChange(of: phone.gone) { _, gone in if gone { dismiss() } }
     }
+
+    private var ground: Color { Color(hex: phone.screen?.ground) ?? .black }
 
     /// Dragging moves through earlier output a line at a time, as the finger crosses each one.
     private var scrolling: some Gesture {
@@ -60,9 +70,11 @@ struct SessionScreen: View {
             .onEnded { _ in linesDragged = 0 }
     }
 
-    /// The keys a phone's keyboard lacks.
+    /// Above the keyboard: the way back, the keys a phone's keyboard lacks, and the keyboard's
+    /// way down.
     private var keys: some View {
         HStack(spacing: 0) {
+            key(symbol: "chevron.left", named: "Back") { dismiss() }
             key("esc", .escape)
             key("tab", .tab)
             key(symbol: "arrow.left", .left)
@@ -70,49 +82,98 @@ struct SessionScreen: View {
             key(symbol: "arrow.down", .down)
             key(symbol: "arrow.right", .right)
             key("stop", .interrupt).tint(.red)
+            key(symbol: "keyboard.chevron.compact.down", named: "Hide Keyboard") { typing = false }
         }
         .font(.callout)
-        .padding(.top, 4)
+        .background(.bar)
     }
 
     private func key(_ name: String, _ pressed: PressedKey) -> some View {
         Button(name) { Task { await phone.press(pressed) } }
-            .frame(maxWidth: .infinity, minHeight: 36)
+            .frame(maxWidth: .infinity, minHeight: 40)
     }
 
     private func key(symbol: String, _ pressed: PressedKey) -> some View {
-        Button {
-            Task { await phone.press(pressed) }
-        } label: {
-            Image(systemName: symbol).frame(maxWidth: .infinity, minHeight: 36)
-        }
-        .accessibilityLabel(pressed.rawValue)
+        key(symbol: symbol, named: pressed.rawValue) { Task { await phone.press(pressed) } }
     }
 
-    private var answer: some View {
-        HStack(spacing: 8) {
-            TextField("Message", text: $text)
-                .textFieldStyle(.roundedBorder)
-                .focused($typing)
-                .onSubmit(send)
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill").font(.title)
-            }
-            .accessibilityLabel(text.isEmpty ? "Enter" : "Send")
+    private func key(symbol: String, named name: String, _ action: @escaping () -> Void)
+        -> some View
+    {
+        Button(action: action) {
+            Image(systemName: symbol).frame(maxWidth: .infinity, minHeight: 40)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-    }
-
-    /// Sends what was typed and Enter; with nothing typed, just Enter.
-    private func send() {
-        let typed = text
-        text = ""
-        // The keyboard stays up, so the terminal is not refitted after every answer.
-        typing = true
-        Task { await phone.send(typed) }
+        .accessibilityLabel(name)
     }
 }
+
+#if canImport(UIKit)
+    import UIKit
+
+    /// Takes the keyboard for the terminal: what is typed goes out a key at a time, with no
+    /// text field in between.
+    private struct KeyCatcher: UIViewRepresentable {
+        @Binding var active: Bool
+        let typed: (String) -> Void
+        let erased: () -> Void
+
+        func makeUIView(context: Context) -> Keys { Keys() }
+
+        func updateUIView(_ keys: Keys, context: Context) {
+            keys.typed = typed
+            keys.erased = erased
+            keys.keyboardTaken = { active = $0 }
+            guard active != keys.isFirstResponder else { return }
+            // After this update, when the view is in its window.
+            DispatchQueue.main.async {
+                if active { keys.becomeFirstResponder() } else { keys.resignFirstResponder() }
+            }
+        }
+    }
+
+    private final class Keys: UIView, UIKeyInput {
+        var typed: (String) -> Void = { _ in }
+        var erased: () -> Void = {}
+        var keyboardTaken: (Bool) -> Void = { _ in }
+
+        // A terminal takes what is typed as it is.
+        var autocorrectionType = UITextAutocorrectionType.no
+        var autocapitalizationType = UITextAutocapitalizationType.none
+        var spellCheckingType = UITextSpellCheckingType.no
+        var smartQuotesType = UITextSmartQuotesType.no
+        var smartDashesType = UITextSmartDashesType.no
+        var smartInsertDeleteType = UITextSmartInsertDeleteType.no
+
+        override var canBecomeFirstResponder: Bool { true }
+        var hasText: Bool { true }
+        func insertText(_ text: String) { typed(text) }
+        func deleteBackward() { erased() }
+
+        override func becomeFirstResponder() -> Bool {
+            let became = super.becomeFirstResponder()
+            if became { keyboardTaken(true) }
+            return became
+        }
+
+        override func resignFirstResponder() -> Bool {
+            let resigned = super.resignFirstResponder()
+            if resigned { keyboardTaken(false) }
+            return resigned
+        }
+    }
+
+    /// The edge swipe goes back from a screen whose navigation bar is hidden, as the terminal's is.
+    extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+        override open func viewDidLoad() {
+            super.viewDidLoad()
+            interactivePopGestureRecognizer?.delegate = self
+        }
+
+        public func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            viewControllers.count > 1
+        }
+    }
+#endif
 
 /// The size of one character of the terminal's type.
 enum Cell {

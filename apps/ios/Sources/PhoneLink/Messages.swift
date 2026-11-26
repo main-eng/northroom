@@ -9,6 +9,10 @@ public enum Ask: Equatable, Sendable {
     /// Makes a terminal on the computer and starts its session.
     case start
     case type(session: String, text: String)
+    /// Types `text` as keys pressed one after another, not as a paste.
+    case keys(session: String, text: String)
+    /// Lists what is in `folder`, or at the top of the drive for `nil`.
+    case list(folder: String?)
     case press(session: String, key: PressedKey)
     /// Moves through earlier output by `lines`, towards older output when positive.
     case scroll(session: String, lines: Int)
@@ -24,6 +28,9 @@ public enum Ask: Equatable, Sendable {
         case .leave: fields = ["type": "leave"]
         case .start: fields = ["type": "start"]
         case .type(let session, let text): fields = ["type": "type", "session": session, "text": text]
+        case .keys(let session, let text): fields = ["type": "keys", "session": session, "text": text]
+        case .list(let folder?): fields = ["type": "list", "folder": folder]
+        case .list(nil): fields = ["type": "list"]
         case .press(let session, let key):
             fields = ["type": "press", "session": session, "key": key.rawValue]
         case .scroll(let session, let lines):
@@ -52,6 +59,18 @@ public struct Session: Codable, Equatable, Identifiable, Sendable {
     public var doing: String
     public var agent: String
     public var activity: Activity
+}
+
+/// One file or folder in a listed folder.
+public struct Item: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    /// `folder`, `page`, `terminal`, `image`, `video`, `audio` or `file`.
+    public var kind: String
+    /// A file's size in bytes; absent for a folder.
+    public var size: Int?
+
+    public var isFolder: Bool { kind == "folder" }
 }
 
 /// Text in one look, starting at `column`.
@@ -88,9 +107,16 @@ public enum Tell: Equatable, Sendable {
     case gone(session: String)
     /// The session a `start` made.
     case started(session: String)
+    /// What is in `folder`, or at the top of the drive for `nil`.
+    case folder(folder: String?, name: String, items: [Item])
+    /// The folder a `list` named is not in the drive.
+    case noFolder(folder: String?)
 
     private struct Wire: Decodable {
         var type: String
+        var folder: String?
+        var name: String?
+        var items: [Item]?
         var host: String?
         var why: String?
         var sessions: [Session]?
@@ -108,6 +134,9 @@ public enum Tell: Equatable, Sendable {
         case ("screen", let session?, let screen?): self = .screen(session: session, screen)
         case ("gone", let session?, _): self = .gone(session: session)
         case ("started", let session?, _): self = .started(session: session)
+        case ("folder", _, _):
+            self = .folder(folder: wire.folder, name: wire.name ?? "", items: wire.items ?? [])
+        case ("no-folder", _, _): self = .noFolder(folder: wire.folder)
         default: return nil
         }
     }
