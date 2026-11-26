@@ -1,7 +1,7 @@
 # Phone link
 
 How a phone, or any device, connects to a computer running Northroom: lists its running
-sessions, watches one terminal, types into it and lists the drive's folders. Anyone may build a device or a host that
+sessions, watches one terminal, types into it, lists the drive's folders and reads its files. Anyone may build a device or a host that
 speaks this. The rules are in `apps/native/core/src/remote/`, the connection in
 `apps/native/crates/northroom-link/`, and a working device in that crate's `Client`.
 
@@ -48,6 +48,7 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
 | `{"type":"type","session":"<id>","text":"…"}`               | Type text, as a paste. It does not press Enter.                                                                            |
 | `{"type":"keys","session":"<id>","text":"…"}`               | Type text as keys pressed one after another, not as a paste.                                                               |
 | `{"type":"list","folder":"<id>"}`                           | List a folder, or the top of the drive when `folder` is absent. Answered with `folder` or `no-folder`.                     |
+| `{"type":"read","file":"<id>","from":0,"length":1048576}`   | Read up to `length` bytes of a file from byte `from` (0 when absent). Answered with `bytes` or `no-file`.                  |
 | `{"type":"press","session":"<id>","key":"enter"}`           | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
 | `{"type":"scroll","session":"<id>","lines":3}`              | Move through earlier output as the computer's wheel does, towards older output when positive; at most 500 lines a message. |
 
@@ -66,6 +67,8 @@ read, is answered with `refused` and the link closes.
 | `{"type":"started","session":"<id>"}`             | The session a `start` made. It is in the `sessions` sent just before.                             |
 | `{"type":"folder","folder":"<id>","name":"…","items":[…]}` | What a folder holds, in the drive's name order. `folder` is absent for the top of the drive. |
 | `{"type":"no-folder","folder":"<id>"}`            | The folder a `list` named is not in the drive.                                                    |
+| `{"type":"bytes","file":"<id>","from":0,"size":1204,"data":"…"}` | Bytes of a file from `from`, as base64, at most 1 MiB a message, and the whole file's `size`. A device asks again from where these end until it has `size` bytes. |
+| `{"type":"no-file","file":"<id>"}`                | The file a `read` named is not in the drive or can't be read.                                     |
 
 A session:
 
@@ -85,11 +88,12 @@ A session:
 An item in a folder:
 
 ```json
-{ "id": "…", "name": "Notes", "kind": "page", "size": 1204 }
+{ "id": "…", "name": "Notes", "kind": "page", "size": 1204, "extension": "md" }
 ```
 
 `kind` is `folder`, `page`, `terminal`, `image`, `video`, `audio` or `file`. `size` is in bytes and
-absent for a folder. An id lasts while the computer's Northroom runs; list again after
+absent for a folder. `name` is as the drive shows it: a page is without its `.md` and a terminal
+without its `.nterm`. `extension` is absent for a folder or a bare name. An id lasts while the computer's Northroom runs; list again after
 reconnecting.
 
 A screen:
@@ -124,4 +128,4 @@ A screen:
   typing shows the newest output again. A full-screen program gets the scroll as its own wheel
   or arrow keys.
 - A folder is listed when asked; the computer does not say when it changes.
-- A file can be listed but not opened yet.
+- A file is read whole, a piece at a time; there is no reading of part of a film as it plays.

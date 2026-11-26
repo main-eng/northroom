@@ -4,7 +4,7 @@
 
 use crate::remote::devices::{Devices, Key, FILE};
 use crate::remote::pairing::Invite;
-use crate::remote::protocol::{Item, Listing, Pressed};
+use crate::remote::protocol::{Item, Listing, Piece, Pressed};
 use crate::remote::screen::Screen;
 use crate::remote::service::{Desk, Out, Service};
 use crate::sessions::Running;
@@ -74,6 +74,17 @@ impl Desk for AppDesk {
         })?
     }
 
+    fn read(&self, file: &str, from: u64, length: usize) -> Option<Piece> {
+        let path = crate::ffi::with_columns(|columns| columns.workspace().path_of(file))?.ok()?;
+        match read_piece(&path, from, length) {
+            Ok(piece) => Some(piece),
+            Err(error) => {
+                eprintln!("a phone's read of {} failed: {error}", path.display());
+                None
+            }
+        }
+    }
+
     fn press(&self, session: &str, pressed: Pressed) {
         let sessions = crate::app().sessions.relock();
         let Some(terminal) = sessions.get(session) else {
@@ -90,6 +101,24 @@ impl Desk for AppDesk {
             terminal.scroll_lines(lines);
         }
     }
+}
+
+/// Up to `length` bytes of the file at `path` from byte `from`, and the file's size. A folder
+/// is not a file to read.
+fn read_piece(path: &std::path::Path, from: u64, length: usize) -> std::io::Result<Piece> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let details = file.metadata()?;
+    if !details.is_file() {
+        return Err(std::io::Error::other("not a file"));
+    }
+    file.seek(SeekFrom::Start(from))?;
+    let mut bytes = Vec::new();
+    file.take(length as u64).read_to_end(&mut bytes)?;
+    Ok(Piece {
+        size: details.len(),
+        bytes,
+    })
 }
 
 /// The relays the person's `settings` choose (`settings::file::PHONE_RELAY`): the one at the

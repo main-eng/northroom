@@ -6,8 +6,12 @@ struct FilesScreen: View {
     var body: some View {
         NavigationStack {
             FolderScreen(folder: nil, name: nil)
-                .navigationDestination(for: Item.self) {
-                    FolderScreen(folder: $0.id, name: $0.name)
+                .navigationDestination(for: Item.self) { item in
+                    if item.isFolder {
+                        FolderScreen(folder: item.id, name: item.name)
+                    } else {
+                        FileScreen(item: item)
+                    }
                 }
         }
     }
@@ -24,10 +28,11 @@ private struct FolderScreen: View {
     var body: some View {
         let listed = phone.folders[folder ?? Phone.top]
         List(items(of: listed)) { item in
-            if item.isFolder {
-                NavigationLink(value: item) { ItemRow(item: item) }
-            } else {
+            // A terminal is opened from Sessions, where the running ones are.
+            if item.kind == "terminal" {
                 ItemRow(item: item)
+            } else {
+                NavigationLink(value: item) { ItemRow(item: item) }
             }
         }
         .overlay { note(for: listed) }

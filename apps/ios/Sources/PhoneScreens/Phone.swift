@@ -20,6 +20,17 @@ public final class Phone {
         case gone
     }
 
+    /// A file being brought to this device to show.
+    public enum Fetch: Equatable {
+        case fetching(received: Int, size: Int)
+        /// The whole file, in this device's temporary folder.
+        case ready(URL)
+        case failed
+    }
+
+    /// The bytes one `read` asks for.
+    private static let pieceBytes = 1024 * 1024
+
     /// The key `folders` keeps the top of the drive under.
     public static let top = ""
 
@@ -36,6 +47,8 @@ public final class Phone {
     /// The folders listed so far, by id; the top of the drive is `Phone.top`. A folder that is
     /// no longer in the drive is `.gone`.
     public private(set) var folders: [String: Folder] = [:]
+    /// The files fetched or on their way, by id.
+    public private(set) var fetches: [String: Fetch] = [:]
     /// Why the last pairing did not work, for the scan screen.
     public private(set) var notice: String?
     public private(set) var pairing = false
@@ -44,6 +57,8 @@ public final class Phone {
     private var link: Link?
     private var listening: Task<Void, Never>?
     private var watching: (session: String, columns: Int, lines: Int)?
+    /// Where each file on its way is being written.
+    private var arriving: [String: (handle: FileHandle, url: URL)] = [:]
     /// The last key sent, which the next one waits for.
     private var sending: Task<Void, Never>?
 
@@ -83,6 +98,7 @@ public final class Phone {
         computer = nil
         sessions = []
         folders = [:]
+        fetches.keys.forEach(discard)
         watching = nil
         screen = nil
     }
@@ -116,6 +132,7 @@ public final class Phone {
                 try? await link.ask(
                     .watch(session: watching.session, columns: watching.columns, lines: watching.lines))
             }
+            resumeFetches()
         } catch LinkError.refused {
             await turnedAway(pairing: code != nil)
         } catch {
@@ -152,6 +169,9 @@ public final class Phone {
         case .folder(let folder, let name, let items):
             folders[folder ?? Phone.top] = .listed(name: name, items: items)
         case .noFolder(let folder): folders[folder ?? Phone.top] = .gone
+        case .bytes(let file, let from, let size, let data):
+            arrived(file: file, from: from, size: size, data)
+        case .noFile(let file): failed(file)
         default: break
         }
     }
@@ -223,6 +243,62 @@ public final class Phone {
     /// Asks for what is in `folder`, or at the top of the drive for `nil`. `folders` gains it.
     public func list(folder: String?) async {
         try? await link?.ask(.list(folder: folder))
+    }
+
+    /// Brings `item`'s file to this device a piece at a time. `fetches` follows it.
+    public func fetch(_ item: Item) {
+        discard(item.id)
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("northroom-files").appendingPathComponent(UUID().uuidString)
+        let url = folder.appendingPathComponent(item.fileName)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: url) else {
+            fetches[item.id] = .failed
+            return
+        }
+        arriving[item.id] = (handle, url)
+        fetches[item.id] = .fetching(received: 0, size: item.size ?? 0)
+        send(.read(file: item.id, from: 0, length: Phone.pieceBytes))
+    }
+
+    /// Lets go of the file `id` and this device's copy of it.
+    public func discard(_ id: String) {
+        try? arriving.removeValue(forKey: id)?.handle.close()
+        if case .ready(let url) = fetches.removeValue(forKey: id) {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        }
+    }
+
+    /// A piece of `file` came. The next is asked for, or the file is whole.
+    private func arrived(file: String, from: Int, size: Int, _ data: Data) {
+        guard let landing = arriving[file], case .fetching(let received, _) = fetches[file],
+            from == received
+        else { return }
+        try? landing.handle.write(contentsOf: data)
+        let now = received + data.count
+        if data.isEmpty || now >= size {
+            try? landing.handle.close()
+            arriving[file] = nil
+            fetches[file] = .ready(landing.url)
+        } else {
+            fetches[file] = .fetching(received: now, size: size)
+            send(.read(file: file, from: now, length: Phone.pieceBytes))
+        }
+    }
+
+    private func failed(_ file: String) {
+        try? arriving.removeValue(forKey: file)?.handle.close()
+        fetches[file] = .failed
+    }
+
+    /// Asks again for the next piece of each file that was on its way when the link ended.
+    private func resumeFetches() {
+        for (file, fetch) in fetches {
+            if case .fetching(let received, _) = fetch {
+                send(.read(file: file, from: received, length: Phone.pieceBytes))
+            }
+        }
     }
 
     private static var deviceName: String {

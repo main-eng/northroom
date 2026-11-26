@@ -22,6 +22,14 @@ final class PairAndAnswerTests: XCTestCase {
         app.buttons["Files"].tap()
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 10), "the drive is listed")
         keep("2 files")
+        // Opens the first page or file listed, when the top of the drive has one.
+        let file = app.cells.containing(.image, identifier: "doc.text").firstMatch
+        if file.exists {
+            file.tap()
+            sleep(3)
+            keep("2 file open")
+            app.navigationBars.buttons.firstMatch.tap()
+        }
         app.buttons["Sessions"].tap()
 
         // Opens a session that is running, or starts one.

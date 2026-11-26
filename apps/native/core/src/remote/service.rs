@@ -5,7 +5,7 @@
 use crate::remote::devices::{Devices, Key};
 use crate::remote::pairing::Offer;
 use crate::remote::protocol::{
-    parse_ask, parse_key, Ask, Listing, Pressed, Refusal, Session, Tell,
+    parse_ask, parse_key, Ask, Listing, Piece, Pressed, Refusal, Session, Tell,
 };
 use crate::remote::screen::Screen;
 use crate::sessions::{self, Running};
@@ -22,6 +22,9 @@ const GRID_MOST: GridSize = GridSize {
     columns: 300,
     lines: 200,
 };
+/// The most bytes one `read` message is answered with: as base64 it stays well inside the
+/// link's longest message.
+const READ_MOST_BYTES: usize = 1024 * 1024;
 /// The most lines one `scroll` message moves, either way.
 const SCROLL_MOST_LINES: i32 = 500;
 
@@ -41,6 +44,8 @@ pub trait Desk {
     fn keys(&self, session: &str, text: &str);
     /// What is in `folder`, or at the top of the drive for `None`; `None` when it is not there.
     fn folder(&self, folder: Option<&str>) -> Option<Listing>;
+    /// Up to `length` bytes of `file` from byte `from`; `None` when it can't be read.
+    fn read(&self, file: &str, from: u64, length: usize) -> Option<Piece>;
     fn press(&self, session: &str, pressed: Pressed);
     /// Moves `session`'s terminal by `lines` as the wheel does, towards older output when
     /// positive.
@@ -100,6 +105,19 @@ fn listing(folder: Option<String>, desk: &dyn Desk) -> Tell {
             items,
         },
         None => Tell::NoFolder { folder },
+    }
+}
+
+/// Up to `length` bytes of `file` from `from`, or that it can't be read.
+fn piece(file: String, from: u64, length: usize, desk: &dyn Desk) -> Tell {
+    match desk.read(&file, from, length.min(READ_MOST_BYTES)) {
+        Some(Piece { size, bytes }) => Tell::Bytes {
+            file,
+            from,
+            size,
+            data: crate::update::sha512::base64(&bytes),
+        },
+        None => Tell::NoFile { file },
     }
 }
 
@@ -252,6 +270,9 @@ impl Service {
                 Vec::new()
             }
             Ask::List { folder } => vec![Out::Tell(link, listing(folder, desk))],
+            Ask::Read { file, from, length } => {
+                vec![Out::Tell(link, piece(file, from, length, desk))]
+            }
             Ask::Start => self.start(link, desk),
             Ask::Scroll { session, lines } => {
                 desk.scroll(&session, lines.clamp(-SCROLL_MOST_LINES, SCROLL_MOST_LINES));

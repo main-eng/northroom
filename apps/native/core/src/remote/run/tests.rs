@@ -1,5 +1,5 @@
 use super::*;
-use crate::remote::protocol::Listing;
+use crate::remote::protocol::{Listing, Piece};
 use crate::remote::screen::Run;
 use crate::terminal::activity::Activity;
 use northroom_link::{Address, Client};
@@ -60,6 +60,10 @@ impl Desk for OneTerminal {
     }
 
     fn folder(&self, _folder: Option<&str>) -> Option<Listing> {
+        None
+    }
+
+    fn read(&self, _file: &str, _from: u64, _length: usize) -> Option<Piece> {
         None
     }
 }

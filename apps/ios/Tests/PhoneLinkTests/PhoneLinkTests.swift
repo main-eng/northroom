@@ -38,6 +38,12 @@ struct PhoneLinkTests {
         #expect(
             text(.keys(session: "s1", text: "ls"))
                 == #"{"session":"s1","text":"ls","type":"keys"}"#)
+        #expect(
+            text(.read(file: "p1", from: 5, length: 9))
+                == #"{"file":"p1","from":5,"length":9,"type":"read"}"#)
+        #expect(
+            Tell(Data(#"{"type":"bytes","file":"p1","from":0,"size":12,"data":"aGVsbG8="}"#.utf8))
+                == .bytes(file: "p1", from: 0, size: 12, Data("hello".utf8)))
         let folder = Tell(
             Data(#"{"type":"folder","name":"Drive","items":[{"id":"f1","name":"Work","kind":"folder"}]}"#.utf8))
         #expect(

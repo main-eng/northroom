@@ -1,6 +1,6 @@
 use super::*;
 use crate::remote::devices::FILE;
-use crate::remote::protocol::Item;
+use crate::remote::protocol::{Item, Piece};
 use crate::terminal::activity::Activity;
 use crate::terminal::input::Key as Pressable;
 use std::cell::RefCell;
@@ -100,6 +100,17 @@ impl Desk for FakeDesk {
             .push(format!("keys {session} {text}"));
     }
 
+    /// The page `p1` holds "hello, phone".
+    fn read(&self, file: &str, from: u64, length: usize) -> Option<Piece> {
+        const PAGE: &[u8] = b"hello, phone";
+        let start = usize::try_from(from).ok()?.min(PAGE.len());
+        let end = start.saturating_add(length).min(PAGE.len());
+        (file == "p1").then(|| Piece {
+            size: PAGE.len() as u64,
+            bytes: PAGE[start..end].to_vec(),
+        })
+    }
+
     /// The top of the drive holds one folder, `f1`, which holds one page.
     fn folder(&self, folder: Option<&str>) -> Option<Listing> {
         let item = |id: &str, name: &str, kind, size| Item {
@@ -107,6 +118,7 @@ impl Desk for FakeDesk {
             name: name.to_owned(),
             kind,
             size,
+            extension: None,
         };
         match folder {
             None => Some(Listing {
@@ -357,6 +369,31 @@ fn a_folder_is_listed_from_the_top_of_the_drive_down() {
     assert_eq!(
         told(fixture.ask(1, r#"{"type":"list","folder":"gone"}"#)),
         r#"{"type":"no-folder","folder":"gone"}"#
+    );
+}
+
+#[test]
+fn a_file_is_read_a_piece_at_a_time_as_base64() {
+    let mut fixture = fixture(&[]);
+    fixture.paired(1);
+    let told = |out: Vec<Out>| match out.as_slice() {
+        [Out::Tell(1, tell)] => String::from_utf8(tell.encoded()).unwrap(),
+        other => panic!("expected one message: {other:?}"),
+    };
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"read","file":"p1","length":5}"#)),
+        r#"{"type":"bytes","file":"p1","from":0,"size":12,"data":"aGVsbG8="}"#
+    );
+    assert_eq!(
+        told(fixture.ask(
+            1,
+            r#"{"type":"read","file":"p1","from":7,"length":99999999}"#
+        )),
+        r#"{"type":"bytes","file":"p1","from":7,"size":12,"data":"cGhvbmU="}"#
+    );
+    assert_eq!(
+        told(fixture.ask(1, r#"{"type":"read","file":"nope","length":5}"#)),
+        r#"{"type":"no-file","file":"nope"}"#
     );
 }
 

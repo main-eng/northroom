@@ -28,6 +28,14 @@ pub enum Ask {
     },
     /// Stop watching.
     Leave,
+    /// Read up to `length` bytes of `file` starting at byte `from`. Answered with `bytes`, or
+    /// `no-file` when it can't be read.
+    Read {
+        file: String,
+        #[serde(default)]
+        from: u64,
+        length: usize,
+    },
     /// Make a terminal at the top of the drive and start its session. Answered with `started`.
     Start,
     /// Type `text` into `session`, as a paste.
@@ -107,6 +115,9 @@ pub struct Item {
     /// A file's size in bytes; absent for a folder.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
+    /// A file's extension without the dot, as written; absent for a folder or a bare name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extension: Option<String>,
 }
 
 impl Item {
@@ -116,6 +127,7 @@ impl Item {
             name: entry.title.clone(),
             kind: kind_word(entry.kind),
             size: entry.size_bytes,
+            extension: entry.extension.clone(),
         }
     }
 }
@@ -131,6 +143,13 @@ fn kind_word(kind: EntryKind) -> &'static str {
         EntryKind::Audio => "audio",
         EntryKind::File => "file",
     }
+}
+
+/// Part of a file's bytes, and how long the whole file is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Piece {
+    pub size: u64,
+    pub bytes: Vec<u8>,
 }
 
 /// A folder's name and what is in it, in the drive's name order.
@@ -164,6 +183,16 @@ pub enum Tell {
         name: String,
         items: Vec<Item>,
     },
+    /// Bytes of `file` from byte `from`, as base64, and the whole file's `size`. Fewer bytes
+    /// than asked for means the file ends there.
+    Bytes {
+        file: String,
+        from: u64,
+        size: u64,
+        data: String,
+    },
+    /// The file a `read` named is not in the drive or can't be read.
+    NoFile { file: String },
     /// The folder a `list` named is not in the drive.
     NoFolder {
         #[serde(skip_serializing_if = "Option::is_none")]
