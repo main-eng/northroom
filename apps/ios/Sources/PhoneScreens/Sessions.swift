@@ -4,9 +4,11 @@ import SwiftUI
 /// The computer's running sessions, the ones that need the person first (the computer's order).
 struct SessionsScreen: View {
     @Environment(Phone.self) private var phone
+    /// The session on screen, when one is.
+    @State private var opened: [String] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $opened) {
             List(phone.sessions) { session in
                 NavigationLink(value: session.id) { SessionRow(session: session) }
             }
@@ -16,12 +18,23 @@ struct SessionsScreen: View {
                 } else if phone.sessions.isEmpty {
                     ContentUnavailableView(
                         "No sessions running", systemImage: "terminal",
-                        description: Text("Start one in Northroom on your computer."))
+                        description: Text("Start one with the plus."))
                 }
             }
             .navigationTitle(phone.computer?.name ?? "")
             .navigationDestination(for: String.self) { SessionScreen(session: $0) }
+            .onChange(of: phone.started) { _, started in
+                guard let started else { return }
+                opened = [started]
+                phone.openedStarted()
+            }
             .toolbar {
+                Button {
+                    Task { await phone.start() }
+                } label: {
+                    Label("New Terminal", systemImage: "plus")
+                }
+                .disabled(phone.state != .connected)
                 Menu {
                     Button("Forget This Computer", role: .destructive) {
                         Task { await phone.forget() }
@@ -51,7 +64,7 @@ private struct SessionRow: View {
         switch session.activity {
         case .needsYou: "Needs you"
         case .finished: "Finished"
-        default: session.doing.isEmpty ? session.agent : session.doing
+        default: session.doing.isEmpty ? (session.agent.isEmpty ? "Shell" : session.agent) : session.doing
         }
     }
 

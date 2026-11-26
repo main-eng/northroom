@@ -44,6 +44,7 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
 | `{"type":"hello"}`                                          | A paired device connected. Answered with `welcome`, then `sessions`.                                                       |
 | `{"type":"watch","session":"<id>","columns":48,"lines":30}` | Show this session's terminal, fitted to this grid (20 to 300 columns, 5 to 200 lines), until another `watch` or a `leave`. |
 | `{"type":"leave"}`                                          | Stop watching. The terminal takes back the size of its view on the computer.                                               |
+| `{"type":"start"}`                                          | Make a terminal at the top of the drive and start its shell. Answered with `sessions`, then `started`.                     |
 | `{"type":"type","session":"<id>","text":"…"}`               | Type text, as a paste. It does not press Enter.                                                                            |
 | `{"type":"press","session":"<id>","key":"enter"}`           | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
 | `{"type":"scroll","session":"<id>","lines":3}`              | Move through earlier output as the computer's wheel does, towards older output when positive; at most 500 lines a message. |
@@ -57,9 +58,10 @@ read, is answered with `refused` and the link closes.
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `{"type":"welcome","host":"<computer's name>"}`   | The device may stay.                                                                              |
 | `{"type":"refused","why":"not-paired"}`           | The device may not, and the link closes. `why` is `not-paired`, `wrong-code` or `not-understood`. |
-| `{"type":"sessions","sessions":[…]}`              | Every running session, most urgent first. Sent after `hello` and whenever it changes.             |
+| `{"type":"sessions","sessions":[…]}`              | Every open terminal, most urgent first, a shell at its prompt as `idle`. Sent after `hello` and whenever it changes. |
 | `{"type":"screen","session":"<id>","screen":{…}}` | The watched terminal's screen. Sent after `watch` and whenever it changes.                        |
 | `{"type":"gone","session":"<id>"}`                | The watched session ended.                                                                        |
+| `{"type":"started","session":"<id>"}`             | The session a `start` made. It is in the `sessions` sent just before.                             |
 
 A session:
 
@@ -107,4 +109,4 @@ A screen:
 - Scrolling moves the terminal's one view: the computer's window scrolls with the device, and
   typing shows the newest output again. A full-screen program gets the scroll as its own wheel
   or arrow keys.
-- There is no file browsing or starting a session yet.
+- There is no file browsing yet.

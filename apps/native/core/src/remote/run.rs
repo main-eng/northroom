@@ -30,7 +30,11 @@ struct AppDesk;
 
 impl Desk for AppDesk {
     fn sessions(&self) -> Vec<Running> {
-        crate::sessions::ffi::running_now()
+        crate::sessions::ffi::running_for_devices()
+    }
+
+    fn start(&self) -> Option<String> {
+        crate::ffi::start_unshown_session()
     }
 
     fn screen(&self, session: &str) -> Option<Screen> {

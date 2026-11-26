@@ -6,6 +6,8 @@ public enum Ask: Equatable, Sendable {
     case hello
     case watch(session: String, columns: Int, lines: Int)
     case leave
+    /// Makes a terminal on the computer and starts its session.
+    case start
     case type(session: String, text: String)
     case press(session: String, key: PressedKey)
     /// Moves through earlier output by `lines`, towards older output when positive.
@@ -20,6 +22,7 @@ public enum Ask: Equatable, Sendable {
         case .watch(let session, let columns, let lines):
             fields = ["type": "watch", "session": session, "columns": columns, "lines": lines]
         case .leave: fields = ["type": "leave"]
+        case .start: fields = ["type": "start"]
         case .type(let session, let text): fields = ["type": "type", "session": session, "text": text]
         case .press(let session, let key):
             fields = ["type": "press", "session": session, "key": key.rawValue]
@@ -83,6 +86,8 @@ public enum Tell: Equatable, Sendable {
     case sessions([Session])
     case screen(session: String, Screen)
     case gone(session: String)
+    /// The session a `start` made.
+    case started(session: String)
 
     private struct Wire: Decodable {
         var type: String
@@ -102,6 +107,7 @@ public enum Tell: Equatable, Sendable {
         case ("sessions", _, _): self = .sessions(wire.sessions ?? [])
         case ("screen", let session?, let screen?): self = .screen(session: session, screen)
         case ("gone", let session?, _): self = .gone(session: session)
+        case ("started", let session?, _): self = .started(session: session)
         default: return nil
         }
     }

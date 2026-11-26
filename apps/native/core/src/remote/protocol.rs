@@ -27,6 +27,8 @@ pub enum Ask {
     },
     /// Stop watching.
     Leave,
+    /// Make a terminal at the top of the drive and start its session. Answered with `started`.
+    Start,
     /// Type `text` into `session`, as a paste.
     Type { session: String, text: String },
     /// Press one key in `session`: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`,
@@ -100,6 +102,8 @@ pub enum Tell {
     Screen { session: String, screen: Screen },
     /// The watched session has ended or its terminal is gone.
     Gone { session: String },
+    /// The session a `start` made, already in the `sessions` sent just before.
+    Started { session: String },
 }
 
 impl Tell {

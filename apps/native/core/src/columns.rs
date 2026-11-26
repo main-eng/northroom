@@ -1590,17 +1590,35 @@ impl Columns {
         let Some(location) = self.location_of(column) else {
             return Ok(None);
         };
+        let id = self.create_terminal_file(&location, language)?;
+        self.refresh_and_select(column, &id)?;
+        Ok(Some(id))
+    }
+
+    /// Makes a terminal file at the top of the drive, named as `create_terminal` names one and
+    /// listed, for a session no view here shows yet (one a paired phone starts). Returns its id
+    /// and path.
+    pub fn create_terminal_at_top(&mut self, language: &str) -> DriveResult<(String, PathBuf)> {
+        let top = self.workspace.root().to_path_buf();
+        let location = self.workspace.location_at(&top)?;
+        let id = self.create_terminal_file(&location, language)?;
+        self.refresh()?;
+        let path = self.workspace.path_of(&id)?;
+        Ok((id, path))
+    }
+
+    /// Makes a terminal file at `location`, named with the terminal word in `language`
+    /// (numbered when taken). Returns its id.
+    fn create_terminal_file(&mut self, location: &Location, language: &str) -> DriveResult<String> {
         let name = format!(
             "{}.nterm",
             crate::strings::text(language, crate::strings::key::TERMINAL_SHELL_LABEL)
         );
-        let id = self.workspace.create_file(
-            &location,
+        self.workspace.create_file(
+            location,
             &name,
             crate::terminal::launch::TERMINAL_FILE.as_bytes(),
-        )?;
-        self.refresh_and_select(column, &id)?;
-        Ok(Some(id))
+        )
     }
 
     /// Copies files and folders from anywhere on the computer into `column`'s folder, for an

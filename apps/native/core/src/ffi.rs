@@ -554,6 +554,54 @@ fn terminal_palette() -> Palette {
 /// the file's folder when none runs, and returns the number it is known by on screen.
 fn show_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> u64 {
     let app = app();
+    // Already running: show it as it was left.
+    let running = {
+        let sessions = app.sessions.relock();
+        sessions.get(id).map(|session| session.attach(view))
+    };
+    if running.is_none() {
+        let started = start_session(id, path, view);
+        app.sessions.relock().insert(id.to_owned(), started);
+    }
+    app.shown_terminals.relock().show(id)
+}
+
+/// The size a session starts at when no view shows it. The phone that asked for it fits it
+/// next (`Terminal::hold_grid`), and a view here fits it when it opens.
+const UNSHOWN_VIEW: crate::terminal::ViewSize = crate::terminal::ViewSize {
+    width: 640,
+    height: 384,
+    cell: crate::terminal::frame::CellMetrics {
+        width: 8.0,
+        height: 16.0,
+        baseline: 12.0,
+        stroke: 1.0,
+    },
+};
+
+/// Makes a terminal at the top of the drive and starts its session with no view here showing
+/// it, for a paired phone. Returns the terminal file's id, or `None` when no drive is open or
+/// the file could not be made.
+pub(crate) fn start_unshown_session() -> Option<String> {
+    let made = with_columns(|columns| columns.create_terminal_at_top(interface_language()))?;
+    let (id, path) = match made {
+        Ok(made) => made,
+        Err(error) => {
+            eprintln!("a phone's terminal was not made: {error}");
+            return None;
+        }
+    };
+    let started = start_session(&id, &path, UNSHOWN_VIEW);
+    started.detach();
+    app().sessions.relock().insert(id.clone(), started);
+    // The drive's lists gained a file off the shell's thread.
+    crate::notify_changed();
+    Some(id)
+}
+
+/// Starts the session of the terminal file `id` at `path`, fitted to `view`: its shell, in the
+/// file's folder.
+fn start_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> Terminal {
     let environment: Vec<(String, String)> = std::env::vars().collect();
     let palette = terminal_palette();
     // Read before the sessions' lock, which the columns' lock never waits under.
@@ -566,47 +614,38 @@ fn show_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> u64 {
     })
     .unzip();
     // The terminal file decides the folder; the person decides what runs (ADR-0005).
-    let mut sessions = app.sessions.relock();
-    match sessions.get(id) {
-        // Already running: show it as it was left.
-        Some(session) => session.attach(view),
-        None => {
-            let shell = choose_shell(std::env::var("SHELL").ok().as_deref());
-            let directory = path
-                .parent()
-                .map_or_else(|| PathBuf::from("/"), Path::to_path_buf);
-            // Agents started in this session learn how to report activity. The hook files
-            // live in the app's data; if writing them fails, the session runs unreported.
-            let harness_home = crate::paths::get().support;
-            let session = match crate::terminal::harness::write_harness_files(&harness_home) {
-                Ok(plugin) => crate::terminal::harness::session_environment(&plugin),
-                Err(error) => {
-                    eprintln!("the terminal's activity hooks were not written: {error}");
-                    Vec::new()
-                }
-            };
-            let launch = build_launch(&directory, &environment, &shell, &session);
-            let turns =
-                crate::changes::ffi::follow_terminal(id, path, &directory, drive.as_deref());
-            // The terminal's output from before the last quit shows above the new shell, once.
-            let restored = metadata
-                .as_deref()
-                .and_then(|metadata| crate::terminal::transcript::take(metadata, id))
-                .map(|text| crate::terminal::transcript::shown(&text, interface_language()))
-                .unwrap_or_default();
-            let started = Terminal::start(view, launch, palette, turns, &restored);
-            // An agent open in it at the last quit opens its conversation again: the command is
-            // typed once the shell waits at its prompt.
-            let resume = metadata
-                .as_deref()
-                .and_then(|metadata| crate::terminal::transcript::take_resume(metadata, id));
-            if let Some(command) = resume {
-                started.type_ahead(format!("{}\r", command.trim()).into_bytes());
-            }
-            sessions.insert(id.to_owned(), started);
+    let shell = choose_shell(std::env::var("SHELL").ok().as_deref());
+    let directory = path
+        .parent()
+        .map_or_else(|| PathBuf::from("/"), Path::to_path_buf);
+    // Agents started in this session learn how to report activity. The hook files live in the
+    // app's data; if writing them fails, the session runs unreported.
+    let harness_home = crate::paths::get().support;
+    let session = match crate::terminal::harness::write_harness_files(&harness_home) {
+        Ok(plugin) => crate::terminal::harness::session_environment(&plugin),
+        Err(error) => {
+            eprintln!("the terminal's activity hooks were not written: {error}");
+            Vec::new()
         }
+    };
+    let launch = build_launch(&directory, &environment, &shell, &session);
+    let turns = crate::changes::ffi::follow_terminal(id, path, &directory, drive.as_deref());
+    // The terminal's output from before the last quit shows above the new shell, once.
+    let restored = metadata
+        .as_deref()
+        .and_then(|metadata| crate::terminal::transcript::take(metadata, id))
+        .map(|text| crate::terminal::transcript::shown(&text, interface_language()))
+        .unwrap_or_default();
+    let started = Terminal::start(view, launch, palette, turns, &restored);
+    // An agent open in it at the last quit opens its conversation again: the command is typed
+    // once the shell waits at its prompt.
+    let resume = metadata
+        .as_deref()
+        .and_then(|metadata| crate::terminal::transcript::take_resume(metadata, id));
+    if let Some(command) = resume {
+        started.type_ahead(format!("{}\r", command.trim()).into_bytes());
     }
-    app.shown_terminals.relock().show(id)
+    started
 }
 
 /// Takes the terminal shown as `number` off screen. Its session runs on, and is marked off

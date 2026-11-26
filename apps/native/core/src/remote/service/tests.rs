@@ -60,6 +60,19 @@ impl Desk for FakeDesk {
         self.running.borrow().clone()
     }
 
+    fn start(&self) -> Option<String> {
+        let id = format!("s{}", self.running.borrow().len() + 1);
+        self.running.borrow_mut().push(Running {
+            id: id.clone(),
+            name: "Terminal".to_owned(),
+            folder: "Work".to_owned(),
+            doing: String::new(),
+            agent: String::new(),
+            activity: Activity::Idle,
+        });
+        Some(id)
+    }
+
     fn screen(&self, session: &str) -> Option<Screen> {
         self.shows
             .borrow()
@@ -273,6 +286,20 @@ fn scrolling_moves_the_named_session_by_at_most_a_message_s_limit() {
     fixture.ask(1, r#"{"type":"scroll","session":"s1","lines":12}"#);
     fixture.ask(1, r#"{"type":"scroll","session":"s1","lines":-100000}"#);
     assert_eq!(fixture.desk.done(), ["scroll s1 12", "scroll s1 -500"]);
+}
+
+#[test]
+fn a_started_session_is_listed_before_the_device_is_told_which_it_is() {
+    let mut fixture = fixture(&[("s1", Activity::Working)]);
+    fixture.paired(1);
+    let out = fixture.ask(1, r#"{"type":"start"}"#);
+    let [Out::Tell(1, Tell::Sessions { sessions }), Out::Tell(1, Tell::Started { session })] =
+        out.as_slice()
+    else {
+        panic!("expected the sessions, then the started one: {out:?}");
+    };
+    assert_eq!(session, "s2");
+    assert!(sessions.iter().any(|listed| listed.id == "s2"));
 }
 
 #[test]

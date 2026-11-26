@@ -25,8 +25,10 @@ const SCROLL_MOST_LINES: i32 = 500;
 
 /// The running terminals, as a device may see and use them.
 pub trait Desk {
-    /// Every running session.
+    /// Every open terminal's session, a shell waiting at its prompt included.
     fn sessions(&self) -> Vec<Running>;
+    /// Makes a terminal and starts its session, returning its id; `None` when it can't be made.
+    fn start(&self) -> Option<String>;
     /// What `session`'s terminal shows; `None` when it is not running.
     fn screen(&self, session: &str) -> Option<Screen>;
     /// Holds `session`'s terminal at `grid` while a device watches it, or with `None` gives it
@@ -227,12 +229,23 @@ impl Service {
                 }
                 Vec::new()
             }
+            Ask::Start => self.start(link, desk),
             Ask::Scroll { session, lines } => {
                 desk.scroll(&session, lines.clamp(-SCROLL_MOST_LINES, SCROLL_MOST_LINES));
                 // What scrolled into view is sent now, not at the next look for changes.
                 self.tell_screen(link, desk)
             }
         }
+    }
+
+    /// Starts a session and tells `link`'s device which it is, after the list that holds it.
+    fn start(&mut self, link: u64, desk: &dyn Desk) -> Vec<Out> {
+        let Some(session) = desk.start() else {
+            return Vec::new();
+        };
+        let mut out = self.tell_sessions(link, desk);
+        out.push(Out::Tell(link, Tell::Started { session }));
+        out
     }
 
     fn watch(&mut self, link: u64, session: String, grid: GridSize, desk: &dyn Desk) -> Vec<Out> {

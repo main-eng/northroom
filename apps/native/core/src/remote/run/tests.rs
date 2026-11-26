@@ -49,6 +49,10 @@ impl Desk for OneTerminal {
     }
 
     fn scroll(&self, _session: &str, _lines: i32) {}
+
+    fn start(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A phone that read `invite` off the screen, dialling this machine.

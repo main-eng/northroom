@@ -22,6 +22,8 @@ public final class Phone {
     public private(set) var screen: Screen?
     /// Set when the watched session ended.
     public private(set) var gone = false
+    /// The session this device just started, for the sessions screen to open, once.
+    public private(set) var started: String?
     /// Why the last pairing did not work, for the scan screen.
     public private(set) var notice: String?
     public private(set) var pairing = false
@@ -129,11 +131,22 @@ public final class Phone {
         case .sessions(let running): sessions = running
         case .screen(let session, let shown) where session == watching?.session: screen = shown
         case .gone(let session) where session == watching?.session: gone = true
+        case .started(let session): started = session
         default: break
         }
     }
 
     // MARK: One session
+
+    /// Asks the computer for a new terminal. `started` names it when it runs.
+    public func start() async {
+        try? await link?.ask(.start)
+    }
+
+    /// The started session is open on screen.
+    public func openedStarted() {
+        started = nil
+    }
 
     public func watch(session: String, columns: Int, lines: Int) async {
         if watching?.session != session {

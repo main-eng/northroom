@@ -8,16 +8,20 @@ use crate::theme::Token;
 use crate::workspace::Workspace;
 use crate::Relock;
 
-/// What every listed session is doing (`sessions::listed_activity`), the title its program set
-/// and the agent running in it, by its terminal file's id. A terminal with nothing running in it
-/// is left out.
-fn session_states() -> Vec<(String, Activity, String, &'static str)> {
+/// What a session is listed as doing, from its activity, whether an agent runs in it and
+/// whether its shell is busy; `None` leaves it out (`sessions::listed_activity`,
+/// `sessions::device_activity`).
+type Listed = fn(Activity, bool, bool) -> Option<Activity>;
+
+/// What every session `listed` keeps is doing, the title its program set and the agent running
+/// in it, by its terminal file's id.
+fn session_states(listed: Listed) -> Vec<(String, Activity, String, &'static str)> {
     crate::app()
         .sessions
         .relock()
         .iter()
         .filter_map(|(id, session)| {
-            let listed = sessions::listed_activity(
+            let listed = listed(
                 session.activity(),
                 session.agent().is_some(),
                 session.busy(),
@@ -64,8 +68,18 @@ fn placed_session(
 
 /// Every session running now. Empty before a drive is open.
 pub fn running_now() -> Vec<Running> {
+    running_listed(sessions::listed_activity)
+}
+
+/// Every open terminal's session, as a paired device lists them: shells waiting at their prompt
+/// too.
+pub fn running_for_devices() -> Vec<Running> {
+    running_listed(sessions::device_activity)
+}
+
+fn running_listed(listed: Listed) -> Vec<Running> {
     // Read and release the sessions before asking the drive where their files are.
-    let states = session_states();
+    let states = session_states(listed);
     with_columns(|columns| {
         let workspace = columns.workspace();
         states
@@ -120,7 +134,7 @@ pub struct SessionsButton {
 
 /// Every session, counted by activity only, so the drive is not asked where the files are.
 fn counted_sessions() -> Vec<Running> {
-    session_states()
+    session_states(sessions::listed_activity)
         .into_iter()
         .map(|(id, activity, _, _)| Running {
             id,
@@ -170,7 +184,7 @@ pub fn sessions_summary() -> String {
 
 /// How many sessions wait for the person (`sessions::waiting`), for the Dock's icon.
 pub fn sessions_waiting() -> usize {
-    session_states()
+    session_states(sessions::listed_activity)
         .iter()
         .filter(|(_, activity, _, _)| matches!(activity, Activity::NeedsYou | Activity::Finished))
         .count()
@@ -194,7 +208,7 @@ pub struct SessionNotice {
 /// case the session on screen is not news.
 pub fn session_news(at_window: bool) -> Vec<SessionNotice> {
     let app = crate::app();
-    let states: Vec<(String, Activity)> = session_states()
+    let states: Vec<(String, Activity)> = session_states(sessions::listed_activity)
         .into_iter()
         .map(|(id, activity, _, _)| (id, activity))
         .collect();

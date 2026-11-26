@@ -33,6 +33,7 @@ struct PhoneLinkTests {
 
     @Test func asksAreTheJSONTheComputerReads() {
         #expect(text(.hello) == #"{"type":"hello"}"#)
+        #expect(text(.start) == #"{"type":"start"}"#)
         #expect(
             text(.watch(session: "s1", columns: 48, lines: 30))
                 == #"{"columns":48,"lines":30,"session":"s1","type":"watch"}"#)

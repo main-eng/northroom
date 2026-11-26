@@ -50,6 +50,22 @@ pub fn listed_activity(activity: Activity, agent_runs: bool, busy: bool) -> Opti
     }
 }
 
+/// What a terminal's session is listed as doing for a paired device, or `None` once it ended. A
+/// device lists every open terminal, so a shell waiting at its prompt can be typed into: what
+/// `listed_activity` leaves out is idle.
+pub fn device_activity(activity: Activity, agent_runs: bool, busy: bool) -> Option<Activity> {
+    match activity {
+        Activity::Ended => None,
+        Activity::NeedsYou
+        | Activity::Finished
+        | Activity::Working
+        | Activity::Starting
+        | Activity::Idle => {
+            Some(listed_activity(activity, agent_runs, busy).unwrap_or(Activity::Idle))
+        }
+    }
+}
+
 /// The group for a session doing `activity`. A starting session counts as idle, and an ended
 /// one is not listed.
 pub fn group_of(activity: Activity) -> Option<Activity> {
@@ -283,6 +299,20 @@ mod tests {
 
     fn ids(listed: &[&Running]) -> Vec<String> {
         listed.iter().map(|session| session.id.clone()).collect()
+    }
+
+    #[test]
+    fn a_device_lists_a_shell_at_its_prompt_as_idle_and_an_ended_one_not_at_all() {
+        assert_eq!(listed_activity(Activity::Idle, false, false), None);
+        assert_eq!(
+            device_activity(Activity::Idle, false, false),
+            Some(Activity::Idle)
+        );
+        assert_eq!(
+            device_activity(Activity::Idle, false, true),
+            Some(Activity::Working)
+        );
+        assert_eq!(device_activity(Activity::Ended, true, true), None);
     }
 
     #[test]
