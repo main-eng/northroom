@@ -408,6 +408,12 @@ impl Link {
             .collect()
     }
 
+    /// Forgets the device with `key` among the app's own, giving a terminal it watched its size
+    /// back.
+    pub fn forget_for_app(&self, key: &Key) -> std::io::Result<()> {
+        self.forget(key, &AppDesk::default())
+    }
+
     /// Forgets the device with `key` and ends its links.
     pub fn forget(&self, key: &Key, desk: &dyn Desk) -> std::io::Result<()> {
         let out = self.service.relock().forget(key, desk)?;
@@ -425,9 +431,18 @@ fn send(host: &Host, out: Vec<Out>) {
     }
 }
 
-/// Answers `event` by the rules.
+/// Answers `event` by the rules, and tells the app when a device paired, so its menu lists it.
 fn answer(service: &Mutex<Service>, event: Event, desk: &dyn Desk) -> Vec<Out> {
     let mut service = service.relock();
+    let paired_before = service.devices().list().len();
+    let out = answer_by_rules(&mut service, event, desk);
+    if service.devices().list().len() != paired_before {
+        crate::notify_changed();
+    }
+    out
+}
+
+fn answer_by_rules(service: &mut Service, event: Event, desk: &dyn Desk) -> Vec<Out> {
     match event {
         Event::Opened { link, peer } => {
             service.opened(link, peer);

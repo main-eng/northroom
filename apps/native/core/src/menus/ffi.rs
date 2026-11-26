@@ -219,8 +219,12 @@ pub enum NrMenu {
     Sessions,
 }
 
-fn bar_state(update_label: &str) -> menus::BarState<'_> {
+fn bar_state<'a>(
+    update_label: &'a str,
+    phones: &'a [(crate::remote::devices::Key, String)],
+) -> menus::BarState<'a> {
     menus::BarState {
+        phones,
         update_label,
         update_enabled: crate::update::ffi::menu_enabled(),
         folder_shows: with_columns(|_| ()).is_some()
@@ -239,7 +243,8 @@ fn update_label() -> String {
 /// The menu bar's menus.
 pub fn menu_bar() -> Vec<menus::Menu> {
     let label = update_label();
-    menus::menu_bar(bar_state(&label))
+    let phones = crate::remote::app::devices();
+    menus::menu_bar(bar_state(&label, &phones))
 }
 
 /// The tray's menu.
@@ -275,6 +280,7 @@ fn run_bar(command: BarCommand) -> Effect {
         }
         BarCommand::ChooseDrive => Effect::ChooseDrive,
         BarCommand::ConnectPhone => connect_phone(),
+        BarCommand::ForgetPhone(key) => ask_to_forget_phone(key),
         BarCommand::ShowView(view) => {
             set_folder_view(view);
             Effect::Changed
@@ -738,6 +744,8 @@ enum Ask {
     Quit,
     /// A phone's pairing code is on screen; either answer takes it off.
     Pair,
+    /// Forget the paired phone with this key once confirmed.
+    ForgetPhone(crate::remote::devices::Key),
 }
 
 static PROMPT: Mutex<Option<(Ask, Prompt)>> = Mutex::new(None);
@@ -999,20 +1007,28 @@ pub unsafe extern "C" fn nr_prompt_answer(taken: bool, typed: *const c_char) -> 
     }
     *prompt = None;
     drop(prompt);
-    if matches!(ask, Ask::Quit) {
-        return hand_over(Effect::Quit);
-    }
-    let name = name.unwrap_or_default();
-    hand_over(match ask {
-        Ask::Rename(column, id) => changed(with_columns(|columns| {
-            columns.rename_id(column, &id, &name)
-        })),
+    hand_over(do_asked(ask, &name.unwrap_or_default()))
+}
+
+/// Does what a confirmed dialog asked, `name` being what was typed in its field.
+fn do_asked(ask: Ask, name: &str) -> Effect {
+    match ask {
+        Ask::Rename(column, id) => {
+            changed(with_columns(|columns| columns.rename_id(column, &id, name)))
+        }
         Ask::EndSession(id) => {
             crate::ffi::end_session(&id);
             changed(None)
         }
-        Ask::Quit | Ask::Unlock(_) | Ask::Pair => changed(None),
-    })
+        Ask::ForgetPhone(key) => {
+            if let Err(why) = crate::remote::app::forget(&key) {
+                eprintln!("phone link\ta phone was not forgotten: {why}");
+            }
+            changed(None)
+        }
+        Ask::Quit => Effect::Quit,
+        Ask::Unlock(_) | Ask::Pair => changed(None),
+    }
 }
 
 /// Asks for the open file's password when it is locked (`deck::ReadError::Locked`), saying so
@@ -1049,6 +1065,19 @@ fn connect_phone() -> Effect {
     match code {
         Ok(code) => ask(Ask::Pair, menus::pair_prompt(code, language())),
         Err(why) => Effect::Toast(menus::pair_failed(language()), why),
+    }
+}
+
+/// Asks before forgetting the paired phone with `key` (`menus::forget_phone_prompt`). Nothing
+/// when no such phone is paired now.
+fn ask_to_forget_phone(key: crate::remote::devices::Key) -> Effect {
+    let phones = crate::remote::app::devices();
+    match phones.iter().find(|(paired, _)| *paired == key) {
+        Some((_, name)) => ask(
+            Ask::ForgetPhone(key),
+            menus::forget_phone_prompt(name, language()),
+        ),
+        None => Effect::Nothing,
     }
 }
 

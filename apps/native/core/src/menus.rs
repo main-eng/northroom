@@ -350,9 +350,14 @@ pub struct BarState<'a> {
     pub drive_changeable: bool,
     /// How folders are shown.
     pub view: View,
+    /// The paired phones, each its key and the name it gave, for the item that forgets one.
+    pub phones: &'a [(crate::remote::devices::Key, String)],
     /// The interface language code for the labels.
     pub language: &'a str,
 }
+
+/// What a forget-phone item's id starts with; the phone's key in hex follows.
+const FORGET_PHONE_ID: &str = "forget-phone:";
 
 /// The action of a menu bar or tray item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -365,6 +370,8 @@ pub enum BarCommand {
     ChooseDrive,
     /// Show the QR code a phone pairs with (ADR-0016).
     ConnectPhone,
+    /// Forget the paired phone with this key, once confirmed.
+    ForgetPhone(crate::remote::devices::Key),
     ShowView(View),
     Reload,
     ToggleHiddenFiles,
@@ -449,6 +456,13 @@ pub fn menu_bar(state: BarState) -> Vec<Menu> {
                 Entry::item("change-drive", say(key::MENU_CHANGE_DRIVE_FOLDER))
                     .enabled(state.drive_changeable),
                 Entry::item("connect-phone", say(key::MENU_CONNECT_PHONE)),
+            ]
+            .into_iter()
+            .chain(forget_phone_entry(
+                state.phones,
+                say(key::MENU_FORGET_PHONE),
+            ))
+            .chain([
                 Entry::separator(),
                 Entry {
                     submenu: Some(Menu::new(say(key::MENU_SERVICES), Vec::new())),
@@ -461,7 +475,8 @@ pub fn menu_bar(state: BarState) -> Vec<Menu> {
                 Entry::system(Role::ShowAll, say(key::MENU_SHOW_ALL)),
                 Entry::separator(),
                 Entry::item("quit", say(key::MENU_QUIT)).keys(Shortcut::command('q')),
-            ],
+            ])
+            .collect(),
         ),
         Menu::new(
             say(key::MENU_EDIT),
@@ -560,8 +575,30 @@ pub fn tray(
 /// The tooltip on the menu bar's Northroom icon.
 pub const TRAY_TOOLTIP: &str = "Northroom";
 
+/// The item that forgets a paired phone: a menu of the phones by name. No item when none is
+/// paired.
+fn forget_phone_entry(
+    phones: &[(crate::remote::devices::Key, String)],
+    title: &str,
+) -> Option<Entry> {
+    if phones.is_empty() {
+        return None;
+    }
+    let entries = phones
+        .iter()
+        .map(|(key, name)| {
+            let id = format!("{FORGET_PHONE_ID}{}", crate::remote::devices::key_hex(key));
+            Entry::item(id, name.as_str())
+        })
+        .collect();
+    Some(Entry::submenu(title, Menu::new(title, entries)))
+}
+
 /// The action for a menu bar or tray item id.
 pub fn bar_command(id: &str) -> Option<BarCommand> {
+    if let Some(key) = id.strip_prefix(FORGET_PHONE_ID) {
+        return crate::remote::devices::parse_key_hex(key).map(BarCommand::ForgetPhone);
+    }
     Some(match id {
         "updates" => BarCommand::CheckForUpdates,
         "settings" => BarCommand::ShowSettings,
@@ -970,6 +1007,20 @@ pub fn pair_prompt(code: Vec<Vec<bool>>, language: &str) -> Prompt {
         destructive: false,
         secret: false,
         code: Some(code),
+    }
+}
+
+/// The confirmation before forgetting the paired phone called `name`.
+pub fn forget_phone_prompt(name: &str, language: &str) -> Prompt {
+    Prompt {
+        title: strings::text(language, key::DIALOG_FORGET_PHONE_TITLE).replace("{name}", name),
+        message: Some(strings::text(language, key::DIALOG_FORGET_PHONE_MESSAGE).to_owned()),
+        value: None,
+        action: strings::text(language, key::DIALOG_FORGET_PHONE_ACTION),
+        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        destructive: true,
+        secret: false,
+        code: None,
     }
 }
 
@@ -1501,8 +1552,39 @@ mod tests {
         folder_shows: true,
         drive_changeable: true,
         view: View::List,
+        phones: &[],
         language: "en",
     };
+
+    #[test]
+    fn a_paired_phone_is_listed_to_forget_and_its_item_names_it_by_key() {
+        let northroom = |state| menu_bar(state).remove(0);
+        let has_forget = |menu: &Menu| {
+            menu.entries
+                .iter()
+                .any(|entry| entry.title == "Forget Phone")
+        };
+        assert!(!has_forget(&northroom(STATE)));
+
+        let phones = [([7u8; 32], "Kitchen iPhone".to_owned())];
+        let menu = northroom(BarState {
+            phones: &phones,
+            ..STATE
+        });
+        let forget = menu
+            .entries
+            .iter()
+            .find(|entry| entry.title == "Forget Phone")
+            .and_then(|entry| entry.submenu.as_ref())
+            .expect("a menu of the paired phones");
+        assert_eq!(titles(forget), ["Kitchen iPhone"]);
+        assert_eq!(
+            bar_command(&forget.entries[0].id),
+            Some(BarCommand::ForgetPhone([7; 32]))
+        );
+        assert_eq!(bar_command("forget-phone:not-a-key"), None);
+        assert!(separators_are_tidy(&menu));
+    }
 
     #[test]
     fn shortcuts_read_command_option_shift_control_then_the_key() {
@@ -2491,6 +2573,7 @@ mod tests {
     fn the_words_are_in_the_interface_language() {
         let english = |key: Key| strings::text("en", key);
         let bar = menu_bar(BarState {
+            phones: &[],
             language: "en",
             ..STATE
         });

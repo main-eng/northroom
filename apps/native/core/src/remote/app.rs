@@ -1,7 +1,7 @@
 //! The app's one phone link (ADR-0016): started at launch when a phone is paired, and by
 //! Connect Phone otherwise, so a computer nobody paired listens to nothing.
 
-use crate::remote::devices::{Devices, FILE};
+use crate::remote::devices::{parse_key_hex, Devices, Key, FILE};
 use crate::remote::run::Link;
 use crate::Relock;
 use std::sync::Mutex;
@@ -20,6 +20,29 @@ fn started(link: &mut Option<Link>) -> Result<&Link, String> {
 fn has_devices() -> bool {
     let file = crate::paths::get().support.join(FILE);
     !Devices::open(&file, || [0; 32]).list().is_empty()
+}
+
+/// The paired phones, each its key and the name it gave. None while the link does not run: it
+/// runs whenever a phone is paired.
+pub fn devices() -> Vec<(Key, String)> {
+    let link = LINK.relock();
+    let Some(link) = link.as_ref() else {
+        return Vec::new();
+    };
+    link.devices()
+        .into_iter()
+        .filter_map(|(key, name)| Some((parse_key_hex(&key)?, name)))
+        .collect()
+}
+
+/// Forgets the paired phone with `key` and ends its links. Its error is in words.
+pub fn forget(key: &Key) -> Result<(), String> {
+    let link = LINK.relock();
+    let Some(link) = link.as_ref() else {
+        return Ok(());
+    };
+    link.forget_for_app(key)
+        .map_err(|failed| failed.to_string())
 }
 
 /// Starts the link at launch when a phone is paired, so it can reconnect.
