@@ -657,6 +657,32 @@ impl Terminal {
     /// mouse-tracking program gets wheel reports, a full-screen program without tracking gets arrow
     /// keys, and otherwise the scrollback moves.
     pub fn scroll(&self, delta: f32, precise: bool, x: f32, y: f32, modifiers: Modifiers) {
+        let cell_height = self.shared.state.relock().cell.height;
+        let pixels = if precise {
+            delta
+        } else {
+            delta * WHEEL_NOTCH_LINES * cell_height
+        };
+        let lines = self
+            .shared
+            .pointer
+            .relock()
+            .wheel
+            .lines(pixels, cell_height);
+        self.scroll_lines_at(lines, x, y, modifiers);
+    }
+
+    /// Moves by `lines` as the wheel does, positive towards older output, for a device with no
+    /// pointer over this view (a paired phone).
+    pub fn scroll_lines(&self, lines: i32) {
+        self.scroll_lines_at(lines, 0.0, 0.0, Modifiers::default());
+    }
+
+    /// `lines` of wheel movement with the pointer at `x`, `y`.
+    fn scroll_lines_at(&self, lines: i32, x: f32, y: f32, modifiers: Modifiers) {
+        if lines == 0 {
+            return;
+        }
         let Some(engine) = self.shared.engine() else {
             return;
         };
@@ -664,20 +690,6 @@ impl Terminal {
             let state = self.shared.state.relock();
             (state.cell, state.grid)
         };
-        let pixels = if precise {
-            delta
-        } else {
-            delta * WHEEL_NOTCH_LINES * cell.height
-        };
-        let lines = self
-            .shared
-            .pointer
-            .relock()
-            .wheel
-            .lines(pixels, cell.height);
-        if lines == 0 {
-            return;
-        }
         let modes = engine.modes();
         if program_has_mouse(modes, modifiers) {
             let at = cell_at(x, y, (cell.width, cell.height), grid.columns);

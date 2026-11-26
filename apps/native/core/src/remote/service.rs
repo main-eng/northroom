@@ -20,6 +20,8 @@ const GRID_MOST: GridSize = GridSize {
     columns: 300,
     lines: 200,
 };
+/// The most lines one `scroll` message moves, either way.
+const SCROLL_MOST_LINES: i32 = 500;
 
 /// The running terminals, as a device may see and use them.
 pub trait Desk {
@@ -32,6 +34,9 @@ pub trait Desk {
     fn fit(&self, session: &str, grid: Option<GridSize>);
     fn paste(&self, session: &str, text: &str);
     fn press(&self, session: &str, pressed: Pressed);
+    /// Moves `session`'s terminal by `lines` as the wheel does, towards older output when
+    /// positive.
+    fn scroll(&self, session: &str, lines: i32);
 }
 
 /// Something to send or do on a link.
@@ -221,6 +226,11 @@ impl Service {
                     desk.press(&session, pressed);
                 }
                 Vec::new()
+            }
+            Ask::Scroll { session, lines } => {
+                desk.scroll(&session, lines.clamp(-SCROLL_MOST_LINES, SCROLL_MOST_LINES));
+                // What scrolled into view is sent now, not at the next look for changes.
+                self.tell_screen(link, desk)
             }
         }
     }

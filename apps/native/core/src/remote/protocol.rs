@@ -32,6 +32,9 @@ pub enum Ask {
     /// Press one key in `session`: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`,
     /// `right` or `interrupt` (Control-C).
     Press { session: String, key: String },
+    /// Move through `session`'s earlier output by `lines`, towards older output when positive,
+    /// as the wheel does on this computer.
+    Scroll { session: String, lines: i32 },
 }
 
 /// Why a device was turned away.

@@ -47,6 +47,8 @@ impl Desk for OneTerminal {
     fn press(&self, _session: &str, pressed: Pressed) {
         self.typed.relock().push(format!("{pressed:?}"));
     }
+
+    fn scroll(&self, _session: &str, _lines: i32) {}
 }
 
 /// A phone that read `invite` off the screen, dialling this machine.

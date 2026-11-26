@@ -46,6 +46,7 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
 | `{"type":"leave"}`                                          | Stop watching. The terminal takes back the size of its view on the computer.                                               |
 | `{"type":"type","session":"<id>","text":"…"}`               | Type text, as a paste. It does not press Enter.                                                                            |
 | `{"type":"press","session":"<id>","key":"enter"}`           | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
+| `{"type":"scroll","session":"<id>","lines":3}`              | Move through earlier output as the computer's wheel does, towards older output when positive; at most 500 lines a message. |
 
 A device that is not paired may send only `pair`. Anything else, or a message that can't be
 read, is answered with `refused` and the link closes.
@@ -103,4 +104,7 @@ A screen:
 - One session is watched at a time per device. Two devices watching one session share the grid
   of whichever asked last.
 - The whole screen is sent on each change, at most about seven times a second.
-- There is no scrollback, file browsing or starting a session yet.
+- Scrolling moves the terminal's one view: the computer's window scrolls with the device, and
+  typing shows the newest output again. A full-screen program gets the scroll as its own wheel
+  or arrow keys.
+- There is no file browsing or starting a session yet.

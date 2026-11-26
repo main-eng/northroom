@@ -85,6 +85,12 @@ impl Desk for FakeDesk {
             .borrow_mut()
             .push(format!("press {session} {pressed:?}"));
     }
+
+    fn scroll(&self, session: &str, lines: i32) {
+        self.done
+            .borrow_mut()
+            .push(format!("scroll {session} {lines}"));
+    }
 }
 
 struct Fixture {
@@ -258,6 +264,15 @@ fn typing_and_keys_reach_the_named_session() {
             format!("press s1 {:?}", Pressed::Interrupt),
         ]
     );
+}
+
+#[test]
+fn scrolling_moves_the_named_session_by_at_most_a_message_s_limit() {
+    let mut fixture = fixture(&[("s1", Activity::Working)]);
+    fixture.paired(1);
+    fixture.ask(1, r#"{"type":"scroll","session":"s1","lines":12}"#);
+    fixture.ask(1, r#"{"type":"scroll","session":"s1","lines":-100000}"#);
+    assert_eq!(fixture.desk.done(), ["scroll s1 12", "scroll s1 -500"]);
 }
 
 #[test]

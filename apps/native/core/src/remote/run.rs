@@ -59,6 +59,12 @@ impl Desk for AppDesk {
             Pressed::Interrupt => terminal.input(INTERRUPT),
         }
     }
+
+    fn scroll(&self, session: &str, lines: i32) {
+        if let Some(terminal) = crate::app().sessions.relock().get(session) {
+            terminal.scroll_lines(lines);
+        }
+    }
 }
 
 /// The relays the person's `settings` choose (`settings::file::PHONE_RELAY`): the one at the

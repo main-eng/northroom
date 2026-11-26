@@ -160,6 +160,13 @@ public final class Phone {
         try? await link?.ask(.press(session: session, key: .enter))
     }
 
+    /// Moves the watched terminal through its earlier output, towards older output when
+    /// `lines` is positive.
+    public func scroll(lines: Int) async {
+        guard let session = watching?.session, lines != 0 else { return }
+        try? await link?.ask(.scroll(session: session, lines: lines))
+    }
+
     public func press(_ key: PressedKey) async {
         guard let session = watching?.session else { return }
         try? await link?.ask(.press(session: session, key: key))

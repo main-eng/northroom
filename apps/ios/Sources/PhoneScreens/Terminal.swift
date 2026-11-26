@@ -9,6 +9,8 @@ struct SessionScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @FocusState private var typing: Bool
+    /// The lines the finger's drag has scrolled so far.
+    @State private var linesDragged = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,6 +25,9 @@ struct SessionScreen: View {
                     }
                 }
                 .clipped()
+                .contentShape(Rectangle())
+                .onTapGesture { typing = true }
+                .gesture(scrolling)
                 // Waits out the keyboard's slide, then asks for the grid that fits.
                 .task(id: grid) {
                     try? await Task.sleep(for: .milliseconds(200))
@@ -40,6 +45,19 @@ struct SessionScreen: View {
         #endif
         .onDisappear { Task { await phone.leave() } }
         .onChange(of: phone.gone) { _, gone in if gone { dismiss() } }
+    }
+
+    /// Dragging moves through earlier output a line at a time, as the finger crosses each one.
+    private var scrolling: some Gesture {
+        DragGesture(minimumDistance: Cell.size.height)
+            .onChanged { drag in
+                let lines = Int(drag.translation.height / Cell.size.height)
+                let step = lines - linesDragged
+                guard step != 0 else { return }
+                linesDragged = lines
+                Task { await phone.scroll(lines: step) }
+            }
+            .onEnded { _ in linesDragged = 0 }
     }
 
     /// The keys a phone's keyboard lacks.

@@ -8,6 +8,8 @@ public enum Ask: Equatable, Sendable {
     case leave
     case type(session: String, text: String)
     case press(session: String, key: PressedKey)
+    /// Moves through earlier output by `lines`, towards older output when positive.
+    case scroll(session: String, lines: Int)
 
     /// The message as the JSON the computer reads.
     public func encoded() -> Data {
@@ -21,6 +23,8 @@ public enum Ask: Equatable, Sendable {
         case .type(let session, let text): fields = ["type": "type", "session": session, "text": text]
         case .press(let session, let key):
             fields = ["type": "press", "session": session, "key": key.rawValue]
+        case .scroll(let session, let lines):
+            fields = ["type": "scroll", "session": session, "lines": lines]
         }
         // Strings and whole numbers always encode.
         return (try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])) ?? Data()

@@ -40,6 +40,9 @@ struct PhoneLinkTests {
             text(.press(session: "s1", key: .interrupt))
                 == #"{"key":"interrupt","session":"s1","type":"press"}"#)
         #expect(
+            text(.scroll(session: "s1", lines: -3))
+                == #"{"lines":-3,"session":"s1","type":"scroll"}"#)
+        #expect(
             text(.pair(code: "c0de", name: "My phone"))
                 == #"{"code":"c0de","name":"My phone","type":"pair"}"#)
     }
