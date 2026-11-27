@@ -77,12 +77,25 @@ pub fn install(handle: WindowHandle<Workspace>, cx: &mut App) {
         let id = c(&command.id);
         // SAFETY: a NUL-terminated string.
         let said = Said::of(&unsafe { nr_menu_run(NrMenu::Bar, id.as_ptr()) });
-        let _ = handle.update(cx, |workspace, window, cx| {
-            effects::carry_out(workspace, said, window, cx)
+        // After this dispatch: a command chosen while the window has the keyboard arrives
+        // inside the window's own update, where the window can't be updated again, so a dialog
+        // or notice the command asked for would never show.
+        cx.defer(move |cx| {
+            let carried = handle.update(cx, |workspace, window, cx| {
+                effects::carry_out(workspace, said, window, cx)
+            });
+            if let Err(error) = carried {
+                eprintln!("menu bar\ta command's effect was not carried out: {error}");
+            }
         });
     });
     cx.on_action(move |command: &SystemCommand, cx| {
-        let _ = handle.update(cx, |_, window, cx| run_system(command.role, window, cx));
+        let role = command.role;
+        cx.defer(move |cx| {
+            if let Err(error) = handle.update(cx, |_, window, cx| run_system(role, window, cx)) {
+                eprintln!("menu bar\ta system command was not run: {error}");
+            }
+        });
     });
     let mut bindings = Vec::new();
     for menu in menus() {
