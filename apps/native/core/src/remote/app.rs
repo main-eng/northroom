@@ -61,6 +61,11 @@ pub fn invite() -> Result<String, String> {
     Ok(started(&mut LINK.relock())?.invite())
 }
 
+/// Whether a pairing link is on screen that no phone has used yet.
+pub fn inviting() -> bool {
+    LINK.relock().as_ref().is_some_and(Link::inviting)
+}
+
 /// Takes the pairing link off screen.
 pub fn withdraw_invite() {
     if let Some(link) = LINK.relock().as_ref() {

@@ -394,6 +394,11 @@ impl Link {
         }
     }
 
+    /// Whether a pairing link is on screen that no phone has used yet.
+    pub fn inviting(&self) -> bool {
+        self.service.relock().offering()
+    }
+
     /// Takes the pairing link off screen; it no longer works.
     pub fn withdraw_invite(&self) {
         self.service.relock().withdraw_offer();

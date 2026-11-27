@@ -950,16 +950,22 @@ pub fn folder_command(id: &str) -> Option<FolderCommand> {
 
 // MARK: Dialogs a menu opens
 
-/// A confirmation dialog: its title, the sentence under it, the field and its initial value,
-/// and its two buttons. A `destructive` one has its action in the warning colour and no close
-/// button.
+/// A dialog's two buttons: the one that does what it asks, and the one that does not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Buttons {
+    pub action: &'static str,
+    pub cancel: &'static str,
+}
+
+/// A dialog: its title, the sentence under it, the field and its initial value, and its two
+/// buttons. One that asks nothing (`pair_prompt`) has no buttons and closes by its close mark.
+/// A `destructive` one has its action in the warning colour and no close mark.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prompt {
     pub title: String,
     pub message: Option<String>,
     pub value: Option<String>,
-    pub action: &'static str,
-    pub cancel: &'static str,
+    pub buttons: Option<Buttons>,
     pub destructive: bool,
     /// The field holds a password: shown as bullets, never trimmed.
     pub secret: bool,
@@ -972,14 +978,14 @@ pub fn pair_failed(language: &str) -> &'static str {
     strings::text(language, key::DIALOG_PAIR_FAILED)
 }
 
-/// The dialog that shows a phone the pairing link as the QR code `code`.
+/// The dialog that shows a phone the pairing link as the QR code `code`. It asks nothing, so it
+/// has no buttons: it closes by its close mark, or by itself once a phone pairs.
 pub fn pair_prompt(code: Vec<Vec<bool>>, language: &str) -> Prompt {
     Prompt {
         title: strings::text(language, key::DIALOG_PAIR_TITLE).to_owned(),
         message: Some(strings::text(language, key::DIALOG_PAIR_MESSAGE).to_owned()),
         value: None,
-        action: strings::text(language, key::DIALOG_PAIR_DONE),
-        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        buttons: None,
         destructive: false,
         secret: false,
         code: Some(code),
@@ -992,8 +998,10 @@ pub fn forget_phone_prompt(name: &str, language: &str) -> Prompt {
         title: strings::text(language, key::DIALOG_FORGET_PHONE_TITLE).replace("{name}", name),
         message: Some(strings::text(language, key::DIALOG_FORGET_PHONE_MESSAGE).to_owned()),
         value: None,
-        action: strings::text(language, key::DIALOG_FORGET_PHONE_ACTION),
-        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        buttons: Some(Buttons {
+            action: strings::text(language, key::DIALOG_FORGET_PHONE_ACTION),
+            cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        }),
         destructive: true,
         secret: false,
         code: None,
@@ -1010,8 +1018,10 @@ fn naming(title: &str, value: &str, language: &str) -> Prompt {
         title: title.to_owned(),
         message: None,
         value: Some(value.to_owned()),
-        action: strings::text(language, key::COMMON_SAVE),
-        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        buttons: Some(Buttons {
+            action: strings::text(language, key::COMMON_SAVE),
+            cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        }),
         destructive: false,
         secret: false,
         code: None,
@@ -1030,8 +1040,10 @@ pub fn unlock_prompt(name: &str, wrong: bool, language: &str) -> Prompt {
         title: strings::text(language, key::DIALOG_UNLOCK_TITLE).replace("{name}", name),
         message: Some(strings::text(language, message).to_owned()),
         value: Some(String::new()),
-        action: strings::text(language, key::MENU_OPEN),
-        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        buttons: Some(Buttons {
+            action: strings::text(language, key::MENU_OPEN),
+            cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        }),
         destructive: false,
         secret: true,
         code: None,
@@ -1330,8 +1342,10 @@ pub fn quit_prompt(count: usize, language: &str) -> Option<Prompt> {
         title: strings::text(language, key::DIALOG_QUIT_TITLE).to_owned(),
         message: Some(message),
         value: None,
-        action: strings::text(language, key::MENU_QUIT),
-        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        buttons: Some(Buttons {
+            action: strings::text(language, key::MENU_QUIT),
+            cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        }),
         destructive: true,
         secret: false,
         code: None,
@@ -1356,8 +1370,10 @@ pub fn end_session_prompt(
         title: strings::text(language, key::DIALOG_END_SESSION_TITLE).replace("{name}", name),
         message: Some(strings::text(language, message).to_owned()),
         value: None,
-        action: strings::text(language, key::MENU_END_SESSION),
-        cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        buttons: Some(Buttons {
+            action: strings::text(language, key::MENU_END_SESSION),
+            cancel: strings::text(language, key::ACCOUNT_CANCEL),
+        }),
         destructive: true,
         secret: false,
         code: None,
@@ -1439,6 +1455,11 @@ pub fn page_table_command(id: &str) -> Option<PageTableCommand> {
 
 #[cfg(test)]
 mod tests {
+    /// The label on `prompt`'s action button.
+    fn action_of(prompt: &Prompt) -> &'static str {
+        prompt.buttons.expect("the dialog has buttons").action
+    }
+
     use super::*;
 
     fn titles(menu: &Menu) -> Vec<String> {
@@ -1461,7 +1482,7 @@ mod tests {
             Some("Type its password to open it.")
         );
         assert_eq!(
-            (first.value.as_deref(), first.secret, first.action),
+            (first.value.as_deref(), first.secret, action_of(&first)),
             (Some(""), true, "Open")
         );
         let again = unlock_prompt("Report.pdf", true, "en");
@@ -2190,7 +2211,7 @@ mod tests {
             ),
             ("Rename", Some("Notes"))
         );
-        assert_eq!(rename_prompt("Notes", "en").action, "Save");
+        assert_eq!(action_of(&rename_prompt("Notes", "en")), "Save");
         assert_eq!(name_of("  Plan \n"), Some("Plan".to_owned()));
         assert_eq!(name_of(" \t\n"), None);
         assert_eq!(
@@ -2438,7 +2459,7 @@ mod tests {
         assert!(quit_prompt(0, "en").is_none());
         let one = quit_prompt(1, "en").expect("asks");
         assert_eq!(one.title, "Quit Northroom?");
-        assert_eq!(one.action, "Quit Northroom");
+        assert_eq!(action_of(&one), "Quit Northroom");
         assert!(one.destructive && one.value.is_none());
         let three = quit_prompt(3, "en").expect("asks");
         assert!(three.message.expect("says").starts_with("3 sessions"));
@@ -2452,7 +2473,7 @@ mod tests {
         assert!(end_session_prompt("Terminal", Activity::Finished, "en").is_none());
         let working = end_session_prompt("Claude Code", Activity::Working, "en").expect("asks");
         assert_eq!(working.title, "End Claude Code?");
-        assert_eq!(working.action, "End Session");
+        assert_eq!(action_of(&working), "End Session");
         assert!(working.destructive && working.value.is_none());
         let waiting = end_session_prompt("Claude Code", Activity::NeedsYou, "en").expect("asks");
         assert_ne!(waiting.message, working.message);
@@ -2537,7 +2558,7 @@ mod tests {
             "the drive's new entries in Finder's own words"
         );
         assert_eq!(
-            rename_prompt("Notes", "en").action,
+            action_of(&rename_prompt("Notes", "en")),
             english(key::COMMON_SAVE)
         );
         assert_eq!(update_failed("en"), "Couldn’t update the file");

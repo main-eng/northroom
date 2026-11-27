@@ -231,6 +231,11 @@ impl Service {
         code
     }
 
+    /// Whether a pairing code is on screen that no device has used yet.
+    pub fn offering(&self) -> bool {
+        self.offer.is_some()
+    }
+
     /// Takes the pairing code off screen; it no longer works.
     pub fn withdraw_offer(&mut self) {
         self.offer = None;

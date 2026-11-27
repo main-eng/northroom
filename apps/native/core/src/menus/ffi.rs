@@ -840,8 +840,8 @@ pub extern "C" fn nr_prompt() -> NrPrompt {
         has_message: prompt.message.is_some(),
         value: prompt.value.as_deref().map_or(empty, NrText::borrowing),
         has_field: prompt.value.is_some(),
-        action: NrText::borrowing(prompt.action),
-        cancel: NrText::borrowing(prompt.cancel),
+        action: NrText::borrowing(prompt.buttons.map_or("", |buttons| buttons.action)),
+        cancel: NrText::borrowing(prompt.buttons.map_or("", |buttons| buttons.cancel)),
         destructive: prompt.destructive,
         secret: prompt.secret,
     }
@@ -849,7 +849,8 @@ pub extern "C" fn nr_prompt() -> NrPrompt {
 
 /// Layout of the current dialog over a `width` by `height` view (`dialog::layout::PromptLayout`):
 /// the panel, a prompt's close button, the title and message lines, the field background and
-/// where the platform field sits on it, and the Cancel and action buttons with their labels.
+/// where the platform field sits on it, and the Cancel and action buttons with their labels,
+/// when it has them.
 pub fn prompt_layout(width: f64, height: f64) -> crate::dialog::layout::PromptLayout {
     let prompt = PROMPT
         .relock()
@@ -859,8 +860,7 @@ pub fn prompt_layout(width: f64, height: f64) -> crate::dialog::layout::PromptLa
             title: String::new(),
             message: None,
             value: None,
-            action: "",
-            cancel: "",
+            buttons: None,
             destructive: false,
             secret: false,
             code: None,
@@ -904,6 +904,14 @@ pub fn alert_layout(
         color,
         &mut crate::text::typeset::width,
     )
+}
+
+/// Whether the open dialog has nothing left to show: the pairing dialog once a phone has used
+/// its code. The shell then closes it as its close mark would.
+#[no_mangle]
+pub extern "C" fn nr_prompt_settled() -> bool {
+    let pairing = matches!(PROMPT.relock().as_ref(), Some((Ask::Pair, _)));
+    pairing && !crate::remote::app::inviting()
 }
 
 /// Whether the dialog's action is enabled with `typed` in its field, since a name prompt needs

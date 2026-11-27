@@ -2,7 +2,8 @@
 //! panel in the background colour with a 1 px border and 14 px corners. The panel holds a
 //! title, an optional message, an optional one-line field, and Cancel beside the action. The
 //! naming prompt has a close mark in its corner; a `destructive` alert uses the warning colour
-//! for its action.
+//! for its action. A dialog that asks nothing (the pairing code) has the close mark and no
+//! buttons.
 //!
 //! The core owns the layout (`menus::ffi::prompt_layout`), keys and focus (`nr_dialog_key`,
 //! `nr_dialog_focus`), whether the action is available (`nr_prompt_takes`) and what answering
@@ -24,11 +25,12 @@ use gpui::{
     IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, Render,
     Rgba, ScrollEvent, Subscription, Window, canvas, div, prelude::*, px,
 };
-use northroom_core::dialog::layout::PromptLayout as Layout;
+use northroom_core::dialog::layout::{Button, Foot, PromptLayout as Layout};
 use northroom_core::ffi::{NrKeyPress, NrMotion};
 use northroom_core::menus::ffi::{
     NrDialog, NrDialogIntent, NrEffect, NrMenuEffect, nr_dialog_close, nr_dialog_focus,
-    nr_dialog_key, nr_dialog_open, nr_prompt, nr_prompt_answer, nr_prompt_takes, prompt_layout,
+    nr_dialog_key, nr_dialog_open, nr_prompt, nr_prompt_answer, nr_prompt_settled, nr_prompt_takes,
+    prompt_layout,
 };
 use std::rc::Rc;
 
@@ -71,10 +73,15 @@ struct Open {
 impl Open {
     fn frame_of(&self, part: Part) -> Option<Bounds<Pixels>> {
         match part {
-            Part::Cancel => Some(self.placed.cancel.frame.bounds()),
-            Part::Action => Some(self.placed.action.frame.bounds()),
+            Part::Cancel => self.foot().map(|foot| foot.cancel.frame.bounds()),
+            Part::Action => self.foot().map(|foot| foot.action.frame.bounds()),
             Part::Close => self.placed.close.map(|close| close.bounds()),
         }
+    }
+
+    /// The dialog's two buttons, when it has them.
+    fn foot(&self) -> Option<&Foot> {
+        self.placed.foot.as_ref()
     }
 
     fn part_at(&self, at: Point<Pixels>) -> Option<Part> {
@@ -265,6 +272,13 @@ impl Dialogs {
         })
     }
 
+    /// Closes a dialog with nothing left to show (`nr_prompt_settled`), as its close mark would.
+    pub fn close_settled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.open.is_some() && nr_prompt_settled() {
+            self.finish(false, window, cx);
+        }
+    }
+
     /// Answers the dialog: action taken (`taken`) or cancelled. It stays open when a required
     /// name is missing.
     fn finish(&mut self, taken: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -419,9 +433,11 @@ impl DialogPainter<'_> {
         if let Some(field) = placed.field {
             self.draw_field(window, field.frame.bounds());
         }
-        self.draw_cancel(window, cx);
-        self.draw_focus_ring(window);
-        self.draw_action(window, cx);
+        if let Some(foot) = self.open.foot() {
+            self.draw_cancel(window, cx, &foot.cancel);
+            self.draw_focus_ring(window, foot);
+            self.draw_action(window, cx, &foot.action);
+        }
     }
 
     /// Draws a QR code dark on light whatever the theme, as a camera reads it.
@@ -507,8 +523,7 @@ impl DialogPainter<'_> {
     }
 
     /// Draws Cancel: an outline, filled while pressed.
-    fn draw_cancel(&self, window: &mut Window, cx: &mut App) {
-        let cancel = &self.open.placed.cancel;
+    fn draw_cancel(&self, window: &mut Window, cx: &mut App, cancel: &Button) {
         let frame = cancel.frame.bounds();
         if self.open.pressed == Some(Part::Cancel) {
             self.rounded(window, frame, mixed(Token::Foreground, 0.12), 6.0);
@@ -525,16 +540,16 @@ impl DialogPainter<'_> {
 
     /// Draws the focused button's ring when no field has focus: 2 px in the ring colour, 1 px
     /// outside.
-    fn draw_focus_ring(&self, window: &mut Window) {
+    fn draw_focus_ring(&self, window: &mut Window, foot: &Foot) {
         let open = self.open;
         let focus = nr_dialog_focus(open.kind);
         if open.field.is_some() || !focus.ring || focus.part < 0 {
             return;
         }
         let around = if focus.part == 0 {
-            &open.placed.cancel
+            &foot.cancel
         } else {
-            &open.placed.action
+            &foot.action
         };
         self.stroke(
             window,
@@ -547,7 +562,7 @@ impl DialogPainter<'_> {
 
     /// Draws the action button in the accent, or the warning colour when destructive. It is
     /// faded while the typed text is not accepted and darker while pressed.
-    fn draw_action(&self, window: &mut Window, cx: &mut App) {
+    fn draw_action(&self, window: &mut Window, cx: &mut App, action: &Button) {
         let open = self.open;
         let typed = c(&open.typed(cx));
         // SAFETY: a NUL-terminated string.
@@ -563,7 +578,6 @@ impl DialogPainter<'_> {
         } else {
             1.0
         };
-        let action = &open.placed.action;
         self.rounded(
             window,
             action.frame.bounds(),

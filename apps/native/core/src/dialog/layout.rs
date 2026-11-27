@@ -8,7 +8,7 @@
 
 use crate::board::card::Font;
 use crate::geometry::Rect;
-use crate::menus::Prompt;
+use crate::menus::{Buttons, Prompt};
 use crate::text::wrap::{self, Breaks};
 use crate::theme::Token;
 
@@ -200,6 +200,13 @@ pub struct PromptLayout {
     /// A pairing dialog's QR code, under the message.
     pub code: Option<CodePlace>,
     pub field: Option<FieldPlace>,
+    /// Cancel and the action. A dialog that asks nothing has neither.
+    pub foot: Option<Foot>,
+}
+
+/// A prompt's two buttons along its foot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Foot {
     pub cancel: Button,
     pub action: Button,
 }
@@ -234,7 +241,10 @@ pub fn prompt(
     if let Some(code) = &prompt.code {
         panel_height += SPACE + code_side(code);
     }
-    panel_height += SPACE + button::HEIGHT + EDGE;
+    if prompt.buttons.is_some() {
+        panel_height += SPACE + button::HEIGHT;
+    }
+    panel_height += EDGE;
     let panel = centred(width, height, panel_width, panel_height);
     let left = panel.x + EDGE;
     let mut y = panel.y + EDGE;
@@ -288,19 +298,40 @@ pub fn prompt(
             ),
         }
     });
-    y += SPACE;
-    let action_width = (measure(prompt.action, button::FONT) + 2.0 * button::PADDING).ceil();
+    let foot = prompt
+        .buttons
+        .map(|buttons| foot(buttons, panel, y + SPACE, action_color, measure));
+    PromptLayout {
+        panel,
+        close: (!prompt.destructive).then(|| close_mark(panel)),
+        title,
+        message,
+        code,
+        field,
+        foot,
+    }
+}
+
+/// Places `buttons` at `top`, the action at the panel's right edge and Cancel before it.
+fn foot(
+    buttons: Buttons,
+    panel: Rect,
+    top: f64,
+    action_color: Token,
+    measure: &mut Measure,
+) -> Foot {
+    let action_width = (measure(buttons.action, button::FONT) + 2.0 * button::PADDING).ceil();
     // Cancel is an outline button: its 1 px border sits outside its 16 px padding.
-    let cancel_width = (measure(prompt.cancel, button::FONT) + 2.0 * button::PADDING + 2.0).ceil();
+    let cancel_width = (measure(buttons.cancel, button::FONT) + 2.0 * button::PADDING + 2.0).ceil();
     let action = Rect::new(
         panel.max_x() - EDGE - action_width,
-        y,
+        top,
         action_width,
         button::HEIGHT,
     );
     let cancel = Rect::new(
         action.x - BUTTON_GAP - cancel_width,
-        y,
+        top,
         cancel_width,
         button::HEIGHT,
     );
@@ -316,15 +347,9 @@ pub fn prompt(
             color,
         ),
     };
-    PromptLayout {
-        panel,
-        close: (!prompt.destructive).then(|| close_mark(panel)),
-        title,
-        message,
-        code,
-        field,
-        cancel: button(cancel, prompt.cancel, Token::Foreground),
-        action: button(action, prompt.action, action_color),
+    Foot {
+        cancel: button(cancel, buttons.cancel, Token::Foreground),
+        action: button(action, buttons.action, action_color),
     }
 }
 
@@ -539,8 +564,10 @@ mod tests {
             title: "New Folder".into(),
             message: message.map(str::to_owned),
             value: Some("Untitled".into()),
-            action: "Save",
-            cancel: "Cancel",
+            buttons: Some(Buttons {
+                action: "Save",
+                cancel: "Cancel",
+            }),
             destructive: false,
             secret: false,
             code: None,
@@ -548,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pairing_dialog_draws_its_code_centred_between_the_sentence_and_the_buttons() {
+    fn a_pairing_dialog_draws_its_code_centred_under_the_sentence_and_has_no_buttons() {
         // A code of 25 squares a side: dark along its top line, and two runs on its second.
         let mut code = vec![vec![false; 25]; 25];
         code[0] = vec![true; 25];
@@ -568,7 +595,9 @@ mod tests {
         assert_eq!((code.ground.width, code.ground.height), (264.0, 264.0));
         assert_eq!(code.ground.x, 384.0 + (512.0 - 264.0) / 2.0);
         assert!(code.ground.y >= placed.message.last().expect("a sentence").frame.max_y());
-        assert!(code.ground.max_y() <= placed.action.frame.y);
+        assert!(placed.foot.is_none() && placed.close.is_some());
+        // The panel ends one edge under the code.
+        assert_eq!(placed.panel.max_y(), code.ground.max_y() + 25.0);
         let (left, top) = (code.ground.x + 32.0, code.ground.y + 32.0);
         assert_eq!(
             code.squares,
@@ -609,16 +638,17 @@ mod tests {
         assert_eq!(field.frame, Rect::new(409.0, 373.0, 462.0, 36.0));
         assert_eq!(field.control, Rect::new(421.0, 381.0, 438.0, 20.0));
         // Save: 28 of words and 32 of padding; Cancel 42 and 34, 8 before it.
+        let foot = placed.foot.expect("a naming dialog has buttons");
         assert_eq!(
-            placed.action.frame,
+            foot.action.frame,
             Rect::new(871.0 - 60.0, 425.0, 60.0, 36.0)
         );
         assert_eq!(
-            placed.cancel.frame,
+            foot.cancel.frame,
             Rect::new(811.0 - 8.0 - 76.0, 425.0, 76.0, 36.0)
         );
         assert_eq!(
-            placed.cancel.words,
+            foot.cancel.words,
             Line::new(
                 "Cancel",
                 743.0,
@@ -629,7 +659,7 @@ mod tests {
                 Token::Foreground
             )
         );
-        assert_eq!(placed.action.words.color, Token::PrimaryForeground);
+        assert_eq!(foot.action.words.color, Token::PrimaryForeground);
     }
 
     #[test]
@@ -638,8 +668,10 @@ mod tests {
             title: "Move to Trash?".into(),
             message: Some("word ".repeat(20)),
             value: None,
-            action: "Move to Trash",
-            cancel: "Cancel",
+            buttons: Some(Buttons {
+                action: "Move to Trash",
+                cancel: "Cancel",
+            }),
             destructive: true,
             secret: false,
             code: None,
@@ -666,7 +698,7 @@ mod tests {
             25.0 + 28.0 + 8.0 + 60.0 + 16.0 + 36.0 + 25.0
         );
         assert_eq!(
-            placed.action.frame.y,
+            placed.foot.expect("a warning has buttons").action.frame.y,
             placed.panel.y + 25.0 + 28.0 + 8.0 + 60.0 + 16.0
         );
     }
