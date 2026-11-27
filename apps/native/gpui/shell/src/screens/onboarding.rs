@@ -95,7 +95,6 @@ impl Onboarding {
     ) {
         let origin = self.frame.origin;
         fill(window, self.frame, color(Token::Background));
-        placed.title.draw(window, cx, origin, None);
         placed.description.draw(window, cx, origin, None);
         rounded(window, self.choose, color(Token::Cta), CONTROL_RADIUS);
         placed.choose_label.draw(window, cx, origin, None);
