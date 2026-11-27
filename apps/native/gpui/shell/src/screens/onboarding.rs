@@ -1,6 +1,7 @@
 //! The welcome screen, shown over everything while no folder is chosen. Its one button opens the
 //! platform folder picker, and the folder picked becomes the drive (`nr_selection_choose`). The
 //! core lays it out (`onboarding_layout`). Once a folder is chosen the window shows the drive.
+//! It fills the window, title bar included, and its top strip moves the window as the bar does.
 
 use super::{Ask, Screen};
 use gpui::{
@@ -21,6 +22,8 @@ pub struct Onboarding {
     refusal: String,
     /// Where the button was last drawn, in window points.
     choose: Bounds<Pixels>,
+    /// How tall the strip at the top that moves the window is: the title bar's height.
+    strip: Pixels,
 }
 
 impl Onboarding {
@@ -29,12 +32,23 @@ impl Onboarding {
             frame: Bounds::default(),
             refusal: String::new(),
             choose: Bounds::default(),
+            strip: Pixels::ZERO,
         }
     }
 
-    fn mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
-        if event.button == MouseButton::Left && contains(&self.choose, event.position) {
+    fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.button != MouseButton::Left {
+            return;
+        }
+        if contains(&self.choose, event.position) {
             self.choose(cx);
+        } else if event.position.y < self.frame.origin.y + self.strip {
+            // As on the title bar: a double click does what the system setting says.
+            if event.click_count == 2 {
+                window.titlebar_double_click();
+            } else {
+                window.start_window_move();
+            }
         }
     }
 
@@ -95,6 +109,7 @@ impl Onboarding {
     ) {
         let origin = self.frame.origin;
         fill(window, self.frame, color(Token::Background));
+        placed.title.draw(window, cx, origin, None);
         placed.description.draw(window, cx, origin, None);
         rounded(window, self.choose, color(Token::Cta), CONTROL_RADIUS);
         placed.choose_label.draw(window, cx, origin, None);
@@ -105,7 +120,9 @@ impl Onboarding {
         let (onboarding, over) = (cx.entity(), over.clone());
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase == DispatchPhase::Bubble && over.is_hovered(window) {
-                onboarding.update(cx, |onboarding, cx| onboarding.mouse_down(event, cx));
+                onboarding.update(cx, |onboarding, cx| {
+                    onboarding.mouse_down(event, window, cx)
+                });
             }
         });
     }
@@ -118,9 +135,11 @@ impl Screen for Onboarding {
         cx.notify();
     }
 
-    fn place(&mut self, frame: Bounds<Pixels>, _: &NrWindowLayout, cx: &mut Context<Self>) {
-        if self.frame != frame {
+    fn place(&mut self, frame: Bounds<Pixels>, laid: &NrWindowLayout, cx: &mut Context<Self>) {
+        let strip = gpui::px(laid.title_bar.height as f32);
+        if self.frame != frame || self.strip != strip {
             self.frame = frame;
+            self.strip = strip;
             cx.notify();
         }
     }

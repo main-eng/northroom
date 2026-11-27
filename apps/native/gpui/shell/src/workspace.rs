@@ -468,8 +468,10 @@ impl Workspace {
     fn place_screens(&self, laid: &NrWindowLayout, cx: &mut Context<Self>) {
         let content = rect(&laid.content);
         self.bar.place(rect(&laid.title_bar), laid, cx);
+        // The first screen takes the whole window: with no drive there is nothing for the bar's
+        // tabs and buttons to act on, so the bar is not shown.
         if let Some(onboarding) = &self.onboarding {
-            onboarding.place(content, laid, cx);
+            onboarding.place(content.union(&rect(&laid.title_bar)), laid, cx);
         }
         if let Some(settings) = &self.settings {
             settings.place(content, laid, cx);
@@ -510,8 +512,8 @@ impl Render for Workspace {
         self.sync(window, cx);
         let laid = self.layout(window);
         self.place_screens(&laid, cx);
-        // Back to front: folder, columns and shown file, settings, title bar,
-        // welcome, then overlays.
+        // Back to front: folder, columns and shown file, settings, title bar (or the first
+        // screen in its place), then overlays.
         let mut shown: Vec<AnyView> = Vec::new();
         if !laid.folder_hidden {
             shown.extend(self.list.as_ref().map(|list| list.view()));
@@ -541,8 +543,10 @@ impl Render for Workspace {
         }
         let mut above: Vec<AnyView> = Vec::new();
         above.extend(self.settings.as_ref().map(|settings| settings.view()));
-        above.push(self.bar.view());
-        above.extend(self.onboarding.as_ref().map(|onboarding| onboarding.view()));
+        match &self.onboarding {
+            Some(onboarding) => above.push(onboarding.view()),
+            None => above.push(self.bar.view()),
+        }
         // A full-screen video replaces everything. The player draws in window coordinates, so it
         // sits at the window origin.
         let filling = screens::preview::filling_screen(cx)

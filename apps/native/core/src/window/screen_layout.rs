@@ -11,6 +11,10 @@ use crate::theme::Token;
 
 // MARK: The first screen
 
+const TITLE_FONT: Font = Font::sans(24.0, Font::MEDIUM);
+const TITLE_LINE: f64 = 32.0;
+/// From the title to the one line under it.
+const TITLE_GAP: f64 = 8.0;
 const DESCRIPTION_FONT: Font = Font::sans(14.0, Font::REGULAR);
 const DESCRIPTION_LINE: f64 = 20.0;
 /// From the description to the button.
@@ -20,10 +24,11 @@ const NOTE_GAP: f64 = 12.0;
 const NOTE_FONT: Font = Font::sans(14.0, Font::REGULAR);
 const NOTE_LINE: f64 = 20.0;
 
-/// The first screen on a computer with no drive yet: one line and one button, each centred in
-/// the window.
+/// The first screen on a computer with no drive yet: a title, one line and one button, each
+/// centred in the window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Onboarding {
+    pub title: Line,
     pub description: Line,
     /// The button that opens the platform's folder picker; the folder picked becomes the drive.
     pub choose: Rect,
@@ -54,14 +59,22 @@ pub fn onboarding(
     } else {
         NOTE_GAP + NOTE_LINE
     };
-    let column_height = DESCRIPTION_LINE + SPACE + button::HEIGHT + noted;
+    let column_height = TITLE_LINE + TITLE_GAP + DESCRIPTION_LINE + SPACE + button::HEIGHT + noted;
     let mut y = ((height - column_height) / 2.0).floor();
+    let title = line(
+        say(key::ONBOARDING_TITLE),
+        y,
+        TITLE_LINE,
+        TITLE_FONT,
+        Token::Foreground,
+    );
+    y += TITLE_LINE + TITLE_GAP;
     let description = line(
         say(key::ONBOARDING_DESCRIPTION),
         y,
         DESCRIPTION_LINE,
         DESCRIPTION_FONT,
-        Token::Foreground,
+        Token::MutedForeground,
     );
     y += DESCRIPTION_LINE + SPACE;
     let mut choose_label = line(
@@ -78,6 +91,7 @@ pub fn onboarding(
     let note = (!note.is_empty())
         .then(|| line(note, y + NOTE_GAP, NOTE_LINE, NOTE_FONT, Token::Destructive));
     Onboarding {
+        title,
         description,
         choose,
         choose_label,
@@ -148,29 +162,42 @@ mod tests {
     use crate::text::typeset::test_measure::sevens;
 
     #[test]
-    fn the_first_screen_is_one_line_and_a_button_each_centred() {
+    fn the_first_screen_is_a_title_a_line_and_a_button_each_centred() {
         let screen = onboarding(1280.0, 800.0, "", "en", &mut sevens);
-        // 20 + 24 + 36 = 80 tall, so its top is 360 down. The line is 34 characters.
+        // 32 + 8 + 20 + 24 + 36 = 120 tall, so its top is 340 down. The title is 20 characters.
+        assert_eq!(
+            screen.title,
+            Line::new(
+                "Welcome to Northroom",
+                570.0,
+                340.0,
+                141.0,
+                32.0,
+                TITLE_FONT,
+                Token::Foreground
+            )
+        );
+        // 34 characters.
         assert_eq!(
             screen.description,
             Line::new(
                 "Choose the folder your work is in.",
                 521.0,
-                360.0,
+                380.0,
                 239.0,
                 20.0,
                 DESCRIPTION_FONT,
-                Token::Foreground
+                Token::MutedForeground
             )
         );
         // "Choose Folder" is 13 characters: 16 + 91 + 16, centred on a whole point.
-        assert_eq!(screen.choose, Rect::new(578.0, 404.0, 123.0, 36.0));
+        assert_eq!(screen.choose, Rect::new(578.0, 424.0, 123.0, 36.0));
         assert_eq!(
             screen.choose_label,
             Line::new(
                 "Choose Folder",
                 594.0,
-                412.0,
+                432.0,
                 92.0,
                 20.0,
                 button::FONT,
@@ -181,18 +208,22 @@ mod tests {
 
         // A note takes 12 and its line of 20 under the button; the whole stays centred.
         let refused = onboarding(1280.0, 800.0, "Not this one.", "en", &mut sevens);
-        assert_eq!(refused.description.frame.y, 344.0);
+        assert_eq!(refused.title.frame.y, 324.0);
         assert_eq!(
             refused.note,
             Some(Line::new(
                 "Not this one.",
                 594.0,
-                436.0,
+                456.0,
                 92.0,
                 20.0,
                 NOTE_FONT,
                 Token::Destructive
             ))
+        );
+        assert_eq!(
+            screen.title.text,
+            strings::text("en", key::ONBOARDING_TITLE)
         );
     }
 
