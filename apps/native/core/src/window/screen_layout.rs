@@ -177,14 +177,14 @@ mod tests {
                 Token::Foreground
             )
         );
-        // 34 characters.
+        // 64 characters.
         assert_eq!(
             screen.description,
             Line::new(
-                "Choose the folder your work is in.",
-                521.0,
+                "Choose the folder your work is in. Nothing is moved or uploaded.",
+                416.0,
                 380.0,
-                239.0,
+                449.0,
                 20.0,
                 DESCRIPTION_FONT,
                 Token::MutedForeground

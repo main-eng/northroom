@@ -147,7 +147,7 @@
   "menu_zoom": "Zoom",
   "onboarding_choose": "Choose Folder",
   "onboarding_choose_refused": "Couldn’t open the workspace folder.",
-  "onboarding_description": "Choose the folder your work is in.",
+  "onboarding_description": "Choose the folder your work is in. Nothing is moved or uploaded.",
   "onboarding_folder_gone": "This folder is no longer available.",
   "onboarding_folder_unusable": "Northroom cannot read and write this folder. Choose another one.",
   "onboarding_picker_button": "Choose",
