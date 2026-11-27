@@ -1603,7 +1603,7 @@ mod tests {
         assert_eq!(
             shown,
             [
-                "Northroom: About Northroom | Check for Updates… | - | Settings… | Change Drive Folder… | Connect Phone… | - | Services | - | Hide Northroom | Hide Others | Show All | - | Quit Northroom",
+                "Northroom: About Northroom | Check for Updates… | - | Settings… | Change Folder… | Connect Phone… | - | Services | - | Hide Northroom | Hide Others | Show All | - | Quit Northroom",
                 "Edit: Undo | Redo | - | Cut | Copy | Paste | Paste and Match Style | Delete | Select All | - | Speech",
                 "View: as Board | as List | as Columns | - | Reload | Toggle Full Screen",
                 "Window: Minimize | Zoom | - | Bring All to Front",
