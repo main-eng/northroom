@@ -264,11 +264,11 @@ fn the_code_on_screen_pairs_a_phone_once() {
     let code = fixture.service.offer(fixture.now);
     let pair = pair_message(&code, "Tanner's phone");
     fixture.service.opened(1, PHONE);
-    assert!(fixture.service.offering());
+    assert_eq!(fixture.service.offer_left(fixture.now), 1.0);
     assert_eq!(fixture.ask(1, &pair), [Out::Tell(1, welcome())]);
     assert!(fixture.service.devices().is_paired(&PHONE));
     // The code is used up, which is what closes the dialog that showed it.
-    assert!(!fixture.service.offering());
+    assert_eq!(fixture.service.offer_left(fixture.now), 0.0);
     assert_eq!(fixture.service.devices().list()[0].name, "Tanner's phone");
 
     // The same code, read off the screen by someone else, no longer works.

@@ -178,10 +178,6 @@ impl Workspace {
         if !self.sync_onboarding(window, cx) {
             return;
         }
-        // The pairing dialog closes once a phone has used its code.
-        self.overlay
-            .dialogs
-            .update(cx, |dialogs, cx| dialogs.close_settled(window, cx));
         // A just-opened file the window can't show goes to its default app.
         let elsewhere = text(&nr_take_opened_elsewhere());
         if !elsewhere.is_empty() {

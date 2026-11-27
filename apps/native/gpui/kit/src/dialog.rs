@@ -2,8 +2,9 @@
 //! panel in the background colour with a 1 px border and 14 px corners. The panel holds a
 //! title, an optional message, an optional one-line field, and Cancel beside the action. The
 //! naming prompt has a close mark in its corner; a `destructive` alert uses the warning colour
-//! for its action. A dialog that asks nothing (the pairing code) has the close mark and no
-//! buttons.
+//! for its action. The pairing code is drawn alone instead: a light card of round dots with a
+//! line around it that runs down while the code can be used. It closes by Escape or a press
+//! outside it, and by itself once the code is used or stale (`nr_pair_left`).
 //!
 //! The core owns the layout (`menus::ffi::prompt_layout`), keys and focus (`nr_dialog_key`,
 //! `nr_dialog_focus`), whether the action is available (`nr_prompt_takes`) and what answering
@@ -22,17 +23,18 @@ use crate::motion::{Move, Pose};
 use crate::theme::{Face, Token, color, mixed};
 use gpui::{
     App, Bounds, Context, DispatchPhase, Entity, FocusHandle, Focusable, HitboxBehavior, Hsla,
-    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, Render,
-    Rgba, ScrollEvent, Subscription, Window, canvas, div, prelude::*, px,
+    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseUpEvent, PathBuilder, Pixels,
+    Point, Render, Rgba, ScrollEvent, Subscription, Task, Window, canvas, div, prelude::*, px,
 };
-use northroom_core::dialog::layout::{Button, Foot, PromptLayout as Layout};
+use northroom_core::dialog::layout::{Button, CodePlace, CornerMark, Foot, PromptLayout as Layout};
 use northroom_core::ffi::{NrKeyPress, NrMotion};
 use northroom_core::menus::ffi::{
     NrDialog, NrDialogIntent, NrEffect, NrMenuEffect, nr_dialog_close, nr_dialog_focus,
-    nr_dialog_key, nr_dialog_open, nr_prompt, nr_prompt_answer, nr_prompt_settled, nr_prompt_takes,
+    nr_dialog_key, nr_dialog_open, nr_pair_left, nr_prompt, nr_prompt_answer, nr_prompt_takes,
     prompt_layout,
 };
 use std::rc::Rc;
+use std::time::Duration;
 
 // A drawn alert box, used where the platform's alert cannot keep Return on the named button.
 #[cfg(not(target_os = "macos"))]
@@ -53,7 +55,12 @@ enum Part {
     Cancel,
     Action,
     Close,
+    /// Anywhere off a code's card.
+    Outside,
 }
+
+/// How often the line around a code is drawn again, and the code checked for being used.
+const CODE_TICK: Duration = Duration::from_millis(100);
 
 /// The open dialog.
 struct Open {
@@ -63,6 +70,8 @@ struct Open {
     title: String,
     field: Option<Entity<Field>>,
     _commands: Option<Subscription>,
+    /// Redraws a code's line as its time runs down, and closes the dialog when none is left.
+    _ticking: Option<Task<()>>,
     placed: Layout,
     pressed: Option<Part>,
     shade: Move,
@@ -76,6 +85,19 @@ impl Open {
             Part::Cancel => self.foot().map(|foot| foot.cancel.frame.bounds()),
             Part::Action => self.foot().map(|foot| foot.action.frame.bounds()),
             Part::Close => self.placed.close.map(|close| close.bounds()),
+            Part::Outside => None,
+        }
+    }
+
+    /// Whether `at` is on `part`.
+    fn is_on(&self, part: Part, at: Point<Pixels>) -> bool {
+        match part {
+            Part::Outside => {
+                self.placed.code.is_some() && !contains(&self.placed.panel.bounds(), at)
+            }
+            _ => self
+                .frame_of(part)
+                .is_some_and(|frame| contains(&frame, at)),
         }
     }
 
@@ -85,12 +107,9 @@ impl Open {
     }
 
     fn part_at(&self, at: Point<Pixels>) -> Option<Part> {
-        [Part::Cancel, Part::Action, Part::Close]
+        [Part::Cancel, Part::Action, Part::Close, Part::Outside]
             .into_iter()
-            .find(|&part| {
-                self.frame_of(part)
-                    .is_some_and(|frame| contains(&frame, at))
-            })
+            .find(|&part| self.is_on(part, at))
     }
 
     fn typed(&self, cx: &App) -> String {
@@ -175,12 +194,14 @@ impl Dialogs {
             None => window.focus(&self.focus, cx),
         }
         nr_dialog_open(prompt.dialog, by_key);
+        let ticking = placed.code.is_some().then(|| Self::tick_code(window, cx));
         self.open = Some(Open {
             kind: prompt.dialog,
             destructive: prompt.destructive,
             title: text(&prompt.title),
             field,
             _commands: commands,
+            _ticking: ticking,
             placed,
             pressed: None,
             shade: Move::entering(NrMotion::Shade),
@@ -272,11 +293,25 @@ impl Dialogs {
         })
     }
 
-    /// Closes a dialog with nothing left to show (`nr_prompt_settled`), as its close mark would.
-    pub fn close_settled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.open.is_some() && nr_prompt_settled() {
-            self.finish(false, window, cx);
-        }
+    /// Draws a code's line again every `CODE_TICK`, and closes the dialog once the code has no
+    /// time left: a phone used it, or it went stale.
+    fn tick_code(window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn_in(window, async move |dialogs, cx| {
+            loop {
+                cx.background_executor().timer(CODE_TICK).await;
+                let going = dialogs.update_in(cx, |dialogs, window, cx| {
+                    if nr_pair_left() <= 0.0 {
+                        dialogs.finish(false, window, cx);
+                        return false;
+                    }
+                    cx.notify();
+                    true
+                });
+                if !matches!(going, Ok(true)) {
+                    break;
+                }
+            }
+        })
     }
 
     /// Answers the dialog: action taken (`taken`) or cancelled. It stays open when a required
@@ -320,10 +355,7 @@ impl Dialogs {
         let Some(part) = was else {
             return;
         };
-        if !open
-            .frame_of(part)
-            .is_some_and(|frame| contains(&frame, at))
-        {
+        if !open.is_on(part, at) {
             return;
         }
         self.finish(part == Part::Action, window, cx);
@@ -412,6 +444,10 @@ impl DialogPainter<'_> {
     /// Draws the panel and its title, close mark, message, field, Cancel and action.
     fn draw(&self, window: &mut Window, cx: &mut App) {
         let (pose, placed) = (&self.pose, &self.open.placed);
+        if let Some(code) = &placed.code {
+            self.draw_code(window, code);
+            return;
+        }
         window.paint_quad(gpui::quad(
             pose.rect(placed.panel.bounds()),
             px(pose.length(14.0)),
@@ -420,15 +456,14 @@ impl DialogPainter<'_> {
             pose.color(color(Token::Border)),
             gpui::BorderStyle::Solid,
         ));
-        self.line(window, cx, &placed.title, None);
+        if let Some(title) = &placed.title {
+            self.line(window, cx, title, None);
+        }
         if let Some(close) = placed.close {
             self.draw_close(window, cx, close.bounds());
         }
         for sentence in &placed.message {
             self.line(window, cx, sentence, None);
-        }
-        if let Some(code) = &placed.code {
-            self.draw_code(window, code);
         }
         if let Some(field) = placed.field {
             self.draw_field(window, field.frame.bounds());
@@ -440,11 +475,49 @@ impl DialogPainter<'_> {
         }
     }
 
-    /// Draws a QR code dark on light whatever the theme, as a camera reads it.
-    fn draw_code(&self, window: &mut Window, code: &northroom_core::dialog::layout::CodePlace) {
-        self.rounded(window, code.ground.bounds(), gpui::white(), 6.0);
-        for square in &code.squares {
-            self.rounded(window, square.bounds(), gpui::black(), 0.0);
+    /// Draws a QR code dark on light whatever the theme, as a camera reads it: the card, a dot
+    /// for each dark square, the corner marks, and the line around it for the time left.
+    fn draw_code(&self, window: &mut Window, code: &CodePlace) {
+        let (light, dark) = (gpui::white(), gpui::black());
+        self.rounded(
+            window,
+            code.ground.bounds(),
+            light,
+            code.ground_radius as f32,
+        );
+        for dot in &code.dots {
+            self.rounded(window, dot.bounds(), dark, (dot.width / 2.0) as f32);
+        }
+        for mark in &code.marks {
+            for (square, ink) in [(mark.dark, dark), (mark.light, light), (mark.middle, dark)] {
+                let radius = (square.width * CornerMark::ROUND) as f32;
+                self.rounded(window, square.bounds(), ink, radius);
+            }
+        }
+        self.draw_code_line(window, code, &code.line_left(1.0), light.alpha(0.16));
+        self.draw_code_line(window, code, &code.line_left(nr_pair_left()), light);
+    }
+
+    /// Strokes `points` of the line around a code in `ink`.
+    fn draw_code_line(
+        &self,
+        window: &mut Window,
+        code: &CodePlace,
+        points: &[(f64, f64)],
+        ink: Hsla,
+    ) {
+        let Some((first, rest)) = points.split_first() else {
+            return;
+        };
+        let pose = &self.pose;
+        let place = |at: &(f64, f64)| pose.place(at.0 as f32, at.1 as f32);
+        let mut path = PathBuilder::stroke(px(pose.length(code.line_width as f32)));
+        path.move_to(place(first));
+        for point in rest {
+            path.line_to(place(point));
+        }
+        if let Ok(path) = path.build() {
+            window.paint_path(path, pose.color(ink));
         }
     }
 

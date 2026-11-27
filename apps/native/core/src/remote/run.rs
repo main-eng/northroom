@@ -394,9 +394,10 @@ impl Link {
         }
     }
 
-    /// Whether a pairing link is on screen that no phone has used yet.
-    pub fn inviting(&self) -> bool {
-        self.service.relock().offering()
+    /// The share of its time the pairing link on screen still has. Nothing once a phone has
+    /// used it or it has gone stale.
+    pub fn invite_left(&self) -> f64 {
+        self.service.relock().offer_left(Instant::now())
     }
 
     /// Takes the pairing link off screen; it no longer works.

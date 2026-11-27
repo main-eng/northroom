@@ -906,12 +906,12 @@ pub fn alert_layout(
     )
 }
 
-/// Whether the open dialog has nothing left to show: the pairing dialog once a phone has used
-/// its code. The shell then closes it as its close mark would.
+/// The share of its time the pairing dialog's code still has, for the line drawn around it.
+/// Nothing once a phone has used the code or it has gone stale; the shell then closes the
+/// dialog as Escape would.
 #[no_mangle]
-pub extern "C" fn nr_prompt_settled() -> bool {
-    let pairing = matches!(PROMPT.relock().as_ref(), Some((Ask::Pair, _)));
-    pairing && !crate::remote::app::inviting()
+pub extern "C" fn nr_pair_left() -> f64 {
+    crate::remote::app::invite_left()
 }
 
 /// Whether the dialog's action is enabled with `typed` in its field, since a name prompt needs

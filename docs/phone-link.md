@@ -32,8 +32,8 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
 - Values are percent-encoded. `relay` is absent when the computer uses none; there are up to
   four `at`, the computer's addresses on its own networks. Skip a name you don't know.
 - The code works once, for five minutes, and stops working when the computer takes the link off
-  screen. The dialog that shows it has no buttons: it closes by its close mark, or by itself
-  once a device has paired.
+  screen. On the computer the code is drawn alone, with a line around it that runs down over
+  the five minutes; it goes away once a device has paired or the time is up.
 - The device dials `key` at `relay` and the `at` addresses, then sends `pair`. From then on the
   computer lets that device's key in without a code, until the person forgets the device
   (Northroom > Forget Phone), which also ends its links.

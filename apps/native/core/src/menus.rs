@@ -958,7 +958,8 @@ pub struct Buttons {
 }
 
 /// A dialog: its title, the sentence under it, the field and its initial value, and its two
-/// buttons. One that asks nothing (`pair_prompt`) has no buttons and closes by its close mark.
+/// buttons. One that shows a code (`pair_prompt`) is drawn as the code alone; its title only
+/// names it.
 /// A `destructive` one has its action in the warning colour and no close mark.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prompt {
@@ -969,7 +970,7 @@ pub struct Prompt {
     pub destructive: bool,
     /// The field holds a password: shown as bullets, never trimmed.
     pub secret: bool,
-    /// A QR code shown under the message (`remote::code::modules`).
+    /// A QR code (`remote::code::modules`), drawn in place of everything else.
     pub code: Option<Vec<Vec<bool>>>,
 }
 
@@ -978,12 +979,13 @@ pub fn pair_failed(language: &str) -> &'static str {
     strings::text(language, key::DIALOG_PAIR_FAILED)
 }
 
-/// The dialog that shows a phone the pairing link as the QR code `code`. It asks nothing, so it
-/// has no buttons: it closes by its close mark, or by itself once a phone pairs.
+/// The dialog that shows a phone the pairing link as the QR code `code`, alone on the window.
+/// It closes by Escape or a press outside it, and by itself once a phone pairs or the code
+/// goes stale.
 pub fn pair_prompt(code: Vec<Vec<bool>>, language: &str) -> Prompt {
     Prompt {
         title: strings::text(language, key::DIALOG_PAIR_TITLE).to_owned(),
-        message: Some(strings::text(language, key::DIALOG_PAIR_MESSAGE).to_owned()),
+        message: None,
         value: None,
         buttons: None,
         destructive: false,

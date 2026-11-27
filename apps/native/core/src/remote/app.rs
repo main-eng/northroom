@@ -61,9 +61,10 @@ pub fn invite() -> Result<String, String> {
     Ok(started(&mut LINK.relock())?.invite())
 }
 
-/// Whether a pairing link is on screen that no phone has used yet.
-pub fn inviting() -> bool {
-    LINK.relock().as_ref().is_some_and(Link::inviting)
+/// The share of its time the pairing link on screen still has. Nothing once a phone has used
+/// it or it has gone stale.
+pub fn invite_left() -> f64 {
+    LINK.relock().as_ref().map_or(0.0, Link::invite_left)
 }
 
 /// Takes the pairing link off screen.

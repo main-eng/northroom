@@ -36,6 +36,12 @@ impl Offer {
     pub fn accepts(&self, code: &str, now: Instant) -> bool {
         code == self.code && now.duration_since(self.made) <= OFFER_LASTS
     }
+
+    /// The share of its time this offer still has at `now`: 1 when made, 0 once it is stale.
+    pub fn share_left(&self, now: Instant) -> f64 {
+        let spent = now.duration_since(self.made).as_secs_f64() / OFFER_LASTS.as_secs_f64();
+        (1.0 - spent).clamp(0.0, 1.0)
+    }
 }
 
 /// What a pairing link says.
@@ -216,6 +222,10 @@ mod tests {
         assert_eq!(offer.code().len(), 32);
         assert!(offer.accepts(offer.code(), made + OFFER_LASTS));
         assert!(!offer.accepts(offer.code(), made + OFFER_LASTS + Duration::from_secs(1)));
+        // The share of its time left runs from all of it to none.
+        assert_eq!(offer.share_left(made), 1.0);
+        assert_eq!(offer.share_left(made + OFFER_LASTS / 2), 0.5);
+        assert_eq!(offer.share_left(made + OFFER_LASTS * 2), 0.0);
         assert!(!offer.accepts("guess", made));
         assert_ne!(Offer::new(made).code(), offer.code());
     }

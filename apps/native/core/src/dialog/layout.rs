@@ -136,58 +136,172 @@ const BUTTON_GAP: f64 = 8.0;
 /// Field text: inset 12 pt at the sides, on a 20 px line 8 pt from the top.
 const FIELD_INSET: f64 = 12.0;
 
-/// A QR code: its light ground, quiet zone included, and each run of dark squares on it.
+/// A QR code drawn alone over the window: a light card with round corners, a round dot for
+/// each dark square, the three corner marks as rounded shapes, and around the card the line
+/// that runs down while the code can still be used.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CodePlace {
+    /// The light card, the quiet squares around the code included.
     pub ground: Rect,
-    pub squares: Vec<Rect>,
+    pub ground_radius: f64,
+    /// Each dark square outside the corner marks, drawn as a circle.
+    pub dots: Vec<Rect>,
+    pub marks: [CornerMark; 3],
+    /// The path of the line around the card (`CodePlace::line_left`), and its width.
+    pub line: Rect,
+    pub line_radius: f64,
+    pub line_width: f64,
 }
 
-/// The side a QR code is drawn at, as near as whole points a square allow.
-const CODE_SIDE: f64 = 264.0;
+/// One of a code's three corner marks: a dark rounded square, a light one on it, and a dark
+/// one in the middle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CornerMark {
+    pub dark: Rect,
+    pub light: Rect,
+    pub middle: Rect,
+}
+
+impl CornerMark {
+    /// A mark's corner radius, as a share of the side of the square it rounds.
+    pub const ROUND: f64 = 0.3;
+}
+
+/// The side a QR code's card is drawn at, as near as whole points a square allow.
+const CODE_SIDE: f64 = 392.0;
 /// The light squares the standard asks for around a code.
 const CODE_QUIET: usize = 4;
+/// How many squares a corner mark is across, its light ring and its middle.
+const MARK: usize = 7;
+const CODE_ROUND: f64 = 28.0;
+/// The line around the card: this far out from it, this wide.
+const LINE_OUT: f64 = 14.0;
+const LINE_WIDTH: f64 = 1.5;
+/// How many straight pieces draw a quarter turn of the line.
+const TURN_PIECES: usize = 12;
 
-/// One row's dark squares from `left`, `top`, as one rectangle a run.
-fn dark_runs(row: &[bool], left: f64, top: f64, square: f64) -> Vec<Rect> {
-    let mut runs = Vec::new();
-    let mut from = None;
-    for (column, dark) in row.iter().copied().chain([false]).enumerate() {
-        match (dark, from) {
-            (true, None) => from = Some(column),
-            (false, Some(start)) => {
-                let width = (column - start) as f64 * square;
-                runs.push(Rect::new(left + start as f64 * square, top, width, square));
-                from = None;
-            }
-            _ => {}
-        }
-    }
-    runs
+/// Whether the square at `line`, `column` of a code `side` squares across is in a corner mark.
+fn in_corner_mark(line: usize, column: usize, side: usize) -> bool {
+    let near = |at: usize| at < MARK;
+    let far = |at: usize| at + MARK >= side;
+    (near(line) && (near(column) || far(column))) || (far(line) && near(column))
 }
 
-/// Places `code` centred across `inner` points from `left`, its top at `top`.
-fn code_place(code: &[Vec<bool>], left: f64, top: f64, inner: f64) -> CodePlace {
+/// The corner mark whose top-left square is at `left`, `top`, with squares `square` across.
+fn corner_mark(left: f64, top: f64, square: f64) -> CornerMark {
+    let inset = |by: usize| {
+        let side = (MARK - 2 * by) as f64 * square;
+        Rect::new(
+            left + by as f64 * square,
+            top + by as f64 * square,
+            side,
+            side,
+        )
+    };
+    CornerMark {
+        dark: inset(0),
+        light: inset(1),
+        middle: inset(2),
+    }
+}
+
+/// Places `code` alone at the centre of a `width` × `height` view.
+fn code_place(code: &[Vec<bool>], width: f64, height: f64) -> CodePlace {
     let across = code.len() + 2 * CODE_QUIET;
     let square = (CODE_SIDE / across as f64).floor().max(2.0);
     let side = square * across as f64;
-    let ground = Rect::new((left + (inner - side) / 2.0).round(), top, side, side);
+    let ground = centred(width, height, side, side);
     let quiet = CODE_QUIET as f64 * square;
-    let squares = code
+    let (left, top) = (ground.x + quiet, ground.y + quiet);
+    let far = (code.len().saturating_sub(MARK)) as f64 * square;
+    let dots = code
         .iter()
         .enumerate()
         .flat_map(|(line, row)| {
-            let top = ground.y + quiet + line as f64 * square;
-            dark_runs(row, ground.x + quiet, top, square)
+            row.iter().enumerate().filter_map(move |(column, dark)| {
+                (*dark && !in_corner_mark(line, column, code.len())).then(|| {
+                    Rect::new(
+                        left + column as f64 * square,
+                        top + line as f64 * square,
+                        square,
+                        square,
+                    )
+                })
+            })
         })
         .collect();
-    CodePlace { ground, squares }
+    CodePlace {
+        ground,
+        ground_radius: CODE_ROUND,
+        dots,
+        marks: [
+            corner_mark(left, top, square),
+            corner_mark(left + far, top, square),
+            corner_mark(left, top + far, square),
+        ],
+        line: ground.outset(LINE_OUT),
+        line_radius: CODE_ROUND + LINE_OUT,
+        line_width: LINE_WIDTH,
+    }
 }
 
-/// How tall `code` is drawn (`code_place`).
-fn code_side(code: &[Vec<bool>]) -> f64 {
-    let across = code.len() + 2 * CODE_QUIET;
-    (CODE_SIDE / across as f64).floor().max(2.0) * across as f64
+impl CodePlace {
+    /// The points of the line around the card when `share` of the code's time is left: it
+    /// starts whole at the middle of the top and runs down clockwise, so what is left ends
+    /// there. Empty when no time is left.
+    pub fn line_left(&self, share: f64) -> Vec<(f64, f64)> {
+        if share <= 0.0 {
+            return Vec::new();
+        }
+        let whole = self.line_whole();
+        let lengths: Vec<f64> = whole
+            .windows(2)
+            .map(|pair| (pair[1].0 - pair[0].0).hypot(pair[1].1 - pair[0].1))
+            .collect();
+        let spent = (1.0 - share.clamp(0.0, 1.0)) * lengths.iter().sum::<f64>();
+        let mut passed = 0.0;
+        let mut left = Vec::new();
+        for (pair, length) in whole.windows(2).zip(lengths) {
+            let (from, to) = (pair[0], pair[1]);
+            if passed + length > spent {
+                if left.is_empty() {
+                    let along = (spent - passed).max(0.0) / length;
+                    left.push((
+                        from.0 + (to.0 - from.0) * along,
+                        from.1 + (to.1 - from.1) * along,
+                    ));
+                }
+                left.push(to);
+            }
+            passed += length;
+        }
+        left
+    }
+
+    /// The whole line: clockwise from the middle of the top and back to it.
+    fn line_whole(&self) -> Vec<(f64, f64)> {
+        let (line, radius) = (self.line, self.line_radius);
+        let top_middle = (line.mid_x(), line.y);
+        // Each corner's centre and the angle its quarter turn starts at, clockwise from the
+        // top right, in quarter turns from pointing up.
+        let corners = [
+            (line.max_x() - radius, line.y + radius, 0.0),
+            (line.max_x() - radius, line.max_y() - radius, 1.0),
+            (line.x + radius, line.max_y() - radius, 2.0),
+            (line.x + radius, line.y + radius, 3.0),
+        ];
+        let turns = corners.iter().flat_map(|&(x, y, quarter)| {
+            (0..=TURN_PIECES).map(move |piece| {
+                let turned =
+                    (quarter + piece as f64 / TURN_PIECES as f64) * std::f64::consts::FRAC_PI_2;
+                (x + radius * turned.sin(), y - radius * turned.cos())
+            })
+        });
+        std::iter::once(top_middle)
+            .chain(turns)
+            .chain([top_middle])
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -195,9 +309,10 @@ pub struct PromptLayout {
     pub panel: Rect,
     /// A prompt has a close mark in its corner; a warning has none.
     pub close: Option<Rect>,
-    pub title: Line,
+    /// None for a QR code, which is drawn alone.
+    pub title: Option<Line>,
     pub message: Vec<Line>,
-    /// A pairing dialog's QR code, under the message.
+    /// A pairing dialog's QR code, which is the whole dialog: the card is its panel.
     pub code: Option<CodePlace>,
     pub field: Option<FieldPlace>,
     /// Cancel and the action. A dialog that asks nothing has neither.
@@ -220,6 +335,18 @@ pub fn prompt(
     action_color: Token,
     measure: &mut Measure,
 ) -> PromptLayout {
+    if let Some(code) = &prompt.code {
+        let code = code_place(code, width, height);
+        return PromptLayout {
+            panel: code.ground,
+            close: None,
+            title: None,
+            message: Vec::new(),
+            code: Some(code),
+            field: None,
+            foot: None,
+        };
+    }
     let panel_width = PROMPT_MAX.min(width - 2.0 * PANEL_MARGIN);
     let inner = panel_width - 2.0 * EDGE;
     let title_line = if prompt.destructive {
@@ -237,9 +364,6 @@ pub fn prompt(
     }
     if prompt.value.is_some() {
         panel_height += SPACE + CONTROL;
-    }
-    if let Some(code) = &prompt.code {
-        panel_height += SPACE + code_side(code);
     }
     if prompt.buttons.is_some() {
         panel_height += SPACE + button::HEIGHT;
@@ -278,12 +402,6 @@ pub fn prompt(
             })
             .collect()
     });
-    let code = prompt.code.as_ref().map(|code| {
-        y += SPACE;
-        let placed = code_place(code, left, y, inner);
-        y += placed.ground.height;
-        placed
-    });
     let field = prompt.value.as_ref().map(|_| {
         y += SPACE;
         let frame = Rect::new(left, y, inner, CONTROL);
@@ -304,9 +422,9 @@ pub fn prompt(
     PromptLayout {
         panel,
         close: (!prompt.destructive).then(|| close_mark(panel)),
-        title,
+        title: Some(title),
         message,
-        code,
+        code: None,
         field,
         foot,
     }
@@ -574,40 +692,65 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_pairing_dialog_draws_its_code_centred_under_the_sentence_and_has_no_buttons() {
-        // A code of 25 squares a side: dark along its top line, and two runs on its second.
+    /// A code of 25 squares a side with two dark squares outside its corner marks and one in.
+    fn placed_code() -> PromptLayout {
         let mut code = vec![vec![false; 25]; 25];
-        code[0] = vec![true; 25];
-        code[1][0] = true;
-        code[1][3] = true;
-        code[1][4] = true;
-        let pairing = crate::menus::pair_prompt(code, "en");
-        let placed = prompt(
-            &pairing,
+        code[0][0] = true;
+        code[10][10] = true;
+        code[12][3] = true;
+        prompt(
+            &crate::menus::pair_prompt(code, "en"),
             1280.0,
             800.0,
             Token::PrimaryForeground,
             &mut sevens,
-        );
+        )
+    }
+
+    #[test]
+    fn a_pairing_dialog_is_its_code_alone_as_dots_and_corner_marks_on_a_card() {
+        let placed = placed_code();
+        assert!(placed.title.is_none() && placed.message.is_empty());
+        assert!(placed.close.is_none() && placed.foot.is_none() && placed.field.is_none());
         let code = placed.code.expect("a pairing dialog has a code");
-        // 33 squares across with the quiet edge, 8 pt each: 264 wide, centred in the panel.
-        assert_eq!((code.ground.width, code.ground.height), (264.0, 264.0));
-        assert_eq!(code.ground.x, 384.0 + (512.0 - 264.0) / 2.0);
-        assert!(code.ground.y >= placed.message.last().expect("a sentence").frame.max_y());
-        assert!(placed.foot.is_none() && placed.close.is_some());
-        // The panel ends one edge under the code.
-        assert_eq!(placed.panel.max_y(), code.ground.max_y() + 25.0);
-        let (left, top) = (code.ground.x + 32.0, code.ground.y + 32.0);
+        // 33 squares across with the quiet edge, 11 pt each: 363 wide, centred in the view.
+        assert_eq!(code.ground, Rect::new(459.0, 219.0, 363.0, 363.0));
+        assert_eq!(placed.panel, code.ground);
+        let (left, top) = (503.0, 263.0);
         assert_eq!(
-            code.squares,
+            code.dots,
             [
-                Rect::new(left, top, 200.0, 8.0),
-                Rect::new(left, top + 8.0, 8.0, 8.0),
-                Rect::new(left + 24.0, top + 8.0, 16.0, 8.0),
-            ]
+                Rect::new(left + 110.0, top + 110.0, 11.0, 11.0),
+                Rect::new(left + 33.0, top + 132.0, 11.0, 11.0),
+            ],
+            "a square inside a corner mark is the mark's to draw"
         );
-        assert_eq!(placed.field, None);
+        assert_eq!(
+            code.marks[0],
+            CornerMark {
+                dark: Rect::new(left, top, 77.0, 77.0),
+                light: Rect::new(left + 11.0, top + 11.0, 55.0, 55.0),
+                middle: Rect::new(left + 22.0, top + 22.0, 33.0, 33.0),
+            }
+        );
+        assert_eq!(code.marks[1].dark, Rect::new(left + 198.0, top, 77.0, 77.0));
+        assert_eq!(code.marks[2].dark, Rect::new(left, top + 198.0, 77.0, 77.0));
+    }
+
+    #[test]
+    fn the_line_around_a_code_runs_down_clockwise_from_the_middle_of_its_top() {
+        let code = placed_code().code.expect("a pairing dialog has a code");
+        assert_eq!(code.line, Rect::new(445.0, 205.0, 391.0, 391.0));
+        let near =
+            |at: (f64, f64), x: f64, y: f64| (at.0 - x).abs() < 1e-6 && (at.1 - y).abs() < 1e-6;
+        let whole = code.line_left(1.0);
+        assert!(near(whole[0], 640.5, 205.0) && near(whole[whole.len() - 1], 640.5, 205.0));
+        // The first quarter turn is the top right corner, so the line goes clockwise.
+        assert!(near(whole[1], 836.0 - 42.0, 205.0));
+        // Half spent: what is left starts at the middle of the bottom and still ends at the top.
+        let half = code.line_left(0.5);
+        assert!(near(half[0], 640.5, 596.0) && near(half[half.len() - 1], 640.5, 205.0));
+        assert!(code.line_left(0.0).is_empty());
     }
 
     #[test]
@@ -623,7 +766,7 @@ mod tests {
         assert_eq!(placed.panel, Rect::new(384.0, 314.0, 512.0, 172.0));
         assert_eq!(placed.close, Some(Rect::new(863.0, 331.0, 16.0, 16.0)));
         assert_eq!(
-            placed.title,
+            placed.title.expect("a title"),
             Line::new(
                 "New Folder",
                 409.0,
@@ -680,7 +823,7 @@ mod tests {
         let placed = prompt(&warning, 400.0, 600.0, Token::Ink, &mut sevens);
         assert_eq!(placed.panel.width, 368.0);
         assert!(placed.close.is_none() && placed.field.is_none());
-        assert_eq!(placed.title.frame.height, 28.0);
+        assert_eq!(placed.title.expect("a title").frame.height, 28.0);
         // 318 wide: nine words on a line, each 28 and a space of 7.
         let lines: Vec<&str> = placed
             .message

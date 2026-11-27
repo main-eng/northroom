@@ -231,9 +231,12 @@ impl Service {
         code
     }
 
-    /// Whether a pairing code is on screen that no device has used yet.
-    pub fn offering(&self) -> bool {
-        self.offer.is_some()
+    /// The share of its time the pairing code on screen still has at `now`. Nothing once a
+    /// device has used it, it has gone stale or it was withdrawn.
+    pub fn offer_left(&self, now: Instant) -> f64 {
+        self.offer
+            .as_ref()
+            .map_or(0.0, |offer| offer.share_left(now))
     }
 
     /// Takes the pairing code off screen; it no longer works.
