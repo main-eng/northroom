@@ -13,7 +13,7 @@ use kit::controls::{Drawn, Frame};
 use kit::core::{c, contains, text};
 use kit::draw::{fill, rounded};
 use kit::nr::*;
-use kit::theme::{CONTROL_RADIUS, Token, color};
+use kit::theme::{Token, color};
 use northroom_core::window::screen_layout::Onboarding as Layout;
 
 pub struct Onboarding {
@@ -111,7 +111,9 @@ impl Onboarding {
         fill(window, self.frame, color(Token::Background));
         placed.title.draw(window, cx, origin, None);
         placed.description.draw(window, cx, origin, None);
-        rounded(window, self.choose, color(Token::Cta), CONTROL_RADIUS);
+        // A pill, as the website's primary button is.
+        let radius = f32::from(self.choose.size.height) / 2.0;
+        rounded(window, self.choose, color(Token::Cta), radius);
         placed.choose_label.draw(window, cx, origin, None);
         if let Some(note) = &placed.note {
             note.draw(window, cx, origin, None);

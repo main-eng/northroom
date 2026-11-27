@@ -4,7 +4,7 @@
 //! measured by the core's typesetter (`typeset`).
 
 use crate::board::card::Font;
-use crate::dialog::layout::{button, Line, Measure};
+use crate::dialog::layout::{Line, Measure};
 use crate::geometry::Rect;
 use crate::strings::{self, key};
 use crate::theme::Token;
@@ -19,6 +19,11 @@ const DESCRIPTION_FONT: Font = Font::sans(14.0, Font::REGULAR);
 const DESCRIPTION_LINE: f64 = 20.0;
 /// From the description to the button.
 const SPACE: f64 = 24.0;
+/// The button is the website's primary one: a pill 44 pt tall with 20 pt each side of its words.
+const CHOOSE_HEIGHT: f64 = 44.0;
+const CHOOSE_PADDING: f64 = 20.0;
+const CHOOSE_FONT: Font = Font::sans(15.0, Font::MEDIUM);
+const CHOOSE_LINE: f64 = 20.0;
 /// The note line 12 pt under the button, when there is one.
 const NOTE_GAP: f64 = 12.0;
 const NOTE_FONT: Font = Font::sans(14.0, Font::REGULAR);
@@ -59,7 +64,7 @@ pub fn onboarding(
     } else {
         NOTE_GAP + NOTE_LINE
     };
-    let column_height = TITLE_LINE + TITLE_GAP + DESCRIPTION_LINE + SPACE + button::HEIGHT + noted;
+    let column_height = TITLE_LINE + TITLE_GAP + DESCRIPTION_LINE + SPACE + CHOOSE_HEIGHT + noted;
     let mut y = ((height - column_height) / 2.0).floor();
     let title = line(
         say(key::ONBOARDING_TITLE),
@@ -79,15 +84,15 @@ pub fn onboarding(
     y += DESCRIPTION_LINE + SPACE;
     let mut choose_label = line(
         say(key::ONBOARDING_CHOOSE),
-        y + button::WORDS_TOP,
-        button::LINE,
-        button::FONT,
+        y + (CHOOSE_HEIGHT - CHOOSE_LINE) / 2.0,
+        CHOOSE_LINE,
+        CHOOSE_FONT,
         Token::CtaForeground,
     );
-    let button_width = button::PADDING + (choose_label.frame.width - 1.0) + button::PADDING;
-    let choose = Rect::new(centred(button_width), y, button_width, button::HEIGHT);
-    choose_label.frame.x = choose.x + button::PADDING;
-    y += button::HEIGHT;
+    let button_width = CHOOSE_PADDING + (choose_label.frame.width - 1.0) + CHOOSE_PADDING;
+    let choose = Rect::new(centred(button_width), y, button_width, CHOOSE_HEIGHT);
+    choose_label.frame.x = choose.x + CHOOSE_PADDING;
+    y += CHOOSE_HEIGHT;
     let note = (!note.is_empty())
         .then(|| line(note, y + NOTE_GAP, NOTE_LINE, NOTE_FONT, Token::Destructive));
     Onboarding {
@@ -164,13 +169,13 @@ mod tests {
     #[test]
     fn the_first_screen_is_a_title_a_line_and_a_button_each_centred() {
         let screen = onboarding(1280.0, 800.0, "", "en", &mut sevens);
-        // 32 + 8 + 20 + 24 + 36 = 120 tall, so its top is 340 down. The title is 20 characters.
+        // 32 + 8 + 20 + 24 + 44 = 128 tall, so its top is 336 down. The title is 20 characters.
         assert_eq!(
             screen.title,
             Line::new(
                 "Welcome to Northroom",
                 570.0,
-                340.0,
+                336.0,
                 141.0,
                 32.0,
                 TITLE_FONT,
@@ -183,15 +188,15 @@ mod tests {
             Line::new(
                 "Choose the folder your work is in.",
                 521.0,
-                380.0,
+                376.0,
                 239.0,
                 20.0,
                 DESCRIPTION_FONT,
                 Token::MutedForeground
             )
         );
-        // "Choose Folder" is 13 characters: 16 + 91 + 16, centred on a whole point.
-        assert_eq!(screen.choose, Rect::new(578.0, 424.0, 123.0, 36.0));
+        // "Choose Folder" is 13 characters: 20 + 91 + 20, centred on a whole point.
+        assert_eq!(screen.choose, Rect::new(574.0, 420.0, 131.0, 44.0));
         assert_eq!(
             screen.choose_label,
             Line::new(
@@ -200,7 +205,7 @@ mod tests {
                 432.0,
                 92.0,
                 20.0,
-                button::FONT,
+                CHOOSE_FONT,
                 Token::CtaForeground
             )
         );
@@ -208,13 +213,13 @@ mod tests {
 
         // A note takes 12 and its line of 20 under the button; the whole stays centred.
         let refused = onboarding(1280.0, 800.0, "Not this one.", "en", &mut sevens);
-        assert_eq!(refused.title.frame.y, 324.0);
+        assert_eq!(refused.title.frame.y, 320.0);
         assert_eq!(
             refused.note,
             Some(Line::new(
                 "Not this one.",
                 594.0,
-                456.0,
+                460.0,
                 92.0,
                 20.0,
                 NOTE_FONT,
