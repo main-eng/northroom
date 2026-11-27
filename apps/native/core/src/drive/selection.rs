@@ -68,13 +68,6 @@ pub fn choose(file: &Path, directory: &Path, language: &str) -> Result<PathBuf, 
     Ok(resolved)
 }
 
-/// Creates `folder` for Start on the first screen (`paths::Paths::start_folder`) if it is
-/// missing. An existing folder is left as is. Errors are in `language`.
-pub fn make_start_folder(folder: &Path, language: &str) -> Result<(), String> {
-    fs::create_dir_all(folder)
-        .map_err(|_| strings::text(language, key::ONBOARDING_START_REFUSED).to_owned())
-}
-
 /// Where the app keeps per-drive state, such as how the view was left: a folder under
 /// `support` named from the drive's path, so two drives never share one.
 pub fn metadata_directory(support: &Path, directory: &Path) -> PathBuf {
@@ -172,26 +165,6 @@ mod tests {
         );
         assert_eq!(expand_home("/a/~b"), PathBuf::from("/a/~b"));
         assert_eq!(expand_home("~other/x"), PathBuf::from("~other/x"));
-    }
-
-    #[test]
-    fn start_makes_its_folder_and_keeps_one_already_there() {
-        let home = tempfile::tempdir().expect("home");
-        let folder = home.path().join("Northroom");
-        make_start_folder(&folder, "en").expect("made");
-        fs::write(folder.join("notes.md"), b"x").expect("file");
-        make_start_folder(&folder, "en").expect("kept");
-        assert!(
-            folder.join("notes.md").exists(),
-            "a folder already there keeps its files"
-        );
-
-        let blocked = home.path().join("taken");
-        fs::write(&blocked, b"x").expect("file");
-        assert_eq!(
-            make_start_folder(&blocked, "en"),
-            Err("Northroom couldn’t make its folder. Use a folder you already have.".to_owned())
-        );
     }
 
     #[test]

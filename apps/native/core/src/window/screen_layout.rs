@@ -7,53 +7,39 @@ use crate::board::card::Font;
 use crate::dialog::layout::{button, Line, Measure};
 use crate::geometry::Rect;
 use crate::strings::{self, key};
-use crate::text::wrap::{self, Breaks};
 use crate::theme::Token;
 
 // MARK: The first screen
 
-/// The column is 448 pt wide, centred in the window.
-const COLUMN: f64 = 448.0;
 const TITLE_FONT: Font = Font::sans(24.0, Font::MEDIUM);
 const TITLE_LINE: f64 = 32.0;
-/// From the title to the description, which always takes two 20 pt lines.
+/// From the title to the one line under it.
 const TITLE_GAP: f64 = 8.0;
 const DESCRIPTION_FONT: Font = Font::sans(14.0, Font::REGULAR);
 const DESCRIPTION_LINE: f64 = 20.0;
-const DESCRIPTION_HEIGHT: f64 = 40.0;
-/// From the description to the buttons, and from what is above the footer to it.
+/// From the description to the button.
 const SPACE: f64 = 24.0;
-/// "Use a folder I already have" is a text button 16 pt after Start, on the same line.
-const CHOOSE_GAP: f64 = 16.0;
-const CHOOSE_FONT: Font = Font::sans(14.0, Font::REGULAR);
-/// The note line 12 pt under the buttons, when there is one.
+/// The note line 12 pt under the button, when there is one.
 const NOTE_GAP: f64 = 12.0;
 const NOTE_FONT: Font = Font::sans(14.0, Font::REGULAR);
 const NOTE_LINE: f64 = 20.0;
-const FOOTER_FONT: Font = Font::sans(12.0, Font::REGULAR);
-const FOOTER_LINE: f64 = 16.0;
 
-/// The first screen on a computer with no drive yet.
+/// The first screen on a computer with no drive yet: a title, one line and one button, each
+/// centred in the window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Onboarding {
     pub title: Line,
-    /// The description's lines, as a paragraph wraps them.
-    pub description: Vec<Line>,
-    /// Start, which makes `~/Northroom` the drive.
-    pub start: Rect,
-    pub start_label: Line,
-    /// The text button that opens the platform's folder picker: as wide as its text, as tall as
-    /// Start.
+    pub description: Line,
+    /// The button that opens the platform's folder picker; the folder picked becomes the drive.
     pub choose: Rect,
     pub choose_label: Line,
     /// Why the folder picked was refused, or that the one chosen cannot be used now.
     pub note: Option<Line>,
-    pub footer: Line,
 }
 
-/// The first screen in a `width` by `height` view, with `note` under the buttons
-/// (`selection::onboarding::note`; empty for none). Text is in `language`, in a 448 pt column
-/// centred both ways.
+/// The first screen in a `width` by `height` view, with `note` under the button
+/// (`selection::onboarding::note`; empty for none). Text is in `language`. Every line is as
+/// wide as its words and centred across the view, and the whole is centred down it.
 pub fn onboarding(
     width: f64,
     height: f64,
@@ -62,106 +48,54 @@ pub fn onboarding(
     measure: &mut Measure,
 ) -> Onboarding {
     let say = |key: strings::Key| strings::text(language, key);
-    let x = (width - COLUMN) / 2.0;
+    // The left edge of something `wide`, centred on a whole point.
+    let centred = |wide: f64| ((width - wide) / 2.0).floor();
+    let mut line = |words: &str, top: f64, tall: f64, font: Font, color: Token| {
+        let wide = measure(words, font);
+        Line::new(words, centred(wide), top, wide + 1.0, tall, font, color)
+    };
     let noted = if note.is_empty() {
         0.0
     } else {
-        NOTE_LINE + NOTE_GAP
+        NOTE_GAP + NOTE_LINE
     };
-    let column_height = TITLE_LINE
-        + TITLE_GAP
-        + DESCRIPTION_HEIGHT
-        + SPACE
-        + button::HEIGHT
-        + noted
-        + SPACE
-        + FOOTER_LINE;
-    let mut y = (height - column_height) / 2.0;
-    let title = Line::new(
+    let column_height = TITLE_LINE + TITLE_GAP + DESCRIPTION_LINE + SPACE + button::HEIGHT + noted;
+    let mut y = ((height - column_height) / 2.0).floor();
+    let title = line(
         say(key::ONBOARDING_TITLE),
-        x,
         y,
-        COLUMN,
         TITLE_LINE,
         TITLE_FONT,
         Token::Foreground,
     );
     y += TITLE_LINE + TITLE_GAP;
-    let description = wrap::lines(
+    let description = line(
         say(key::ONBOARDING_DESCRIPTION),
-        COLUMN,
-        Breaks::Words,
-        &mut |line| measure(line, DESCRIPTION_FONT),
-    )
-    .iter()
-    .enumerate()
-    .map(|(index, line)| {
-        let top = y + index as f64 * DESCRIPTION_LINE;
-        Line::new(
-            line,
-            x,
-            top,
-            COLUMN,
-            DESCRIPTION_LINE,
-            DESCRIPTION_FONT,
-            Token::MutedForeground,
-        )
-    })
-    .collect();
-    y += DESCRIPTION_HEIGHT + SPACE;
-    let words = measure(say(key::ONBOARDING_START), button::FONT);
-    let start = Rect::new(
-        x,
         y,
-        button::PADDING + words + button::PADDING,
-        button::HEIGHT,
+        DESCRIPTION_LINE,
+        DESCRIPTION_FONT,
+        Token::MutedForeground,
     );
-    let start_label = Line::new(
-        say(key::ONBOARDING_START),
-        start.x + button::PADDING,
+    y += DESCRIPTION_LINE + SPACE;
+    let mut choose_label = line(
+        say(key::ONBOARDING_CHOOSE),
         y + button::WORDS_TOP,
-        words + 1.0,
         button::LINE,
         button::FONT,
         Token::CtaForeground,
     );
-    let words = measure(say(key::ONBOARDING_CHOOSE), CHOOSE_FONT);
-    let choose = Rect::new(start.max_x() + CHOOSE_GAP, y, words + 1.0, button::HEIGHT);
-    let choose_label = Line::new(
-        say(key::ONBOARDING_CHOOSE),
-        choose.x,
-        y + button::WORDS_TOP,
-        choose.width,
-        button::LINE,
-        CHOOSE_FONT,
-        Token::Foreground,
-    );
+    let button_width = button::PADDING + (choose_label.frame.width - 1.0) + button::PADDING;
+    let choose = Rect::new(centred(button_width), y, button_width, button::HEIGHT);
+    choose_label.frame.x = choose.x + button::PADDING;
     y += button::HEIGHT;
-    let note = (!note.is_empty()).then(|| {
-        y += NOTE_GAP;
-        let line = Line::new(note, x, y, COLUMN, NOTE_LINE, NOTE_FONT, Token::Destructive);
-        y += NOTE_LINE;
-        line
-    });
-    y += SPACE;
-    let footer = Line::new(
-        say(key::ONBOARDING_FOOTER),
-        x,
-        y,
-        COLUMN,
-        FOOTER_LINE,
-        FOOTER_FONT,
-        Token::MutedForeground,
-    );
+    let note = (!note.is_empty())
+        .then(|| line(note, y + NOTE_GAP, NOTE_LINE, NOTE_FONT, Token::Destructive));
     Onboarding {
         title,
         description,
-        start,
-        start_label,
         choose,
         choose_label,
         note,
-        footer,
     }
 }
 
@@ -228,87 +162,67 @@ mod tests {
     use crate::text::typeset::test_measure::sevens;
 
     #[test]
-    fn the_first_screen_is_a_column_448_wide_centred_with_its_note_only_when_there_is_one() {
+    fn the_first_screen_is_a_title_a_line_and_a_button_each_centred() {
         let screen = onboarding(1280.0, 800.0, "", "en", &mut sevens);
-        // 32 + 8 + 40 + 24 + 36 + 24 + 16 = 180 tall, so its top is 310 down.
+        // 32 + 8 + 20 + 24 + 36 = 120 tall, so its top is 340 down. The title is 20 characters.
         assert_eq!(
             screen.title,
             Line::new(
                 "Welcome to Northroom",
-                416.0,
-                310.0,
-                448.0,
+                570.0,
+                340.0,
+                141.0,
                 32.0,
                 TITLE_FONT,
                 Token::Foreground
             )
         );
+        // 34 characters.
         assert_eq!(
-            screen.description.len(),
-            2,
-            "the description wraps onto two lines"
-        );
-        assert_eq!(
-            (screen.description[0].frame.y, screen.description[1].frame.y),
-            (350.0, 370.0)
-        );
-        assert!(screen
-            .description
-            .iter()
-            .all(|line| sevens(&line.text, DESCRIPTION_FONT) <= 448.0));
-        // "Start" is 5 characters: 16 + 35 + 16.
-        assert_eq!(screen.start, Rect::new(416.0, 414.0, 67.0, 36.0));
-        assert_eq!(
-            screen.start_label,
+            screen.description,
             Line::new(
-                "Start",
+                "Choose the folder your work is in.",
+                521.0,
+                380.0,
+                239.0,
+                20.0,
+                DESCRIPTION_FONT,
+                Token::MutedForeground
+            )
+        );
+        // "Choose Folder" is 13 characters: 16 + 91 + 16, centred on a whole point.
+        assert_eq!(screen.choose, Rect::new(578.0, 424.0, 123.0, 36.0));
+        assert_eq!(
+            screen.choose_label,
+            Line::new(
+                "Choose Folder",
+                594.0,
                 432.0,
-                422.0,
-                36.0,
+                92.0,
                 20.0,
                 button::FONT,
                 Token::CtaForeground
             )
         );
-        // "Use a folder I already have" is 27 characters, 16 after Start, as tall as it.
-        assert_eq!(screen.choose, Rect::new(499.0, 414.0, 190.0, 36.0));
-        assert_eq!(
-            screen.choose_label,
-            Line::new(
-                "Use a folder I already have",
-                499.0,
-                422.0,
-                190.0,
-                20.0,
-                CHOOSE_FONT,
-                Token::Foreground
-            )
-        );
         assert_eq!(screen.note, None);
-        assert_eq!(screen.footer.frame, Rect::new(416.0, 474.0, 448.0, 16.0));
 
-        // A note takes 12 and its line of 20 under the button; the column stays centred.
+        // A note takes 12 and its line of 20 under the button; the whole stays centred.
         let refused = onboarding(1280.0, 800.0, "Not this one.", "en", &mut sevens);
-        assert_eq!(refused.title.frame.y, 294.0);
+        assert_eq!(refused.title.frame.y, 324.0);
         assert_eq!(
             refused.note,
             Some(Line::new(
                 "Not this one.",
-                416.0,
-                446.0,
-                448.0,
+                594.0,
+                456.0,
+                92.0,
                 20.0,
                 NOTE_FONT,
                 Token::Destructive
             ))
         );
-        assert_eq!(refused.footer.frame.y, 490.0);
         assert_eq!(
-            screen.footer.text,
-            "You can change this folder later in Settings → Account."
-        );
-        assert_eq!(
-            onboarding(1280.0, 800.0, "", "en", &mut sevens).title.text,
+            screen.title.text,
             strings::text("en", key::ONBOARDING_TITLE)
         );
     }

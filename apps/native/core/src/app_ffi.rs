@@ -623,27 +623,6 @@ pub fn onboarding_layout(
     )
 }
 
-/// Onboarding's Start button: creates `~/Northroom` (`paths::Paths::start_folder`) if needed
-/// and opens it as the drive like `nr_selection_choose`. Returns the refusal, or empty.
-#[no_mangle]
-pub extern "C" fn nr_selection_start() -> NrText {
-    let paths = crate::paths::get();
-    let language = crate::ffi::interface_language();
-    if let Err(refusal) = crate::drive::selection::make_start_folder(&paths.start_folder, language)
-    {
-        return lend(refusal);
-    }
-    let text = |path: &Path| std::ffi::CString::new(path.to_string_lossy().into_owned());
-    let (Ok(support), Ok(folder)) = (text(&paths.support), text(&paths.start_folder)) else {
-        return lend(
-            crate::strings::text(language, crate::strings::key::ONBOARDING_START_REFUSED)
-                .to_owned(),
-        );
-    };
-    // SAFETY: both are NUL-terminated strings that outlive the call.
-    unsafe { crate::ffi::nr_selection_choose(support.as_ptr(), folder.as_ptr()) }
-}
-
 /// Confirm-button label for the native folder picker opened from onboarding and Settings.
 #[no_mangle]
 pub extern "C" fn nr_folder_picker_button() -> NrText {

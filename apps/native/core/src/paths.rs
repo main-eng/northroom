@@ -24,7 +24,6 @@ const CHECK_CACHES: &str = "Caches";
 const SCENE_HOST_TEMPORARY: &str = "northroom-scene-host";
 const CHECK_SCENE_HOST: &str = "scene-host";
 /// The folder Start on the first screen makes the drive, in the home folder.
-const START_FOLDER: &str = "Northroom";
 /// The settings' folder, in the platform's folder for programs' settings.
 const SETTINGS_FOLDER: &str = "northroom";
 const SETTINGS_FOLDER_WINDOWS: &str = "Northroom";
@@ -71,9 +70,6 @@ pub struct Paths {
     pub check_metadata: PathBuf,
     /// Where the page host keeps its compiled network block list.
     pub scene_host: PathBuf,
-    /// The folder Start on the first screen makes the drive: `~/Northroom`, or one in a
-    /// check's `NR_SUPPORT`.
-    pub start_folder: PathBuf,
 }
 
 impl Paths {
@@ -103,12 +99,6 @@ impl Paths {
                 || std::env::temp_dir().join(SCENE_HOST_TEMPORARY),
                 |support| support.join(CHECK_SCENE_HOST),
             ),
-            start_folder: check_support
-                .clone()
-                .or_else(|| set("HOME"))
-                .or_else(|| set("USERPROFILE"))
-                .unwrap_or_default()
-                .join(START_FOLDER),
             check_metadata: check_metadata.clone(),
             settings_file: match (&fixed_drive, &check_support) {
                 // A check keeps its settings with what it names, never in the person's.
@@ -191,7 +181,6 @@ mod tests {
     #[test]
     fn a_persons_folders_keep_their_names() {
         let paths = resolve(&[("HOME", "/Users/someone")]);
-        assert_eq!(paths.start_folder, Path::new("/Users/someone/Northroom"));
         assert_eq!(
             paths.support,
             Path::new("/Users/someone/Library/Application Support/Northroom Native")
@@ -266,11 +255,6 @@ mod tests {
             paths.settings_file,
             Path::new("/tmp/run/support/settings.json"),
             "a check never reads or writes the person's settings"
-        );
-        assert_eq!(
-            paths.start_folder,
-            Path::new("/tmp/run/support/Northroom"),
-            "a check never makes a folder in a home folder"
         );
     }
 

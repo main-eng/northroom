@@ -1,7 +1,6 @@
-//! The welcome screen, shown over everything while no folder is chosen. Start makes the home
-//! folder's Northroom folder the drive (`nr_selection_start`); a link opens the platform folder
-//! picker to use an existing folder (`nr_selection_choose`). The core lays it out
-//! (`onboarding_layout`). Once a folder is chosen the window shows the drive.
+//! The welcome screen, shown over everything while no folder is chosen. Its one button opens the
+//! platform folder picker, and the folder picked becomes the drive (`nr_selection_choose`). The
+//! core lays it out (`onboarding_layout`). Once a folder is chosen the window shows the drive.
 
 use super::{Ask, Screen};
 use gpui::{
@@ -18,10 +17,9 @@ use northroom_core::window::screen_layout::Onboarding as Layout;
 
 pub struct Onboarding {
     frame: Bounds<Pixels>,
-    /// Why the last picked folder was refused, shown under the buttons; empty if none.
+    /// Why the last picked folder was refused, shown under the button; empty if none.
     refusal: String,
-    /// Where Start and the picker link were last drawn, in window points.
-    start: Bounds<Pixels>,
+    /// Where the button was last drawn, in window points.
     choose: Bounds<Pixels>,
 }
 
@@ -30,18 +28,12 @@ impl Onboarding {
         Self {
             frame: Bounds::default(),
             refusal: String::new(),
-            start: Bounds::default(),
             choose: Bounds::default(),
         }
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
-        if event.button != MouseButton::Left {
-            return;
-        }
-        if contains(&self.start, event.position) {
-            self.answered(text(&nr_selection_start()), cx);
-        } else if contains(&self.choose, event.position) {
+        if event.button == MouseButton::Left && contains(&self.choose, event.position) {
             self.choose(cx);
         }
     }
@@ -80,26 +72,23 @@ impl Onboarding {
         }
     }
 
-    /// Lays the screen out at its current place. Start and the picker link get the pointing-hand
-    /// cursor.
-    fn lay_out(&mut self, window: &mut Window) -> (Layout, [Hitbox; 2]) {
+    /// Lays the screen out at its current place. The button gets the pointing-hand cursor.
+    fn lay_out(&mut self, window: &mut Window) -> (Layout, Hitbox) {
         let frame = self.frame;
         let placed = onboarding_layout(
             f64::from(frame.size.width),
             f64::from(frame.size.height),
             &self.refusal,
         );
-        self.start = placed.start.at(frame.origin);
         self.choose = placed.choose.at(frame.origin);
-        let buttons = [self.start, self.choose]
-            .map(|button| window.insert_hitbox(button, HitboxBehavior::Normal));
-        (placed, buttons)
+        let button = window.insert_hitbox(self.choose, HitboxBehavior::Normal);
+        (placed, button)
     }
 
     fn paint(
         &self,
         placed: &Layout,
-        buttons: &[Hitbox; 2],
+        button: &Hitbox,
         over: &Hitbox,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -107,20 +96,13 @@ impl Onboarding {
         let origin = self.frame.origin;
         fill(window, self.frame, color(Token::Background));
         placed.title.draw(window, cx, origin, None);
-        // The description is fixed lines, drawn as the core broke them.
-        for line in &placed.description {
-            line.draw(window, cx, origin, None);
-        }
-        rounded(window, self.start, color(Token::Cta), CONTROL_RADIUS);
-        placed.start_label.draw(window, cx, origin, None);
+        placed.description.draw(window, cx, origin, None);
+        rounded(window, self.choose, color(Token::Cta), CONTROL_RADIUS);
         placed.choose_label.draw(window, cx, origin, None);
         if let Some(note) = &placed.note {
             note.draw(window, cx, origin, None);
         }
-        placed.footer.draw(window, cx, origin, None);
-        for button in buttons {
-            window.set_cursor_style(CursorStyle::PointingHand, button);
-        }
+        window.set_cursor_style(CursorStyle::PointingHand, button);
         let (onboarding, over) = (cx.entity(), over.clone());
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase == DispatchPhase::Bubble && over.is_hovered(window) {
@@ -152,13 +134,13 @@ impl Render for Onboarding {
             canvas(
                 move |bounds, window, cx| {
                     let over = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-                    let (placed, buttons) =
+                    let (placed, button) =
                         laying.update(cx, |onboarding, _| onboarding.lay_out(window));
-                    (over, placed, buttons)
+                    (over, placed, button)
                 },
-                move |_, (over, placed, buttons), window, cx| {
+                move |_, (over, placed, button), window, cx| {
                     painting.update(cx, |onboarding, cx| {
-                        onboarding.paint(&placed, &buttons, &over, window, cx)
+                        onboarding.paint(&placed, &button, &over, window, cx)
                     })
                 },
             )
