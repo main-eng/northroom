@@ -207,7 +207,7 @@ public final class Phone {
         await forget()
         notice =
             pairing
-            ? "That code no longer works. Choose Connect Phone… again for a new one."
+            ? "That code no longer works. Choose Connect Device… again for a new one."
             : "The computer no longer knows this phone. Pair again."
     }
 

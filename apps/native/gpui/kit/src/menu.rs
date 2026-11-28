@@ -2,6 +2,8 @@
 //! (`nr_menu_layout`), handles keys and hover (`nr_menu_key`, `nr_menu_hover`) and places it
 //! (`nr_menu_place`). This module draws it on the popover surface with a 1 px border and 10 px
 //! corners, including submenus, the field, ticks, shortcuts and the core's entrance and exit.
+//! While a lit row names a terminal (`Entry::peek`), its last lines show on a panel beside the
+//! menu, read and placed by the core (`sessions::peek`).
 //!
 //! As in GPUI Kit's popover and dialog, open menus share one deferred layer at the window
 //! origin. Each panel's hitbox blocks the pointer from what is under it, as AppKit's menu window
@@ -28,6 +30,7 @@ use northroom_core::menus::ffi::{
     nr_menu_hover, nr_menu_key, nr_menu_layout, nr_menu_light, nr_menu_replacing_y,
     nr_menu_stays_lit,
 };
+use northroom_core::sessions::peek;
 use std::ffi::CString;
 use std::rc::Rc;
 use std::time::Duration;
@@ -39,6 +42,19 @@ pub type Again = Rc<dyn Fn(&mut App) -> Menu>;
 
 /// How far a context menu opens from the pointer.
 const CONTEXT_GAP: f64 = 2.0;
+
+/// How often a shown peek reads its terminal's screen again.
+const PEEK_EVERY: Duration = Duration::from_millis(400);
+
+/// A terminal's last lines, shown beside the menu while the row that names it is lit
+/// (`Entry::peek`).
+struct Peek {
+    /// The terminal file.
+    file: String,
+    lines: Vec<String>,
+    /// Reads the lines again as the screen changes, for as long as the peek is kept.
+    _follow: Task<()>,
+}
 
 /// Where one row's parts go, copied from the core's `NrMenuRowPlace`.
 #[derive(Clone, Copy, Debug)]
@@ -309,6 +325,8 @@ pub struct Menus {
     pending_submenu: Option<Task<()>>,
     run: Option<Run>,
     again: Option<Again>,
+    /// The lit row's terminal, while one is lit that names one.
+    peek: Option<Peek>,
 }
 
 impl Menus {
@@ -322,6 +340,7 @@ impl Menus {
             pending_submenu: None,
             run: None,
             again: None,
+            peek: None,
         }
     }
 
@@ -430,6 +449,7 @@ impl Menus {
     /// Closes every menu with a fade and shrink, and returns focus to where it was.
     pub fn close_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.pending_submenu = None;
+        self.peek = None;
         if self.panels.is_empty() {
             return;
         }
@@ -712,6 +732,89 @@ impl Menus {
         cx.notify();
     }
 
+    /// The terminal file a lit row names (`Entry::peek`), with its menu's frame and the row's
+    /// top in the window.
+    fn peeked(&self) -> Option<(&str, Bounds<Pixels>, Pixels)> {
+        self.panels.iter().find_map(|panel| {
+            let lit = panel.lit?;
+            let file = panel.entry(lit).peek.as_str();
+            (!file.is_empty()).then(|| (file, panel.bounds(), panel.row_frame(lit).origin.y))
+        })
+    }
+
+    /// Keeps the peek on the terminal the lit row names: read when the row is lit, then again
+    /// every `PEEK_EVERY` while it stays lit, and dropped when no such row is lit.
+    fn follow_peek(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let wanted = self.peeked().map(|(file, ..)| file.to_owned());
+        if wanted.as_deref() == self.peek.as_ref().map(|peek| peek.file.as_str()) {
+            return;
+        }
+        self.peek = wanted.map(|file| Peek {
+            lines: peek::shown(&file),
+            file,
+            _follow: cx.spawn_in(window, async move |menus, cx| {
+                loop {
+                    cx.background_executor().timer(PEEK_EVERY).await;
+                    let read = menus.update(cx, |menus, cx| {
+                        let Some(peek) = &mut menus.peek else { return };
+                        let now = peek::shown(&peek.file);
+                        if now != peek.lines {
+                            peek.lines = now;
+                            cx.notify();
+                        }
+                    });
+                    if read.is_err() {
+                        return;
+                    }
+                }
+            }),
+        });
+    }
+
+    /// Draws the peek on the menu's surface, its lines in the muted colour. It takes no pointer:
+    /// moving onto it leaves the row, which takes it away.
+    fn draw_peek(&self, window: &mut Window, cx: &mut App) {
+        let (Some(peek), Some((_, menu, row_top))) = (&self.peek, self.peeked()) else {
+            return;
+        };
+        let view = window.viewport_size();
+        let menu = northroom_core::board::Frame {
+            x: f64::from(menu.origin.x),
+            y: f64::from(menu.origin.y),
+            width: f64::from(menu.size.width),
+            height: f64::from(menu.size.height),
+        };
+        let Some(panel) = peek::place(
+            peek.lines.len(),
+            menu,
+            f64::from(row_top),
+            (f64::from(view.width), f64::from(view.height)),
+        ) else {
+            return;
+        };
+        let bounds = |frame: northroom_core::board::Frame| {
+            crate::core::frame(
+                frame.x as f32,
+                frame.y as f32,
+                frame.width as f32,
+                frame.height as f32,
+            )
+        };
+        let pose = Pose::rest(Point::default());
+        let whole = bounds(panel);
+        draw_surface(pose, whole, window);
+        let face = Face::mono(peek::FONT.size as f32);
+        let ink = color(Token::MutedForeground);
+        let clip = crate::core::inset(whole, 1.0, 1.0);
+        window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
+            for (index, line) in peek.lines.iter().enumerate() {
+                let frame = bounds(peek::line_frame(panel, index));
+                let max_width = f32::from(frame.size.width);
+                pose.line(window, cx, line, face, ink, frame, max_width);
+            }
+        });
+    }
+
     // For checks.
 
     /// The open menus, back to front, as row titles ("-" for a separator).
@@ -757,6 +860,8 @@ impl Menus {
         for panel in self.leaving.iter().chain(&self.panels) {
             draw_panel(panel, window, cx);
         }
+        self.follow_peek(window, cx);
+        self.draw_peek(window, cx);
         if moving {
             window.request_animation_frame();
         }
@@ -833,11 +938,9 @@ fn draw_panel(panel: &Panel, window: &mut Window, cx: &mut App) {
     });
 }
 
-fn draw_panel_at(panel: &Panel, pose: Pose, window: &mut Window, cx: &mut App) {
-    let whole = Bounds {
-        origin: Point::default(),
-        size: size(px(panel.width), px(panel.height)),
-    };
+/// Paints the surface menus sit on over panel-local `whole`: the popover colour, a 1 px border
+/// and 10 px corners.
+fn draw_surface(pose: Pose, whole: Bounds<Pixels>, window: &mut Window) {
     window.paint_quad(gpui::quad(
         pose.rect(whole),
         px(pose.length(10.0)),
@@ -846,6 +949,14 @@ fn draw_panel_at(panel: &Panel, pose: Pose, window: &mut Window, cx: &mut App) {
         pose.color(color(Token::Border)),
         gpui::BorderStyle::Solid,
     ));
+}
+
+fn draw_panel_at(panel: &Panel, pose: Pose, window: &mut Window, cx: &mut App) {
+    let whole = Bounds {
+        origin: Point::default(),
+        size: size(px(panel.width), px(panel.height)),
+    };
+    draw_surface(pose, whole, window);
     let painter = RowPainter {
         panel,
         pose,

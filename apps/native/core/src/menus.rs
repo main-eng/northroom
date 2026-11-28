@@ -7,6 +7,7 @@
 //! Labels come from the message catalogs (`strings`) in the interface language (English,
 //! ADR-0001).
 
+pub mod far;
 pub mod ffi;
 pub mod keys;
 pub mod layout;
@@ -155,6 +156,9 @@ pub struct Entry {
     /// The entry id run by an X at the row's far end while the row is highlighted; a session's row
     /// uses it to end the session. Empty for no X.
     pub ends: String,
+    /// The terminal file whose last lines show beside the menu while the row is highlighted
+    /// (`sessions::peek`). Empty for none.
+    pub peek: String,
 }
 
 impl Entry {
@@ -177,6 +181,7 @@ impl Entry {
             role: Role::None,
             submenu: None,
             ends: String::new(),
+            peek: String::new(),
         }
     }
 
@@ -217,6 +222,12 @@ impl Entry {
     /// Adds an X at the row's far end, shown while highlighted, that runs entry `id`.
     pub fn ending(mut self, id: impl Into<String>) -> Self {
         self.ends = id.into();
+        self
+    }
+
+    /// Shows terminal file `file`'s last lines beside the menu while the row is highlighted.
+    pub fn peeking(mut self, file: impl Into<String>) -> Self {
+        self.peek = file.into();
         self
     }
 
@@ -375,6 +386,8 @@ pub enum BarCommand {
     ToggleHiddenFiles,
     TogglePalette,
     NewTab,
+    /// Makes a terminal in the folder on screen and opens it in a tab (`Columns::start_terminal`).
+    StartTerminal,
     CloseTab,
     /// Reopens the most recently closed tab (`Columns::reopen_closed_tab`).
     ReopenClosedTab,
@@ -401,6 +414,10 @@ const VIEWS: [(Key, View, char); 3] = [
 
 /// The shortcut that jumps to the next session waiting for the person.
 pub const NEXT_SESSION_KEYS: Shortcut = Shortcut::with('u', COMMAND | SHIFT);
+/// The key that starts a terminal in the folder on screen.
+pub const START_TERMINAL_KEYS: Shortcut = Shortcut::command('n');
+/// The entry that starts a terminal, in the menu bar and the sessions menu.
+pub const START_TERMINAL_ENTRY: &str = "start-terminal";
 /// ⌘⇧T: Reopen Closed Tab, as in every browser.
 pub const REOPEN_CLOSED_TAB_KEYS: Shortcut = Shortcut::with('t', COMMAND | SHIFT);
 
@@ -515,6 +532,9 @@ pub fn menu_bar(state: BarState) -> Vec<Menu> {
                     Entry::item("new-tab", say(key::MENU_NEW_TAB))
                         .keys(Shortcut::command('t'))
                         .hidden(),
+                    Entry::item(START_TERMINAL_ENTRY, say(key::MENU_NEW_TERMINAL))
+                        .keys(START_TERMINAL_KEYS)
+                        .hidden(),
                     Entry::item("close-tab", say(key::MENU_CLOSE_TAB))
                         .keys(Shortcut::command('w'))
                         .hidden(),
@@ -608,6 +628,7 @@ pub fn bar_command(id: &str) -> Option<BarCommand> {
         "hidden-files" => BarCommand::ToggleHiddenFiles,
         "palette" => BarCommand::TogglePalette,
         "new-tab" => BarCommand::NewTab,
+        START_TERMINAL_ENTRY => BarCommand::StartTerminal,
         "close-tab" => BarCommand::CloseTab,
         "quit" => BarCommand::Quit,
         "reopen-closed-tab" => BarCommand::ReopenClosedTab,
@@ -626,6 +647,7 @@ pub fn palette_command(id: &str) -> Option<BarCommand> {
     match id {
         "drive.toggle-hidden-files" => Some(BarCommand::ToggleHiddenFiles),
         "drive.change-folder" => Some(BarCommand::ChooseDrive),
+        "drive.start-terminal" => Some(BarCommand::StartTerminal),
         _ => None,
     }
 }
@@ -974,6 +996,11 @@ pub struct Prompt {
     pub code: Option<Vec<Vec<bool>>>,
 }
 
+/// The words for `key` in `language`.
+pub fn say(language: &str, key: Key) -> &'static str {
+    strings::text(language, key)
+}
+
 /// The notice's title when the phone link could not start, in `language`.
 pub fn pair_failed(language: &str) -> &'static str {
     strings::text(language, key::DIALOG_PAIR_FAILED)
@@ -1241,16 +1268,27 @@ const END_SESSION_ENTRY: &str = "end-session:";
 /// The sessions menu's maximum height, beyond which its rows scroll.
 const SESSIONS_MENU_MAX_HEIGHT: f64 = 560.0;
 
-/// The menu of the title bar's sessions button: every running session under its group heading
-/// (`sessions::grouped`), each heading showing a count. Waiting sessions come first, so while
-/// one waits the first heading shows the next-session shortcut, which works while the menu is
-/// open. With no session running it says so. At least 300 pt wide.
-pub fn sessions_menu(running: &[crate::sessions::Running], language: &str) -> Menu {
+/// The menu of the title bar's sessions button: the entry that starts a terminal, then every
+/// running session under its group heading (`sessions::grouped`), each heading showing a count.
+/// Waiting sessions come first, so while one waits the first heading shows the next-session
+/// shortcut, which works while the menu is open. With no session running it says so. Last come
+/// the `recent` conversations that are not running, under their own heading, each of which
+/// opens again in a new terminal. At least 300 pt wide.
+pub fn sessions_menu(
+    running: &[crate::sessions::Running],
+    recent: &[crate::sessions::recent::Row],
+    language: &str,
+) -> Menu {
     use crate::sessions::{grouped, next};
-    let mut entries = Vec::new();
+    let mut entries = vec![Entry::item(
+        START_TERMINAL_ENTRY,
+        strings::text(language, key::MENU_NEW_TERMINAL),
+    )
+    .icon(Glyph::TerminalWindow)
+    .keys(START_TERMINAL_KEYS)];
     for (group, listed) in grouped(running) {
         let heading = Entry::label(format!("{} · {}", group.label(language), listed.len()));
-        let shows_keys = entries.is_empty() && next(running, None).is_some();
+        let shows_keys = entries.len() == 1 && next(running, None).is_some();
         entries.push(if shows_keys {
             heading.written_keys(NEXT_SESSION_KEYS)
         } else {
@@ -1262,8 +1300,12 @@ pub fn sessions_menu(running: &[crate::sessions::Running], language: &str) -> Me
                 .map(|session| session_row(session, group)),
         );
     }
-    if entries.is_empty() {
+    if entries.len() == 1 {
         entries.push(Entry::label(strings::text(language, key::SESSIONS_NONE)));
+    }
+    if !recent.is_empty() {
+        entries.push(Entry::label(strings::text(language, key::SESSIONS_RECENT)));
+        entries.extend(recent.iter().map(recent_row));
     }
     entries.push(
         Entry::item(
@@ -1281,8 +1323,9 @@ pub fn sessions_menu(running: &[crate::sessions::Running], language: &str) -> Me
 }
 
 /// A session's row under `group`'s heading, with the group's dot. A session that needs the
-/// person or is working shows its folder and activity on a second line; an idle one is a single
-/// line with its folder after its name.
+/// person or is working has a second line (`sessions::detail_of`): what it asks when it said,
+/// else its folder, agent and terminal. An idle one is a single line with its folder after its
+/// name. While the row is highlighted the menu shows the terminal's last lines beside it.
 fn session_row(
     session: &crate::sessions::Running,
     group: crate::terminal::activity::Activity,
@@ -1305,7 +1348,9 @@ fn session_row(
         | Activity::Ended => Entry::item(id, crate::sessions::heading_of(session))
             .detail(crate::sessions::detail_of(session)),
     };
-    let row = row.ending(end_session_entry_of(&session.id));
+    let row = row
+        .ending(end_session_entry_of(&session.id))
+        .peeking(&session.id);
     let shown = look(Some(group));
     match shown.dot {
         Some(colour) => row.dot(Dot {
@@ -1385,6 +1430,39 @@ pub fn end_session_prompt(
 /// The terminal file for sessions menu row `id`.
 pub fn session_entry(id: &str) -> Option<&str> {
     id.strip_prefix(SESSION_ENTRY)
+}
+
+/// The id prefix of a recent conversation's row, before the conversation's id, and of its X.
+const RECENT_ENTRY: &str = "recent:";
+const FORGET_RECENT_ENTRY: &str = "forget-recent:";
+
+/// A recent conversation's row: its task over its folder and when it was last seen. Its X
+/// forgets it. It takes the dot of an ended session, which puts its text in line with the
+/// running sessions' rows.
+fn recent_row(recent: &crate::sessions::recent::Row) -> Entry {
+    use crate::terminal::activity::{look, Activity};
+    let shown = look(Some(Activity::Ended));
+    let row = Entry::item(format!("{RECENT_ENTRY}{}", recent.id), recent.task.as_str())
+        .detail(recent.detail.as_str())
+        .ending(format!("{FORGET_RECENT_ENTRY}{}", recent.id));
+    match shown.dot {
+        Some(colour) => row.dot(Dot {
+            colour,
+            fade: shown.dot_fade,
+            sign: shown.sign,
+        }),
+        None => row,
+    }
+}
+
+/// The conversation that recent row `id` opens again.
+pub fn recent_entry(id: &str) -> Option<&str> {
+    id.strip_prefix(RECENT_ENTRY)
+}
+
+/// The conversation that the X entry `id` of a recent row forgets.
+pub fn forget_recent_entry(id: &str) -> Option<&str> {
+    id.strip_prefix(FORGET_RECENT_ENTRY)
 }
 
 // MARK: A tab's menu
@@ -1559,7 +1637,7 @@ mod tests {
         let has_forget = |menu: &Menu| {
             menu.entries
                 .iter()
-                .any(|entry| entry.title == "Forget Phone")
+                .any(|entry| entry.title == "Forget Device")
         };
         assert!(!has_forget(&northroom(STATE)));
 
@@ -1571,7 +1649,7 @@ mod tests {
         let forget = menu
             .entries
             .iter()
-            .find(|entry| entry.title == "Forget Phone")
+            .find(|entry| entry.title == "Forget Device")
             .and_then(|entry| entry.submenu.as_ref())
             .expect("a menu of the paired phones");
         assert_eq!(titles(forget), ["Kitchen iPhone"]);
@@ -1603,7 +1681,7 @@ mod tests {
         assert_eq!(
             shown,
             [
-                "Northroom: About Northroom | Check for Updates… | - | Settings… | Change Folder… | Connect Phone… | - | Services | - | Hide Northroom | Hide Others | Show All | - | Quit Northroom",
+                "Northroom: About Northroom | Check for Updates… | - | Settings… | Change Folder… | Connect Device… | - | Services | - | Hide Northroom | Hide Others | Show All | - | Quit Northroom",
                 "Edit: Undo | Redo | - | Cut | Copy | Paste | Paste and Match Style | Delete | Select All | - | Speech",
                 "View: as Board | as List | as Columns | - | Reload | Toggle Full Screen",
                 "Window: Minimize | Zoom | - | Bring All to Front",
@@ -1627,6 +1705,7 @@ mod tests {
             folder: folder.to_owned(),
             doing: doing.to_owned(),
             agent: String::new(),
+            question: String::new(),
             activity,
         };
         let running = [
@@ -1640,10 +1719,11 @@ mod tests {
             session("o", "Sales / Q4 leads", "Outreach", "", Activity::NeedsYou),
             session("s", "Drive", "Shell", "", Activity::Idle),
         ];
-        let menu = sessions_menu(&running, "en");
+        let menu = sessions_menu(&running, &[], "en");
         assert_eq!(
             titles(&menu),
             [
+                "New terminal",
                 "Needs you · 1",
                 "Outreach",
                 "Working · 1",
@@ -1654,12 +1734,34 @@ mod tests {
         );
         assert_eq!((menu.min_width, menu.max_height), (300.0, 560.0));
         assert!(menu.quiet_labels);
-        let outreach = &menu.entries[1];
+        let start = &menu.entries[0];
+        assert_eq!(
+            (
+                start.id.as_str(),
+                start.shortcut.as_str(),
+                start.key.as_str()
+            ),
+            ("start-terminal", "⌘N", "n")
+        );
+        assert_eq!(
+            bar_command("start-terminal"),
+            Some(BarCommand::StartTerminal)
+        );
+        let outreach = &menu.entries[2];
         assert_eq!(
             (outreach.id.as_str(), outreach.kind),
             ("session:o", Kind::Item)
         );
         assert_eq!(outreach.detail, "Sales / Q4 leads");
+        // Once it says what it asks, the row says that under its name.
+        let asking = Running {
+            question: "Allow Bash: rm -rf build/?".to_owned(),
+            ..running[1].clone()
+        };
+        assert_eq!(
+            sessions_menu(&[asking], &[], "en").entries[2].detail,
+            "Allow Bash: rm -rf build/?"
+        );
         assert_eq!(
             outreach.dot,
             Some(Dot {
@@ -1669,9 +1771,9 @@ mod tests {
             })
         );
         // A session reporting a task leads with it; its terminal's name moves below.
-        assert_eq!(menu.entries[3].detail, "Finance · Bookkeeping");
+        assert_eq!(menu.entries[4].detail, "Finance · Bookkeeping");
         // An idle session is one line, with its dot.
-        let shell = &menu.entries[5];
+        let shell = &menu.entries[6];
         assert_eq!(
             (shell.id.as_str(), shell.detail.as_str()),
             ("session:s", "")
@@ -1682,9 +1784,17 @@ mod tests {
         );
         assert_eq!(session_entry("session:o"), Some("o"));
         assert_eq!(session_entry("next-session"), None);
+        // Only a session's row shows its terminal's last lines beside the menu.
+        let peeked: Vec<&str> = menu
+            .entries
+            .iter()
+            .map(|entry| entry.peek.as_str())
+            .filter(|file| !file.is_empty())
+            .collect();
+        assert_eq!(peeked, ["o", "b", "s"]);
         // The waiting sessions' heading shows the next-session shortcut without binding it;
         // a hidden row binds it.
-        let heading = &menu.entries[0];
+        let heading = &menu.entries[1];
         assert_eq!(
             (heading.shortcut.as_str(), heading.key.as_str()),
             ("⌘⇧U", "")
@@ -1695,15 +1805,18 @@ mod tests {
             ("next-session", "⌘⇧U", true)
         );
         // With no session waiting, no heading shows the shortcut.
-        let at_work = sessions_menu(&running[..1], "en");
-        assert_eq!(titles(&at_work)[0], "Working · 1");
-        assert_eq!(at_work.entries[0].shortcut, "");
+        let at_work = sessions_menu(&running[..1], &[], "en");
+        assert_eq!(titles(&at_work)[1], "Working · 1");
+        assert_eq!(at_work.entries[1].shortcut, "");
         assert_eq!(
             bar_command("next-session"),
             Some(BarCommand::ShowNextSession)
         );
         // With no session running the menu says so.
-        assert_eq!(titles(&sessions_menu(&[], "en"))[0], "No agents running");
+        assert_eq!(
+            titles(&sessions_menu(&[], &[], "en"))[..2],
+            ["New terminal", "No agents running"]
+        );
         // The menu bar icon's menu lists the waiting sessions above its own rows.
         let tray = tray("Check for Updates…", true, &running, "en");
         assert_eq!(
@@ -1711,6 +1824,83 @@ mod tests {
             ["Outreach · Needs you", "-", "Open Northroom"]
         );
         assert_eq!(tray.entries[0].id, "session:o");
+    }
+
+    #[test]
+    fn the_sessions_menu_ends_with_the_recent_conversations_that_are_not_running() {
+        use crate::sessions::recent::Row;
+        use crate::terminal::activity::Activity;
+        let recent = [
+            Row {
+                id: "3f2a-c91".to_owned(),
+                task: "Draft the Q4 outreach".to_owned(),
+                detail: "Sales / Q4 leads · 5m".to_owned(),
+            },
+            Row {
+                id: "77b0".to_owned(),
+                task: "Claude Code".to_owned(),
+                detail: "Finance · Tue".to_owned(),
+            },
+        ];
+        // With nothing running the menu says so, and the recent ones follow.
+        let menu = sessions_menu(&[], &recent, "en");
+        assert_eq!(
+            titles(&menu),
+            [
+                "New terminal",
+                "No agents running",
+                "Recent",
+                "Draft the Q4 outreach",
+                "Claude Code",
+            ]
+        );
+        let (heading, row) = (&menu.entries[2], &menu.entries[3]);
+        assert_eq!((heading.kind, heading.id.as_str()), (Kind::Label, ""));
+        assert_eq!(
+            (row.id.as_str(), row.kind, row.detail.as_str()),
+            ("recent:3f2a-c91", Kind::Item, "Sales / Q4 leads · 5m")
+        );
+        // Its X forgets it, and its dot is an ended session's.
+        assert_eq!(row.ends, "forget-recent:3f2a-c91");
+        assert_eq!(row.peek, "", "no terminal runs to show the last lines of");
+        assert_eq!(recent_entry(&row.id), Some("3f2a-c91"));
+        assert_eq!(forget_recent_entry(&row.ends), Some("3f2a-c91"));
+        assert_eq!(
+            (recent_entry(&row.ends), forget_recent_entry(&row.id)),
+            (None, None)
+        );
+        assert_eq!(
+            (session_entry(&row.id), end_session_entry(&row.ends)),
+            (None, None)
+        );
+        assert_eq!(
+            row.dot,
+            Some(Dot {
+                colour: Token::MutedForeground,
+                fade: 0.6,
+                sign: crate::terminal::activity::Sign::Dot,
+            })
+        );
+        // They come after the running sessions' groups.
+        let running = [crate::sessions::Running {
+            id: "s".to_owned(),
+            name: "Shell".to_owned(),
+            folder: "Drive".to_owned(),
+            doing: String::new(),
+            agent: String::new(),
+            question: String::new(),
+            activity: Activity::Idle,
+        }];
+        assert_eq!(
+            titles(&sessions_menu(&running, &recent[..1], "en")),
+            [
+                "New terminal",
+                "Idle · 1",
+                "Shell · Drive",
+                "Recent",
+                "Draft the Q4 outreach",
+            ]
+        );
     }
 
     /// Every key of the menu bar.
@@ -1752,6 +1942,7 @@ mod tests {
                 "Show or Hide Hidden Files . 9",
                 "Command Palette k 1",
                 "New Tab t 1",
+                "New terminal n 1",
                 "Close Tab w 1",
                 "Reopen Closed Tab t 9",
                 "Back [ 1",
@@ -2446,11 +2637,13 @@ mod tests {
                 folder: "Films".to_owned(),
                 doing: String::new(),
                 agent: String::new(),
+                question: String::new(),
                 activity: crate::terminal::activity::Activity::Idle,
             }],
+            &[],
             "en",
         )
-        .entries[1];
+        .entries[2];
         assert_eq!(row.ends, "end-session:t");
         assert_eq!(end_session_entry(&row.ends), Some("t"));
         assert_eq!(end_session_entry("session:t"), None);

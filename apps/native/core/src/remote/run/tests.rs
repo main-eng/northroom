@@ -11,8 +11,20 @@ const WAIT: Duration = Duration::from_secs(10);
 
 /// One terminal whose screen shows whatever was last typed into it.
 #[derive(Clone, Default)]
-struct OneTerminal {
-    typed: Arc<Mutex<Vec<String>>>,
+pub(crate) struct OneTerminal {
+    pub(crate) typed: Arc<Mutex<Vec<String>>>,
+    /// The sizes it was fitted to, as "session columns x lines".
+    pub(crate) fitted: Arc<Mutex<Vec<String>>>,
+    following: Arc<Mutex<Vec<Sink>>>,
+}
+
+impl OneTerminal {
+    /// The session writes `bytes`, as whoever follows it hears.
+    pub(crate) fn writes(&self, bytes: &[u8]) {
+        for sink in self.following.relock().iter() {
+            sink(bytes);
+        }
+    }
 }
 
 impl Desk for OneTerminal {
@@ -23,6 +35,7 @@ impl Desk for OneTerminal {
             folder: "Work".to_owned(),
             doing: String::new(),
             agent: "Claude Code".to_owned(),
+            question: String::new(),
             activity: Activity::NeedsYou,
         }]
     }
@@ -41,7 +54,13 @@ impl Desk for OneTerminal {
         })
     }
 
-    fn fit(&self, _session: &str, _grid: Option<GridSize>) {}
+    fn fit(&self, session: &str, grid: Option<GridSize>) {
+        if let Some(grid) = grid {
+            self.fitted
+                .relock()
+                .push(format!("{session} {}x{}", grid.columns, grid.lines));
+        }
+    }
 
     fn paste(&self, _session: &str, text: &str) {
         self.typed.relock().push(text.to_owned());
@@ -52,6 +71,22 @@ impl Desk for OneTerminal {
     }
 
     fn scroll(&self, _session: &str, _lines: i32) {}
+
+    fn follow(&self, _session: &str, _follower: u64, sink: Sink) -> bool {
+        sink(b"state");
+        self.following.relock().push(sink);
+        true
+    }
+
+    fn unfollow(&self, _session: &str, _follower: u64) {
+        self.following.relock().clear();
+    }
+
+    fn input(&self, _session: &str, bytes: &[u8]) {
+        self.typed
+            .relock()
+            .push(String::from_utf8_lossy(bytes).into_owned());
+    }
 
     fn start(&self) -> Option<String> {
         None

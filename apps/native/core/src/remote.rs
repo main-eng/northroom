@@ -9,11 +9,13 @@
 //! only carries the bytes.
 
 pub mod app;
+pub mod bytes;
 pub mod code;
 pub mod devices;
 pub mod pages;
 pub mod pairing;
 pub mod protocol;
+pub mod reach;
 pub mod run;
 pub mod screen;
 pub mod service;

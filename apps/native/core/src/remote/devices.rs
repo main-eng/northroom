@@ -70,7 +70,7 @@ fn read(path: &Path) -> Option<(Key, Vec<Device>)> {
 }
 
 /// Writes `bytes` to `path` so that only the person can read them, replacing the file whole.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder)?;
     }

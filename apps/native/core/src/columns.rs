@@ -1550,6 +1550,72 @@ impl Columns {
         Ok((id, path))
     }
 
+    /// Makes a terminal file in the folder the active tab shows and opens it in a tab of its own,
+    /// ready to type into. Returns its id.
+    pub fn start_terminal(&mut self, language: &str) -> DriveResult<String> {
+        let location = self
+            .columns()
+            .last()
+            .map_or(Location::ROOT, |column| column.location.clone());
+        self.start_terminal_in(&location, language)
+    }
+
+    /// Makes a terminal file at `location` and opens it in a tab of its own (`show_in_tab`).
+    /// Returns its id.
+    pub fn start_terminal_in(
+        &mut self,
+        location: &Location,
+        language: &str,
+    ) -> DriveResult<String> {
+        let id = self.create_terminal_file(location, language)?;
+        self.refresh()?;
+        self.show_in_tab(&id)?;
+        Ok(id)
+    }
+
+    /// Opens the terminal file at the top of the drive that shows the session `far` in a tab
+    /// of its own, making the file under `title` when there is none yet. Returns its id.
+    pub fn show_far_terminal(
+        &mut self,
+        far: &crate::terminal::launch::Elsewhere,
+        title: &str,
+    ) -> DriveResult<String> {
+        let id = match self.far_terminal(far) {
+            Some(id) => id,
+            None => {
+                let name = format!("{title}.nterm");
+                let id =
+                    self.workspace
+                        .create_file(&Location::ROOT, &name, far.file().as_bytes())?;
+                self.refresh()?;
+                id
+            }
+        };
+        self.show_in_tab(&id)?;
+        Ok(id)
+    }
+
+    /// The terminal file at the top of the drive that shows the session `far`.
+    fn far_terminal(&mut self, far: &crate::terminal::launch::Elsewhere) -> Option<String> {
+        use crate::terminal::launch::Elsewhere;
+        let terminals: Vec<String> = self
+            .workspace
+            .all_contents(&Location::ROOT)
+            .ok()?
+            .into_iter()
+            .filter(|entry| entry.kind == EntryKind::Terminal)
+            .map(|entry| entry.id)
+            .collect();
+        terminals.into_iter().find(|id| {
+            let read = self
+                .workspace
+                .path_of(id)
+                .ok()
+                .and_then(|path| std::fs::read(path).ok());
+            read.and_then(|bytes| Elsewhere::read(&bytes)).as_ref() == Some(far)
+        })
+    }
+
     /// Makes a terminal file at `location`, named with the terminal word in `language`
     /// (numbered when taken). Returns its id.
     fn create_terminal_file(&mut self, location: &Location, language: &str) -> DriveResult<String> {
@@ -3522,6 +3588,33 @@ mod tests {
         assert_eq!(columns.tab_count(), 1);
         assert!(columns.opened().is_none());
         assert_eq!(columns.columns().len(), 1);
+    }
+
+    #[test]
+    fn a_started_terminal_is_made_in_the_folder_on_screen_and_fills_a_new_tab() {
+        let (root, _metadata, mut columns) = columns();
+        columns.set_view(View::Board);
+        let films = columns.columns()[0]
+            .rows
+            .iter()
+            .position(|entry| entry.title == "Films")
+            .expect("Films");
+        columns.open_row(0, films).expect("into Films");
+        let id = columns.start_terminal("en").expect("started");
+        assert!(root.path().join("Films").join("Terminal.nterm").is_file());
+        assert_eq!((columns.tab_count(), columns.active_tab()), (2, 1));
+        let filling = columns
+            .tab_terminal(1)
+            .expect("a terminal fills the new tab");
+        assert_eq!(
+            (filling.id.as_str(), filling.title.as_str()),
+            (id.as_str(), "Terminal")
+        );
+        assert!(columns.is_throwaway_terminal(&id, "Terminal"));
+        // Started again while the first fills its tab: beside it, in the same folder.
+        columns.start_terminal("en").expect("a second");
+        assert!(root.path().join("Films").join("Terminal 2.nterm").is_file());
+        assert_eq!(columns.tab_count(), 3);
     }
 
     #[test]

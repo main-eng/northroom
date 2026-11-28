@@ -566,6 +566,48 @@ fn show_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> u64 {
     app.shown_terminals.relock().show(id)
 }
 
+/// The terminal that shows the session on another computer the terminal file at `path` names
+/// (`launch::Elsewhere`). `None` for a terminal of this computer's own, and for a computer the
+/// person has not paired with.
+fn far_session(path: &Path, view: crate::terminal::ViewSize) -> Option<Terminal> {
+    let far = crate::terminal::launch::Elsewhere::read(&std::fs::read(path).ok()?)?;
+    crate::remote::app::show_far(&far.computer, &far.session, view, terminal_palette())
+}
+
+/// Opens `session` of the paired computer with key `computer` in a tab: the terminal file at
+/// the top of the drive that shows it, made when there is none, named after the session and
+/// the computer.
+pub(crate) fn show_far_session(computer: &str, session: &str) {
+    let seen = crate::remote::app::computers()
+        .into_iter()
+        .find(|seen| seen.key == computer);
+    let Some(seen) = seen else {
+        return;
+    };
+    let language = interface_language();
+    let name = seen
+        .sessions
+        .iter()
+        .find(|listed| listed.id == session)
+        .map_or_else(
+            || crate::strings::text(language, crate::strings::key::TERMINAL_SHELL_LABEL).to_owned(),
+            |listed| listed.name.clone(),
+        );
+    let title = crate::strings::text(language, crate::strings::key::TERMINAL_ON_COMPUTER)
+        .replace("{name}", &name)
+        .replace("{computer}", &seen.name);
+    let far = crate::terminal::launch::Elsewhere {
+        computer: computer.to_owned(),
+        session: session.to_owned(),
+    };
+    let shown = with_columns(|columns| columns.show_far_terminal(&far, &title));
+    if let Some(Err(error)) = shown {
+        eprintln!("computers\ta session's terminal was not opened: {error}");
+    }
+    // The drive's lists and tabs changed, perhaps off the shell's thread.
+    crate::notify_changed();
+}
+
 /// The size a session starts at when no view shows it. The phone that asked for it fits it
 /// next (`Terminal::hold_grid`), and a view here fits it when it opens.
 const UNSHOWN_VIEW: crate::terminal::ViewSize = crate::terminal::ViewSize {
@@ -602,6 +644,9 @@ pub(crate) fn start_unshown_session() -> Option<String> {
 /// Starts the session of the terminal file `id` at `path`, fitted to `view`: its shell, in the
 /// file's folder.
 fn start_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> Terminal {
+    if let Some(far) = far_session(path, view) {
+        return far;
+    }
     let environment: Vec<(String, String)> = std::env::vars().collect();
     let palette = terminal_palette();
     // Read before the sessions' lock, which the columns' lock never waits under.
@@ -634,10 +679,33 @@ fn start_session(id: &str, path: &Path, view: crate::terminal::ViewSize) -> Term
     let resume = metadata
         .as_deref()
         .and_then(|metadata| crate::terminal::transcript::take_resume(metadata, id));
-    if let Some(command) = resume {
-        started.type_ahead(format!("{}\r", command.trim()).into_bytes());
+    let typed = app().typed_at_start.relock().remove(id);
+    match (resume, typed) {
+        (Some(command), _) => started.type_ahead(format!("{}\r", command.trim()).into_bytes()),
+        (None, Some(typed)) => started.type_ahead(typed),
+        (None, None) => {}
     }
     started
+}
+
+/// The command of the agent the person started last (`resume::again`): the one started since
+/// the app started, which is then kept in the app's folder, else the one kept there before.
+pub fn agent_started_last() -> Option<String> {
+    let support = crate::paths::get().support;
+    let Some(command) = crate::terminal::resume::started_last() else {
+        return crate::terminal::resume::kept_again(&support);
+    };
+    if let Err(error) = crate::terminal::resume::keep_again(&support, &command) {
+        eprintln!("terminal\tthe last agent's command was not kept: {error}");
+    }
+    Some(command)
+}
+
+/// Types `bytes` into terminal file `id`'s shell when its session first starts, once the shell
+/// waits at its prompt. End them with a carriage return to run what they spell; without one
+/// they wait at the prompt for the person.
+pub fn type_at_start(id: &str, bytes: Vec<u8>) {
+    app().typed_at_start.relock().insert(id.to_owned(), bytes);
 }
 
 /// Takes the terminal shown as `number` off screen. Its session runs on, and is marked off
@@ -2307,23 +2375,31 @@ pub(crate) fn list_move_column(key: u32, to: usize) {
 /// The command palette while it is open (`commands::Palette`).
 static PALETTE: std::sync::Mutex<Option<crate::commands::Palette>> = std::sync::Mutex::new(None);
 
-/// The commands the palette offers: the drive's while a drive is open; none in Settings.
+/// The commands the palette offers: while a drive is open, the drive's and then one for each
+/// running session; none in Settings.
 fn palette_commands() -> Vec<crate::commands::Command> {
     if nr_settings_tab() >= 0 || with_columns(|_| ()).is_none() {
-        Vec::new()
-    } else {
-        crate::commands::drive_commands(interface_language())
+        return Vec::new();
     }
+    let language = interface_language();
+    let mut offered = crate::commands::drive_commands(language);
+    offered.extend(crate::commands::session_commands(
+        &crate::sessions::ffi::running_now(),
+        language,
+    ));
+    offered
 }
 
 fn with_palette<T: Default>(action: impl FnOnce(&mut crate::commands::Palette) -> T) -> T {
     PALETTE.relock().as_mut().map(action).unwrap_or_default()
 }
 
-/// Opens the command palette (⌘K): every command offered, the first lit.
+/// Opens the command palette (⌘K): every command offered now, the first lit. The commands stay
+/// as they are read here until it closes.
 #[no_mangle]
 pub extern "C" fn nr_palette_open() {
-    *PALETTE.relock() = Some(crate::commands::Palette::open(&palette_commands()));
+    let offered = palette_commands();
+    *PALETTE.relock() = Some(crate::commands::Palette::open(offered));
 }
 
 #[no_mangle]
@@ -2339,7 +2415,7 @@ pub extern "C" fn nr_palette_close() {
 pub unsafe extern "C" fn nr_palette_search(query: *const c_char) {
     // SAFETY: the caller passes a NUL-terminated string.
     let query = unsafe { text_of(query) };
-    with_palette(|palette| palette.search(&palette_commands(), &query));
+    with_palette(|palette| palette.search(&query));
 }
 
 /// Lays the palette out over a window `width` × `height` points (`Palette::layout`) and
@@ -2364,8 +2440,8 @@ pub enum NrPaletteKey {
     Close,
 }
 
-/// A key in the palette: ↓, ↑, Return and Escape are its own. `run` is valid while the
-/// commands are.
+/// A key in the palette: ↓, ↑, Return and Escape are its own. `run` is valid until the next
+/// key that runs a command.
 ///
 /// # Safety
 /// `run` must point to writable storage for one `NrText`.
@@ -2382,8 +2458,9 @@ pub unsafe extern "C" fn nr_palette_key(press: NrKeyPress, run: *mut NrText) -> 
     match with_palette(|palette| Some(palette.key(key))) {
         Some(PaletteAnswer::Redraw) => NrPaletteKey::Redraw,
         Some(PaletteAnswer::Run(id)) => {
+            static RUN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
             // SAFETY: the caller passes storage for one text.
-            unsafe { run.write(NrText::borrowing(id)) };
+            unsafe { run.write(NrText::lend_into(&RUN, id)) };
             NrPaletteKey::Run
         }
         Some(PaletteAnswer::Close) => NrPaletteKey::Close,
@@ -4684,6 +4761,8 @@ pub(crate) fn session_activity(id: &str) -> Option<crate::terminal::activity::Ac
 pub(crate) fn end_session(id: &str) {
     let session = app().sessions.relock().remove(id);
     if let Some(session) = session {
+        // Its agent's conversation stays in the sessions menu's recent ones.
+        crate::sessions::recent::ffi::keep_ending([(id, &session)]);
         session.stop();
     }
     with_columns(|columns| columns.close_tabs_of(id));
@@ -4741,11 +4820,17 @@ pub extern "C" fn nr_tabs_keep() {
 #[no_mangle]
 pub extern "C" fn nr_terminals_quit() {
     let app = app();
+    // The last agent's command is kept for the next launch's new terminals.
+    agent_started_last();
     // Read before the sessions' lock, which the columns' lock never waits under.
     let metadata = with_columns(|columns| columns.workspace().metadata_directory().to_path_buf());
     app.shown_terminals.relock().clear();
     let sessions: Vec<(String, Terminal)> = app.sessions.relock().drain().collect();
     let ended: Vec<String> = sessions.iter().map(|(id, _)| id.clone()).collect();
+    // Every agent conversation open now stays in the sessions menu's recent ones.
+    crate::sessions::recent::ffi::keep_ending(
+        sessions.iter().map(|(id, session)| (id.as_str(), session)),
+    );
     // Two of an agent in one folder can't each resume its latest conversation (`unclaimed`).
     let resumes = crate::terminal::resume::unclaimed(
         sessions

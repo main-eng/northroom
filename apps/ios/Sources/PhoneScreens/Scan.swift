@@ -16,7 +16,7 @@ struct ScanScreen: View {
                 if phone.pairing {
                     ProgressView("Pairing")
                 } else {
-                    Text("On your computer, choose Northroom > Connect Phone…")
+                    Text("On your computer, choose Northroom > Connect Device…")
                         .font(.headline)
                     Text(phone.notice ?? "Then point this phone at the code.")
                         .foregroundStyle(.secondary)

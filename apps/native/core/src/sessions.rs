@@ -6,6 +6,8 @@
 //! by folder and name, so a row stays put while the sessions around it change.
 
 pub mod ffi;
+pub mod peek;
+pub mod recent;
 
 use crate::strings::{self, key};
 use crate::terminal::activity::Activity;
@@ -25,6 +27,8 @@ pub struct Running {
     pub doing: String,
     /// The agent running in it (`Agent::label`), or empty for a plain shell.
     pub agent: String,
+    /// What it asks the person (`Asked::words`); empty unless it needs them and said what for.
+    pub question: String,
     pub activity: Activity,
 }
 
@@ -238,11 +242,15 @@ pub fn doing_of(title: &str) -> String {
 /// program's own name (which the terminal's name or the agent already shows), or a place, as a
 /// shell's title is ("~/drive/Finance", "me@mac:~").
 pub fn task_of(session: &Running) -> Option<&str> {
-    let doing = session.doing.as_str();
+    task_said(&session.doing, &session.name, &session.agent)
+}
+
+/// The task in what a program says it is `doing` (`doing_of`), for a terminal called `name`
+/// running `agent` (its label, or empty): `task_of` for a session that is not listed.
+pub fn task_said<'a>(doing: &'a str, name: &str, agent: &str) -> Option<&'a str> {
     let said = doing.to_lowercase();
-    let only_a_name = said.is_empty()
-        || session.name.to_lowercase().starts_with(&said)
-        || said == session.agent.to_lowercase();
+    let only_a_name =
+        said.is_empty() || name.to_lowercase().starts_with(&said) || said == agent.to_lowercase();
     let a_place = doing.starts_with('~')
         || doing.starts_with('/')
         || (doing.contains('@') && doing.contains(':'));
@@ -254,9 +262,19 @@ pub fn heading_of(session: &Running) -> String {
     task_of(session).map_or_else(|| session.name.clone(), str::to_owned)
 }
 
-/// A row's muted second line: the session's folder, then the agent unless the terminal's name
-/// already starts with it, then the terminal's name when the main line shows the task instead.
+/// A row's muted second line: what the session asks the person when it said, else where and
+/// what it is (`place_of`).
 pub fn detail_of(session: &Running) -> String {
+    if session.question.is_empty() {
+        place_of(session)
+    } else {
+        session.question.clone()
+    }
+}
+
+/// The session's folder, then the agent unless the terminal's name already starts with it, then
+/// the terminal's name when the main line shows the task instead.
+fn place_of(session: &Running) -> String {
     let mut said = vec![session.folder.as_str()];
     let agent = session.agent.as_str();
     if !agent.is_empty()
@@ -293,6 +311,7 @@ mod tests {
             folder: folder.to_owned(),
             doing: String::new(),
             agent: String::new(),
+            question: String::new(),
             activity,
         }
     }
@@ -495,6 +514,11 @@ mod tests {
         row.name = "Claude Code 2".to_owned();
         row.doing = "Drafting emails".to_owned();
         assert_eq!(detail_of(&row), "Sales / Q4 leads · Claude Code 2");
+        // A session that says what it asks shows that below instead.
+        row.activity = Activity::NeedsYou;
+        row.question = "Allow Bash: rm -rf build/?".to_owned();
+        assert_eq!(heading_of(&row), "Drafting emails");
+        assert_eq!(detail_of(&row), "Allow Bash: rm -rf build/?");
     }
 
     #[test]

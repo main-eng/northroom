@@ -36,52 +36,57 @@ northroom://pair?key=<64 hex>&code=<code>&name=<computer's name>&relay=<relay UR
   the five minutes; it goes away once a device has paired or the time is up.
 - The device dials `key` at `relay` and the `at` addresses, then sends `pair`. From then on the
   computer lets that device's key in without a code, until the person forgets the device
-  (Northroom > Forget Phone), which also ends its links.
+  (Northroom > Forget Device), which also ends its links.
 
 ## What a device sends
 
-| Message                                                     | Meaning                                                                                                                    |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `{"type":"pair","code":"…","name":"My phone"}`              | Pair this device. `name` is what the computer lists it as.                                                                 |
-| `{"type":"hello"}`                                          | A paired device connected. Answered with `welcome`, then `sessions`.                                                       |
-| `{"type":"watch","session":"<id>","columns":48,"lines":30}` | Show this session's terminal, fitted to this grid (20 to 300 columns, 5 to 200 lines), until another `watch` or a `leave`. |
-| `{"type":"leave"}`                                          | Stop watching. The terminal takes back the size of its view on the computer.                                               |
-| `{"type":"start"}`                                          | Make a terminal at the top of the drive and start its shell. Answered with `sessions`, then `started`.                     |
-| `{"type":"type","session":"<id>","text":"…"}`               | Type text, as a paste. It does not press Enter.                                                                            |
-| `{"type":"keys","session":"<id>","text":"…"}`               | Type text as keys pressed one after another, not as a paste.                                                               |
-| `{"type":"list","folder":"<id>"}`                           | List a folder, or the top of the drive when `folder` is absent. Answered with `folder` or `no-folder`.                     |
-| `{"type":"read","file":"<id>","from":0,"length":1048576}`   | Read up to `length` bytes of a file from byte `from` (0 when absent). Answered with `bytes` or `no-file`.                  |
-| `{"type":"read","file":"<id>","picture":2,"from":0,"length":1048576}` | The same, of the picture numbered `picture` on the file's pages.                                                 |
-| `{"type":"table","file":"<id>"}`                            | Ask whether a file is shown as a table. Answered with `table` or `no-table`.                                               |
-| `{"type":"rows","file":"<id>","sheet":0,"from":0,"count":100}` | Ask for up to `count` rows (at most 200) of a sheet from row `from`. The first sheet and row are 0. Answered with `rows`. |
-| `{"type":"pages","file":"<id>"}`                            | Ask whether a file is shown as pages. Answered with `pages` or `no-pages`.                                                 |
-| `{"type":"page","file":"<id>","page":0,"width":390}`        | Ask what a page draws laid out `width` points wide (100 to 4000). The first page is 0. Answered with `marks`.             |
-| `{"type":"press","session":"<id>","key":"enter"}`           | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
-| `{"type":"scroll","session":"<id>","lines":3}`              | Move through earlier output as the computer's wheel does, towards older output when positive; at most 500 lines a message. |
+| Message                                                               | Meaning                                                                                                                    |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `{"type":"pair","code":"…","name":"My phone"}`                        | Pair this device. `name` is what the computer lists it as.                                                                 |
+| `{"type":"hello"}`                                                    | A paired device connected. Answered with `welcome`, then `sessions`.                                                       |
+| `{"type":"watch","session":"<id>","columns":48,"lines":30}`           | Show this session's terminal, fitted to this grid (20 to 300 columns, 5 to 200 lines), until another `watch` or a `leave`. |
+| `{"type":"leave"}`                                                    | Stop watching. The terminal takes back the size of its view on the computer.                                               |
+| `{"type":"start"}`                                                    | Make a terminal at the top of the drive and start its shell. Answered with `sessions`, then `started`.                     |
+| `{"type":"type","session":"<id>","text":"…"}`                         | Type text, as a paste. It does not press Enter.                                                                            |
+| `{"type":"keys","session":"<id>","text":"…"}`                         | Type text as keys pressed one after another, not as a paste.                                                               |
+| `{"type":"list","folder":"<id>"}`                                     | List a folder, or the top of the drive when `folder` is absent. Answered with `folder` or `no-folder`.                     |
+| `{"type":"read","file":"<id>","from":0,"length":1048576}`             | Read up to `length` bytes of a file from byte `from` (0 when absent). Answered with `bytes` or `no-file`.                  |
+| `{"type":"read","file":"<id>","picture":2,"from":0,"length":1048576}` | The same, of the picture numbered `picture` on the file's pages.                                                           |
+| `{"type":"table","file":"<id>"}`                                      | Ask whether a file is shown as a table. Answered with `table` or `no-table`.                                               |
+| `{"type":"rows","file":"<id>","sheet":0,"from":0,"count":100}`        | Ask for up to `count` rows (at most 200) of a sheet from row `from`. The first sheet and row are 0. Answered with `rows`.  |
+| `{"type":"pages","file":"<id>"}`                                      | Ask whether a file is shown as pages. Answered with `pages` or `no-pages`.                                                 |
+| `{"type":"page","file":"<id>","page":0,"width":390}`                  | Ask what a page draws laid out `width` points wide (100 to 4000). The first page is 0. Answered with `marks`.              |
+| `{"type":"press","session":"<id>","key":"enter"}`                     | Press one key: `enter`, `escape`, `tab`, `backspace`, `up`, `down`, `left`, `right` or `interrupt` (Control-C).            |
+| `{"type":"scroll","session":"<id>","lines":3}`                        | Move through earlier output as the computer's wheel does, towards older output when positive; at most 500 lines a message. |
+
+| `{"type":"follow","session":"<id>","columns":120,"lines":40}` | Follow a session as another computer's own terminal shows it: fit it to this grid, then get its output as `output`. Several sessions may be followed at once. |
+| `{"type":"fit","session":"<id>","columns":100,"lines":30}` | Fit a followed session to a new grid, as the terminal showing it now is. |
+| `{"type":"unfollow","session":"<id>"}` | Stop following a session. It keeps running. |
+| `{"type":"input","session":"<id>","data":"<base64>"}` | Send a session bytes as if typed at its terminal: keys, pastes and mouse reports as a terminal encodes them. |
 
 A device that is not paired may send only `pair`. Anything else, or a message that can't be
 read, is answered with `refused` and the link closes.
 
 ## What the computer sends
 
-| Message                                           | Meaning                                                                                           |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `{"type":"welcome","host":"<computer's name>"}`   | The device may stay.                                                                              |
-| `{"type":"refused","why":"not-paired"}`           | The device may not, and the link closes. `why` is `not-paired`, `wrong-code` or `not-understood`. |
-| `{"type":"sessions","sessions":[…]}`              | Every open terminal, most urgent first, a shell at its prompt as `idle`. Sent after `hello` and whenever it changes. |
-| `{"type":"screen","session":"<id>","screen":{…}}` | The watched terminal's screen. Sent after `watch` and whenever it changes.                        |
-| `{"type":"gone","session":"<id>"}`                | The watched session ended.                                                                        |
-| `{"type":"started","session":"<id>"}`             | The session a `start` made. It is in the `sessions` sent just before.                             |
-| `{"type":"folder","folder":"<id>","name":"…","items":[…]}` | What a folder holds, in the drive's name order. `folder` is absent for the top of the drive. |
-| `{"type":"no-folder","folder":"<id>"}`            | The folder a `list` named is not in the drive.                                                    |
-| `{"type":"bytes","file":"<id>","from":0,"size":1204,"data":"…"}` | Bytes of a file from `from`, as base64, at most 1 MiB a message, and the whole file's `size`. A device asks again from where these end until it has `size` bytes. |
-| `{"type":"no-file","file":"<id>"}`                | The file a `read` named is not in the drive or can't be read. `picture` is echoed when one was asked for. |
-| `{"type":"pages","file":"<id>","width":612,"height":792,"count":3}` | The file is shown as `count` pages, each `width` × `height` points.             |
-| `{"type":"marks","file":"<id>","page":0,"width":390,"marks":[…]}` | What a page draws, back to front, laid out `width` points wide.                   |
-| `{"type":"no-pages","file":"<id>"}`               | The file is not a kind shown as pages, or could not be read as one.                               |
-| `{"type":"table","file":"<id>","sheets":[…]}`     | The file is shown as these sheets.                                                                |
-| `{"type":"rows","file":"<id>","sheet":0,"from":0,"rows":[…]}` | Rows of a sheet from row `from`. Fewer than asked for means the sheet ends there.     |
-| `{"type":"no-table","file":"<id>"}`               | The file is not a kind shown as a table, or could not be read as one.                             |
+| Message                                                             | Meaning                                                                                                                                                           |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{"type":"welcome","host":"<computer's name>"}`                     | The device may stay.                                                                                                                                              |
+| `{"type":"refused","why":"not-paired"}`                             | The device may not, and the link closes. `why` is `not-paired`, `wrong-code` or `not-understood`.                                                                 |
+| `{"type":"sessions","sessions":[…]}`                                | Every open terminal, most urgent first, a shell at its prompt as `idle`. Sent after `hello` and whenever it changes.                                              |
+| `{"type":"screen","session":"<id>","screen":{…}}`                   | The watched terminal's screen. Sent after `watch` and whenever it changes.                                                                                        |
+| `{"type":"gone","session":"<id>"}`                                  | The watched session ended.                                                                                                                                        |
+| `{"type":"started","session":"<id>"}`                               | The session a `start` made. It is in the `sessions` sent just before.                                                                                             |
+| `{"type":"folder","folder":"<id>","name":"…","items":[…]}`          | What a folder holds, in the drive's name order. `folder` is absent for the top of the drive.                                                                      |
+| `{"type":"no-folder","folder":"<id>"}`                              | The folder a `list` named is not in the drive.                                                                                                                    |
+| `{"type":"bytes","file":"<id>","from":0,"size":1204,"data":"…"}`    | Bytes of a file from `from`, as base64, at most 1 MiB a message, and the whole file's `size`. A device asks again from where these end until it has `size` bytes. |
+| `{"type":"no-file","file":"<id>"}`                                  | The file a `read` named is not in the drive or can't be read. `picture` is echoed when one was asked for.                                                         |
+| `{"type":"pages","file":"<id>","width":612,"height":792,"count":3}` | The file is shown as `count` pages, each `width` × `height` points.                                                                                               |
+| `{"type":"marks","file":"<id>","page":0,"width":390,"marks":[…]}`   | What a page draws, back to front, laid out `width` points wide.                                                                                                   |
+| `{"type":"no-pages","file":"<id>"}`                                 | The file is not a kind shown as pages, or could not be read as one.                                                                                               |
+| `{"type":"table","file":"<id>","sheets":[…]}`                       | The file is shown as these sheets.                                                                                                                                |
+| `{"type":"rows","file":"<id>","sheet":0,"from":0,"rows":[…]}`       | Rows of a sheet from row `from`. Fewer than asked for means the sheet ends there.                                                                                 |
+| `{"type":"no-table","file":"<id>"}`                                 | The file is not a kind shown as a table, or could not be read as one.                                                                                             |
 
 A session:
 
@@ -187,8 +192,35 @@ A screen:
   `italic`, `dim`, `underline` and `strikeout` (false when absent).
 - `cursor` is its line and column, absent when it is hidden or scrolled out of view.
 
+## Following a session from another computer
+
+A phone draws the screen it is sent (`watch`). A computer has a terminal of its own, so it
+follows the session instead: it is sent the bytes the session's own terminal reads, and feeds
+them to its terminal, which then scrolls, selects and resizes as for a session of its own.
+
+- After `follow`, the first `output` messages bring a terminal that was just cleared to the
+  session's state now: a reset, the scrollback and screen with their colours, the cursor, and
+  the modes the program set. The grid must be the one asked for. Every `output` after is what
+  the session wrote next, in order, with nothing lost or repeated between the two.
+- `output` is `{"type":"output","session":"<id>","data":"<base64>"}`, at most 256 KiB of
+  output a message. A sequence may be cut between two messages.
+- The terminal that follows answers none of the program's questions (colours, size, device
+  kind): the session's own terminal does.
+- A program on the alternate screen is sent as that screen alone; what its shell showed before
+  it comes back when the program leaves.
+- A followed session that ends or is not running is told as `gone`.
+- After a link drops, connect, `hello`, and `follow` again: the state is sent afresh.
+
+Northroom itself does this between two computers. Northroom > Connect Device… shows the code;
+a press on the code copies the pairing link, and pasting it into the same dialog on the other
+computer pairs that computer as a device of this one. Its sessions menu then lists this
+computer's sessions, and one opens there as a terminal file that names this computer and the
+session.
+
 ## Limits
 
+- A followed session's output is queued for the device as fast as it is written; a device on
+  a slow link falls behind a session that writes without pause, and the queue is not bounded.
 - One session is watched at a time per device. Two devices watching one session share the grid
   of whichever asked last.
 - The whole screen is sent on each change, at most about seven times a second.

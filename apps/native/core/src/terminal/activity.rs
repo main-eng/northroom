@@ -228,6 +228,86 @@ pub struct Changes {
     pub conversation: Option<String>,
     /// The folder the agent runs in, as the hook reported it last: an absolute path.
     pub conversation_folder: Option<String>,
+    /// What the hook said the agent asks the person, last.
+    pub asked: Option<Asked>,
+}
+
+/// What a session that needs the person asks them, as its program reported it. Every text is
+/// one line without control characters, at most `ASKED_MAX_CHARS` long, and not empty unless
+/// said otherwise.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Asked {
+    /// Leave to use `tool` on `what`: a command, a file or an address, empty when it named none.
+    Permission { tool: String, what: String },
+    /// The agent's own question.
+    Question(String),
+    /// A notice that the agent waits, which says less than a permission or question already
+    /// known and so never replaces one.
+    Notice(String),
+}
+
+impl Asked {
+    /// The question as a session's row and notification show it, in `language`.
+    pub fn words(&self, language: &str) -> String {
+        let words = match self {
+            Self::Permission { tool, what } if what.is_empty() => strings::format(
+                language,
+                key::SESSIONS_ASKS_TOOL,
+                &[("tool", tool.as_str())],
+            ),
+            Self::Permission { tool, what } => strings::format(
+                language,
+                key::SESSIONS_ASKS_TOOL_WHAT,
+                &[("tool", tool.as_str()), ("what", what.as_str())],
+            ),
+            Self::Question(words) | Self::Notice(words) => words.clone(),
+        };
+        crate::sessions::shortened(&words, ASKED_MAX_CHARS)
+    }
+}
+
+/// The longest a question is shown, and the longest any part of one is kept.
+const ASKED_MAX_CHARS: usize = 160;
+
+/// `text` from a terminal as one line to show: control characters and line ends become spaces,
+/// runs of spaces become one, and it is cut to `ASKED_MAX_CHARS`. `None` when nothing is left.
+fn one_line(text: &str) -> Option<String> {
+    let spaced: String = text
+        .chars()
+        .map(|letter| if letter.is_control() { ' ' } else { letter })
+        .collect();
+    let line = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    // A text cut between the bytes of a character ends in the replacement character.
+    let line = line.trim_end_matches('\u{fffd}').trim_end();
+    (!line.is_empty()).then(|| crate::sessions::shortened(line, ASKED_MAX_CHARS))
+}
+
+/// `text` as the JSON string it was cut from reads: each escape as the character it stands
+/// for, a line end or tab as a space, and an escape that is cut short left out.
+fn unescaped(text: &str) -> String {
+    let mut read = String::with_capacity(text.len());
+    let mut letters = text.chars();
+    while let Some(letter) = letters.next() {
+        if letter != '\\' {
+            read.push(letter);
+            continue;
+        }
+        match letters.next() {
+            Some('n' | 't' | 'r' | 'b' | 'f') => read.push(' '),
+            Some('u') => {
+                let code: String = letters.by_ref().take(4).collect();
+                read.extend(u32::from_str_radix(&code, 16).ok().and_then(char::from_u32));
+            }
+            Some(other) => read.push(other),
+            None => {}
+        }
+    }
+    read
+}
+
+/// A hook's text, read out of the JSON it was given, as one line to show.
+fn hook_line(text: &str) -> Option<String> {
+    one_line(&unescaped(text))
 }
 
 /// An OSC longer than this is not a title or notification, so the rest is skipped.
@@ -237,6 +317,10 @@ const ACTIVITY_OSC: &str = "6973";
 const ACTIVITY_PREFIX: &str = "northroom;activity=";
 const SESSION_PREFIX: &str = "northroom;session=";
 const SESSION_FOLDER_PREFIX: &str = "northroom;session-dir=";
+/// A permission the agent asks for: the tool, a semicolon, then what it would run or touch.
+const ALLOW_PREFIX: &str = "northroom;allow=";
+const QUESTION_PREFIX: &str = "northroom;question=";
+const NOTICE_PREFIX: &str = "northroom;notice=";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Parser {
@@ -335,11 +419,14 @@ impl Signals {
     }
 }
 
-/// What Northroom's hook reported in one OSC 6973: an activity, or the agent's conversation
-/// and its folder. An id or folder that is not one is left out.
+/// What Northroom's hook reported in one OSC 6973: an activity, what the agent asks, or the
+/// agent's conversation and its folder. An id or folder that is not one is left out, and so is
+/// a question with nothing to show.
 fn read_hook(text: &str, changes: &mut Changes) {
     if let Some(activity) = text.strip_prefix(ACTIVITY_PREFIX).and_then(Activity::named) {
         changes.activity = Some(activity);
+    } else if let Some(asked) = read_asked(text) {
+        changes.asked = Some(asked);
     } else if let Some(id) = text
         .strip_prefix(SESSION_PREFIX)
         .filter(|id| crate::terminal::resume::is_conversation_id(id))
@@ -353,12 +440,42 @@ fn read_hook(text: &str, changes: &mut Changes) {
     }
 }
 
+/// What the hook said the agent asks, if `text` is one of its three ways of saying so.
+fn read_asked(text: &str) -> Option<Asked> {
+    if let Some(said) = text.strip_prefix(ALLOW_PREFIX) {
+        let (tool, what) = said.split_once(';').unwrap_or((said, ""));
+        return Some(Asked::Permission {
+            tool: hook_line(tool)?,
+            what: hook_line(what).unwrap_or_default(),
+        });
+    }
+    if let Some(said) = text.strip_prefix(QUESTION_PREFIX) {
+        return hook_line(said).map(Asked::Question);
+    }
+    hook_line(text.strip_prefix(NOTICE_PREFIX)?).map(Asked::Notice)
+}
+
 /// How the foreground agent was started: its arguments, and the folder it works in when it
 /// could be read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Launched {
     pub arguments: Vec<String>,
     pub folder: Option<String>,
+}
+
+/// An agent's conversation that can be opened again by its id: what `sessions::recent` keeps of
+/// it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resumable {
+    /// The conversation's id, as the agent's hook reported it.
+    pub id: String,
+    pub agent: crate::terminal::agent::Agent,
+    /// The command that resumes it from any folder (`resume::command`).
+    pub command: String,
+    /// The folder it runs in.
+    pub folder: String,
+    /// The title its program set last.
+    pub title: String,
 }
 
 /// One session's changing activity.
@@ -381,6 +498,10 @@ pub struct Session {
     conversation: Option<String>,
     conversation_folder: Option<String>,
     launched: Launched,
+    /// The conversations that left this terminal and are still to be recorded (`take_left`).
+    left: Vec<Resumable>,
+    /// What the program asks the person. Kept only while the session needs them.
+    asked: Option<Asked>,
 }
 
 impl Default for Session {
@@ -396,15 +517,30 @@ impl Default for Session {
             conversation: None,
             conversation_folder: None,
             launched: Launched::default(),
+            left: Vec::new(),
+            asked: None,
         }
     }
 }
 
 impl Session {
     /// Applies what a chunk of output reported. `watched` says whether the session is on screen;
-    /// a turn that ends while watched counts as seen. Returns whether the activity changed.
+    /// a turn that ends while watched counts as seen. Returns whether the activity or what the
+    /// session asks changed.
     pub fn observe(&mut self, changes: &Changes, watched: bool) -> bool {
+        let before = (self.activity, self.asked.clone());
+        self.observe_activity(changes, watched);
+        self.hear_asked(changes);
+        before != (self.activity, self.asked.clone())
+    }
+
+    /// Applies the conversation, title and activity `changes` reports.
+    fn observe_activity(&mut self, changes: &Changes, watched: bool) {
         if let Some(id) = &changes.conversation {
+            // An agent that starts another conversation leaves the one it had.
+            if self.conversation.as_ref() != Some(id) {
+                self.left.extend(self.resumable());
+            }
             self.conversation = Some(id.clone());
         }
         if let Some(folder) = &changes.conversation_folder {
@@ -415,14 +551,38 @@ impl Session {
             self.title.clone_from(title);
         }
         let Some(mut next) = read else {
-            return false;
+            return;
         };
         if next == Activity::Finished && watched {
             next = Activity::Idle;
         }
-        let changed = next != self.activity;
         self.activity = next;
-        changed
+    }
+
+    /// Keeps what `changes` says the program asks while the session needs the person, and
+    /// forgets it otherwise. A program without hooks asks in the notification that made it
+    /// wait.
+    fn hear_asked(&mut self, changes: &Changes) {
+        if self.activity != Activity::NeedsYou {
+            self.asked = None;
+            return;
+        }
+        let notified = || {
+            let said = changes.notification.as_deref().filter(|_| !self.hooked)?;
+            (read_notification_activity(said) == Activity::NeedsYou)
+                .then(|| one_line(said))?
+                .map(Asked::Question)
+        };
+        match changes.asked.clone().or_else(notified) {
+            Some(Asked::Notice(_)) if self.asked.is_some() => {}
+            Some(asked) => self.asked = Some(asked),
+            None => {}
+        }
+    }
+
+    /// What the program asks the person, known only while the session needs them.
+    pub fn asked(&self) -> Option<&Asked> {
+        self.asked.as_ref()
     }
 
     fn read(&mut self, changes: &Changes) -> Option<Activity> {
@@ -468,11 +628,13 @@ impl Session {
         // Leaving an agent drops its conversation. One just found keeps what its hook reported
         // first, which can come before the foreground is looked at.
         if self.agent.is_some() {
+            self.left.extend(self.resumable());
             self.conversation = None;
             self.conversation_folder = None;
             self.launched = Launched::default();
         }
         self.agent = agent;
+        self.asked = None;
         self.hooked = false;
         self.title_working = false;
         if agent.is_none() && !self.ended {
@@ -506,6 +668,34 @@ impl Session {
         )
     }
 
+    /// The conversation of the agent in the foreground, when its hook reported the id and the
+    /// folder it runs in is known.
+    pub fn resumable(&self) -> Option<Resumable> {
+        let id = self.conversation.as_ref()?;
+        let folder = self
+            .conversation_folder
+            .as_ref()
+            .or(self.launched.folder.as_ref())?;
+        Some(Resumable {
+            id: id.clone(),
+            agent: self.agent?,
+            command: self.resume_command()?.command,
+            folder: folder.clone(),
+            title: self.title.clone(),
+        })
+    }
+
+    /// The id of the conversation the hook reported last, known before its agent is.
+    pub fn conversation(&self) -> Option<&str> {
+        self.conversation.as_deref()
+    }
+
+    /// Takes the conversations that left this terminal since the last call: each as it stood
+    /// when its agent left the foreground or started another.
+    pub fn take_left(&mut self) -> Vec<Resumable> {
+        std::mem::take(&mut self.left)
+    }
+
     /// Records whether something the person started holds the foreground (`busy`). Returns whether
     /// that changed.
     pub fn holds(&mut self, busy: bool) -> bool {
@@ -520,6 +710,7 @@ impl Session {
         let waits = matches!(self.activity, Activity::Finished | Activity::NeedsYou);
         if self.ended && waits {
             self.activity = Activity::Ended;
+            self.asked = None;
             return true;
         }
         let changed = self.activity == Activity::Finished;
@@ -534,6 +725,7 @@ impl Session {
     /// was signalled, and is finished if it succeeded.
     pub fn ended(&mut self, exit: crate::terminal::exit::Exit, watched: bool) {
         self.ended = true;
+        self.asked = None;
         self.activity = match (watched, exit.code) {
             (true, _) => Activity::Ended,
             (false, Some(0)) => Activity::Finished,
@@ -575,9 +767,46 @@ mod tests {
             command(&session).as_deref(),
             Some("cd '/p/My Work' && claude --resume 3f2a-c91 --dangerously-skip-permissions")
         );
-        // Back at the shell (/exit), there is nothing to resume.
+        // Its conversation can be opened again by id, and nothing has left the terminal yet.
+        let first = session.resumable().expect("a conversation");
+        assert_eq!(
+            (first.id.as_str(), first.agent, first.folder.as_str()),
+            ("3f2a-c91", Agent::Claude, "/p/My Work")
+        );
+        assert!(session.take_left().is_empty());
+        // The agent starting another conversation (/clear) leaves the first as it stood.
+        session.observe(
+            &Changes {
+                title: Some("Draft the outreach".to_owned()),
+                ..Default::default()
+            },
+            true,
+        );
+        session.observe(
+            &signals.observe("\u{1b}]6973;northroom;session=77b0\u{7}"),
+            true,
+        );
+        let left = session.take_left();
+        assert_eq!(
+            left.iter()
+                .map(|left| (left.id.as_str(), left.title.as_str()))
+                .collect::<Vec<_>>(),
+            [("3f2a-c91", "Draft the outreach")]
+        );
+        assert_eq!(session.conversation(), Some("77b0"));
+        // Back at the shell (/exit), there is nothing to resume, and the conversation that ran
+        // last has left.
         session.runs(None, true);
         assert_eq!(command(&session), None);
+        assert_eq!(session.resumable(), None);
+        let left = session.take_left();
+        assert_eq!(
+            left.iter()
+                .map(|left| left.command.as_str())
+                .collect::<Vec<_>>(),
+            ["cd '/p/My Work' && claude --resume 77b0 --dangerously-skip-permissions"]
+        );
+        assert!(session.take_left().is_empty(), "each leaves once");
         // An agent without a hook resumes its folder's latest, from the folder it started in.
         session.runs(Some(Agent::Codex), true);
         session.launched(Launched {
@@ -775,6 +1004,125 @@ mod tests {
         assert_eq!(session.activity, Activity::Working);
         session.ended(crate::terminal::exit::Exit { code: Some(0) }, true);
         assert_eq!(session.activity.label("en"), "Ended");
+    }
+
+    #[test]
+    fn the_hook_s_question_is_read_as_one_bounded_line_of_plain_text() {
+        let mut signals = Signals::default();
+        let asked = |signals: &mut Signals, said: &str| {
+            signals
+                .observe(&format!("\u{1b}]6973;northroom;{said}\u{7}"))
+                .asked
+        };
+        let words = |asked: Option<Asked>| asked.map(|asked| asked.words("en"));
+        assert_eq!(
+            words(asked(&mut signals, "allow=Bash;rm -rf build/")).as_deref(),
+            Some("Allow Bash: rm -rf build/?")
+        );
+        // A tool that names nothing to run or touch.
+        assert_eq!(
+            words(asked(&mut signals, "allow=ExitPlanMode;")).as_deref(),
+            Some("Allow ExitPlanMode?")
+        );
+        // The JSON's escapes are read, and a line end is a space.
+        assert_eq!(
+            asked(&mut signals, r#"allow=Bash;echo \"a\\b\"\n  ls \u00e9\"#),
+            Some(Asked::Permission {
+                tool: "Bash".to_owned(),
+                what: r#"echo "a\b" ls é"#.to_owned(),
+            })
+        );
+        assert_eq!(
+            asked(&mut signals, "question=Which  one?\u{9}\u{1}This\u{fffd}"),
+            Some(Asked::Question("Which one? This".to_owned()))
+        );
+        assert_eq!(
+            asked(&mut signals, "notice=Claude needs your permission"),
+            Some(Asked::Notice("Claude needs your permission".to_owned()))
+        );
+        // Nothing to show is no question.
+        assert_eq!(asked(&mut signals, "question= \\n "), None);
+        assert_eq!(asked(&mut signals, "allow=;ls"), None);
+        // A long one is cut, whole and in each part.
+        let long = words(asked(
+            &mut signals,
+            &format!("allow=Bash;{}", "x".repeat(900)),
+        ))
+        .expect("a question");
+        assert_eq!(long.chars().count(), 160);
+        assert!(long.starts_with("Allow Bash: xxx") && long.ends_with('…'));
+    }
+
+    #[test]
+    fn a_session_keeps_what_it_asks_only_while_it_needs_the_person() {
+        use crate::terminal::agent::Agent;
+        let said = |activity: Option<Activity>, asked: Option<Asked>| Changes {
+            activity,
+            asked,
+            ..Changes::default()
+        };
+        let permission = Asked::Permission {
+            tool: "Bash".to_owned(),
+            what: "ls".to_owned(),
+        };
+        let mut session = Session::default();
+        session.runs(Some(Agent::Claude), false);
+        session.observe(&said(Some(Activity::Working), None), false);
+        // A question from a session that is not waiting is not kept.
+        assert!(!session.observe(&said(None, Some(permission.clone())), false));
+        assert_eq!(session.asked(), None);
+        // The activity and the question can come in separate pieces of output.
+        assert!(session.observe(&said(Some(Activity::NeedsYou), None), false));
+        assert!(session.observe(&said(None, Some(permission.clone())), false));
+        assert_eq!(session.asked(), Some(&permission));
+        // A later notice says less, and does not replace it; a new question does.
+        let notice = Asked::Notice("Claude needs your permission".to_owned());
+        assert!(!session.observe(&said(Some(Activity::NeedsYou), Some(notice.clone())), false));
+        assert_eq!(session.asked(), Some(&permission));
+        let question = Asked::Question("Which one?".to_owned());
+        assert!(session.observe(&said(None, Some(question.clone())), false));
+        assert_eq!(session.asked(), Some(&question));
+        // Answered: it works again and asks nothing.
+        session.observe(&said(Some(Activity::Working), None), false);
+        assert_eq!(session.asked(), None);
+        // With nothing else known, the notice is the question.
+        session.observe(&said(Some(Activity::NeedsYou), Some(notice.clone())), false);
+        assert_eq!(session.asked(), Some(&notice));
+        // The agent leaving, or the program ending, takes the question with it.
+        session.runs(None, false);
+        assert_eq!((session.activity, session.asked()), (Activity::Idle, None));
+        session.runs(Some(Agent::Claude), false);
+        session.observe(
+            &said(Some(Activity::NeedsYou), Some(question.clone())),
+            false,
+        );
+        session.ended(crate::terminal::exit::Exit { code: Some(1) }, false);
+        assert_eq!(
+            (session.activity, session.asked()),
+            (Activity::NeedsYou, None)
+        );
+    }
+
+    #[test]
+    fn a_program_without_hooks_asks_in_the_notification_that_makes_it_wait() {
+        let mut signals = Signals::default();
+        let mut session = Session::default();
+        let heard = signals.observe("\u{1b}]9;Codex wants to\u{1}run:\n  rm -rf build\u{7}");
+        assert!(session.observe(&heard, false));
+        assert_eq!(session.activity, Activity::NeedsYou);
+        assert_eq!(
+            session.asked().map(|asked| asked.words("en")).as_deref(),
+            Some("Codex wants to run: rm -rf build")
+        );
+        // A notification that the turn is done is no question.
+        session.observe(
+            &signals.observe("\u{1b}]777;notify;Turn complete\u{7}"),
+            false,
+        );
+        assert_eq!(
+            (session.activity, session.asked()),
+            (Activity::Finished, None)
+        );
     }
 
     #[test]

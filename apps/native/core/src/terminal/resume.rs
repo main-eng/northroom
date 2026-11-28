@@ -197,6 +197,53 @@ pub fn unclaimed<T>(resumes: Vec<(T, Resume)>) -> Vec<(T, Resume)> {
         .collect()
 }
 
+/// The command that starts `agent` afresh as it was `launched`: the name it was started under
+/// and the flags that carry over, without its first prompt or the conversation it opened.
+pub fn again(agent: Agent, launched: &[String]) -> String {
+    let mut words = vec![agent.started_as(launched).to_owned()];
+    words.extend(carried(&way(agent), launched));
+    words.join(" ")
+}
+
+/// The command (`again`) of the agent started most lately in any terminal since the app
+/// started.
+static STARTED_LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Records that `agent` took a terminal's foreground, started as `launched`.
+pub fn started(agent: Agent, launched: &[String]) {
+    use crate::Relock;
+    *STARTED_LAST.relock() = Some(again(agent, launched));
+}
+
+/// The command of the agent started most lately, if one was since the app started.
+pub fn started_last() -> Option<String> {
+    use crate::Relock;
+    STARTED_LAST.relock().clone()
+}
+
+/// The file in the app's own folder that keeps the last started agent's command across a quit.
+const AGAIN_FILE: &str = "last-agent-command";
+
+/// The longest kept command typed into a new terminal.
+const AGAIN_MAX_CHARS: usize = 400;
+
+/// Keeps `command` in `support` as the one a new terminal has typed for the person.
+pub fn keep_again(support: &std::path::Path, command: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(support)?;
+    std::fs::write(support.join(AGAIN_FILE), command)
+}
+
+/// The command kept in `support`, if it is one line a person could have typed: no control
+/// characters, and not too long.
+pub fn kept_again(support: &std::path::Path) -> Option<String> {
+    let kept = std::fs::read_to_string(support.join(AGAIN_FILE)).ok()?;
+    let command = kept.trim();
+    let typeable = !command.is_empty()
+        && command.chars().count() <= AGAIN_MAX_CHARS
+        && !command.chars().any(char::is_control);
+    typeable.then(|| command.to_owned())
+}
+
 /// The flags of `launched` that carry over (`Way::flags`), values quoted, in their order.
 fn carried(way: &Way, launched: &[String]) -> Vec<String> {
     let mut kept = Vec::new();
@@ -248,6 +295,46 @@ mod tests {
         command(agent, id, folder, &words(launched))
             .expect("a resume")
             .command
+    }
+
+    #[test]
+    fn an_agent_starts_again_under_its_name_with_its_flags_and_no_prompt_or_conversation() {
+        assert_eq!(
+            again(
+                Agent::Claude,
+                &words(&[
+                    "node",
+                    "/opt/bin/claude",
+                    "--resume",
+                    "3f2a-c91",
+                    "--model",
+                    "opus",
+                    "--dangerously-skip-permissions",
+                    "fix the pricing page; rm -rf ~",
+                ]),
+            ),
+            "claude --model 'opus' --dangerously-skip-permissions"
+        );
+        assert_eq!(again(Agent::Codex, &words(&["codex"])), "codex");
+    }
+
+    #[test]
+    fn the_kept_command_is_typed_only_if_it_is_one_plain_line() {
+        let support = tempfile::tempdir().expect("support");
+        assert_eq!(kept_again(support.path()), None);
+        keep_again(support.path(), "claude --model 'opus'").expect("kept");
+        assert_eq!(
+            kept_again(support.path()).as_deref(),
+            Some("claude --model 'opus'")
+        );
+        keep_again(support.path(), "claude\rrm -rf ~").expect("kept");
+        assert_eq!(
+            kept_again(support.path()),
+            None,
+            "a line break would run it"
+        );
+        keep_again(support.path(), &"x".repeat(AGAIN_MAX_CHARS + 1)).expect("kept");
+        assert_eq!(kept_again(support.path()), None);
     }
 
     #[test]

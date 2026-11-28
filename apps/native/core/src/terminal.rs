@@ -145,12 +145,31 @@ struct Shared {
     /// emulator calls its listener with its own lock held, and the listener takes `state`.
     engine: Mutex<Option<Arc<Engine>>>,
     pointer: Mutex<Pointer>,
+    runs: Runs,
+    /// Who follows the session's output from another computer (`Terminal::follow`).
+    followers: Mutex<engine::Followers>,
+}
+
+/// What a session shows: a shell on this computer, or a session on another one.
+enum Runs {
     /// What the session runs, again when Return restarts it.
-    launch: Launch,
+    Here(Launch),
+    There(Arc<dyn Far>),
+}
+
+/// A session on another computer, as the terminal showing it here uses it. Its output comes
+/// back through `Terminal::heard_far`.
+pub trait Far: Send + Sync {
+    /// Sends what was typed.
+    fn input(&self, bytes: Vec<u8>);
+    /// Asks for the session's grid to be `grid`, as the view here is.
+    fn fit(&self, grid: GridSize);
+    /// Stops following the session. It keeps running where it is.
+    fn leave(&self);
 }
 
 impl Shared {
-    fn new(launch: Launch, palette: Palette, view: ViewSize) -> Self {
+    fn new(runs: Runs, palette: Palette, view: ViewSize) -> Self {
         Self {
             state: Mutex::new(State {
                 shown: true,
@@ -171,7 +190,8 @@ impl Shared {
             }),
             engine: Mutex::new(None),
             pointer: Mutex::new(Pointer::default()),
-            launch,
+            runs,
+            followers: Mutex::new(engine::Followers::default()),
         }
     }
 
@@ -195,7 +215,7 @@ impl Shared {
             },
         };
         Arc::new(Self::new(
-            launch,
+            Runs::Here(launch),
             Palette::on([17, 17, 17], [238, 238, 240], [60, 60, 90]),
             view,
         ))
@@ -218,10 +238,44 @@ impl Shared {
         }
     }
 
-    /// Sends bytes to the process, if one is running.
+    /// Sends bytes to the process, if one is running, or to the session on another computer.
     fn send(&self, bytes: Vec<u8>) {
+        match &self.runs {
+            Runs::Here(_) => {
+                if let Some(engine) = self.engine() {
+                    engine.send(bytes);
+                }
+            }
+            Runs::There(far) => far.input(bytes),
+        }
+    }
+
+    /// Sends the emulator's own answer to a program's question. A session on another computer
+    /// is answered by the emulator there, so the one here stays silent.
+    fn reply(&self, bytes: Vec<u8>) {
+        if matches!(self.runs, Runs::Here(_)) {
+            self.send(bytes);
+        }
+    }
+
+    /// Starts what the session runs here on `engine`. A session on another computer has
+    /// nothing to start: it is running there.
+    fn spawn(self: &Arc<Self>, engine: &Engine) {
+        let Runs::Here(launch) = &self.runs else {
+            return;
+        };
+        if let Err(error) = engine.spawn(self, launch, self.text_area()) {
+            eprintln!("terminal\tthe shell did not start: {error}");
+        }
+    }
+
+    /// Fits the emulator to `area`, and the process or the session on another computer with it.
+    fn fit(&self, area: TextArea) {
         if let Some(engine) = self.engine() {
-            engine.send(bytes);
+            engine.resize(area);
+        }
+        if let Runs::There(far) = &self.runs {
+            far.fit(area.grid);
         }
     }
 
@@ -288,6 +342,10 @@ impl Shared {
             let watched = state.is_watched();
             let ran = agent.is_some_and(|agent| state.session.runs(agent, watched));
             if ran {
+                // What a new terminal has typed for the person (`resume::started_last`).
+                if let Some(Some(agent)) = agent {
+                    crate::terminal::resume::started(agent, &launched.arguments);
+                }
                 state.session.launched(launched);
             }
             let held = state.session.holds(busy);
@@ -305,6 +363,7 @@ impl Shared {
             engine.ended();
             let notice = crate::terminal::exit::ended_notice(crate::ffi::interface_language());
             engine.feed(notice.as_bytes());
+            self.followers.relock().tell(notice.as_bytes());
         }
         {
             let mut state = self.state.relock();
@@ -337,17 +396,58 @@ impl Terminal {
     /// Starts a new session of `launch` on screen in `view`, showing `shown_first` before the
     /// shell's own output (`transcript::shown`; empty for nothing).
     pub fn start(view: ViewSize, launch: Launch, palette: Palette, shown_first: &[u8]) -> Self {
-        let shared = Arc::new(Shared::new(launch, palette, view));
+        let shared = Arc::new(Shared::new(Runs::Here(launch), palette, view));
         let engine = Arc::new(Engine::new(&shared, grid_size(view)));
         *shared.engine.relock() = Some(Arc::clone(&engine));
         if !shown_first.is_empty() {
             engine.feed(shown_first);
         }
-        let area = shared.text_area();
-        if let Err(error) = engine.spawn(&shared, &shared.launch, area) {
-            eprintln!("terminal\tthe shell did not start: {error}");
-        }
+        shared.spawn(&engine);
         Self { shared }
+    }
+
+    /// Shows a session that runs on another computer in `view`: what is typed goes to `far`,
+    /// and its output comes in through `heard_far`.
+    pub fn of_far(view: ViewSize, far: Arc<dyn Far>, palette: Palette) -> Self {
+        let shared = Arc::new(Shared::new(Runs::There(Arc::clone(&far)), palette, view));
+        let grid = grid_size(view);
+        *shared.engine.relock() = Some(Arc::new(Engine::new(&shared, grid)));
+        far.fit(grid);
+        Self { shared }
+    }
+
+    /// Shows output of the session this terminal follows on another computer.
+    pub fn heard_far(&self, bytes: &[u8]) {
+        if let Some(engine) = self.shared.engine() {
+            engine.feed_on(bytes);
+        }
+        self.shared.output_changed();
+    }
+
+    /// The session this terminal follows on another computer ended there, or can no longer be
+    /// reached.
+    pub fn far_ended(&self) {
+        self.shared.exited(None);
+    }
+
+    /// Hands `sink` the bytes that bring a fresh emulator of this size to this session's
+    /// state, then its output as it is read, for another computer that shows it. `follower`
+    /// names who follows, for `unfollow`.
+    pub fn follow(&self, follower: u64, sink: engine::Sink) {
+        if let Some(engine) = self.shared.engine() {
+            engine.follow(&self.shared.followers, follower, sink);
+        }
+    }
+
+    /// This same session, to use without holding the list it is kept in.
+    pub(crate) fn same(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+        }
+    }
+
+    pub fn unfollow(&self, follower: u64) {
+        self.shared.followers.relock().leave(follower);
     }
 
     /// Shows the session in `view` again, after `detach`.
@@ -394,9 +494,7 @@ impl Terminal {
             state.cell = view.cell;
             state.text_area()
         };
-        if let Some(engine) = self.shared.engine() {
-            engine.resize(area);
-        }
+        self.shared.fit(area);
         self.shared.changed();
     }
 
@@ -414,9 +512,7 @@ impl Terminal {
             state.grid = grid;
             state.text_area()
         };
-        if let Some(engine) = self.shared.engine() {
-            engine.resize(area);
-        }
+        self.shared.fit(area);
         self.shared.changed();
     }
 
@@ -488,6 +584,13 @@ impl Terminal {
         self.shared.state.relock().session.title.clone()
     }
 
+    /// What the program asks the person, in `language` (`activity::Asked::words`). `None`
+    /// unless the session needs them and said what for.
+    pub fn question(&self, language: &str) -> Option<String> {
+        let state = self.shared.state.relock();
+        state.session.asked().map(|asked| asked.words(language))
+    }
+
     fn modes(&self) -> Modes {
         self.shared
             .engine()
@@ -518,8 +621,8 @@ impl Terminal {
             None => {
                 if let Some(engine) = self.shared.engine() {
                     engine.typed();
-                    engine.send(bytes.to_vec());
                 }
+                self.shared.send(bytes.to_vec());
                 self.shared.changed();
             }
         }
@@ -530,10 +633,7 @@ impl Terminal {
         let Some(engine) = self.shared.engine() else {
             return;
         };
-        let area = self.shared.text_area();
-        if let Err(error) = engine.spawn(&self.shared, &self.shared.launch, area) {
-            eprintln!("terminal\tthe shell did not start again: {error}");
-        }
+        self.shared.spawn(&engine);
         crate::notify_changed();
         self.shared.changed();
     }
@@ -704,6 +804,25 @@ impl Terminal {
         self.shared.state.relock().session.resume_command()
     }
 
+    /// The conversation of the agent in the foreground, when it can be resumed by its id
+    /// (`activity::Session::resumable`).
+    pub fn resumable(&self) -> Option<crate::terminal::activity::Resumable> {
+        self.shared.state.relock().session.resumable()
+    }
+
+    /// The id of the conversation the agent's hook reported last
+    /// (`activity::Session::conversation`).
+    pub fn conversation(&self) -> Option<String> {
+        let state = self.shared.state.relock();
+        state.session.conversation().map(str::to_owned)
+    }
+
+    /// Takes the conversations that left this terminal since the last call
+    /// (`activity::Session::take_left`).
+    pub fn take_left_conversations(&self) -> Vec<crate::terminal::activity::Resumable> {
+        self.shared.state.relock().session.take_left()
+    }
+
     /// The whole session's text, scrollback included, as the app quits (`transcript::keep`).
     pub fn transcript(&self) -> String {
         self.shared
@@ -783,6 +902,9 @@ impl Terminal {
         let engine = self.shared.engine.relock().take();
         if let Some(engine) = engine {
             engine.shut_down();
+        }
+        if let Runs::There(far) = &self.shared.runs {
+            far.leave();
         }
     }
 }
@@ -870,6 +992,55 @@ mod tests {
         }
     }
 
+    /// What is typed ahead for the person shows as the shell's prompt does: the shell is looked
+    /// at often while it starts, not once a second.
+    #[cfg(unix)]
+    #[test]
+    fn what_is_typed_ahead_shows_with_the_prompt() {
+        use crate::terminal::launch::{build_launch, choose_shell};
+        let environment: Vec<(String, String)> = std::env::vars().collect();
+        let launch = build_launch(
+            &std::env::temp_dir(),
+            &environment,
+            &choose_shell(None),
+            &[],
+        );
+        let palette = Palette::on([17, 17, 17], [238, 238, 240], [60, 60, 90]);
+        let view = ViewSize {
+            width: 800,
+            height: 240,
+            cell: CELL,
+        };
+        let terminal = Terminal::start(view, launch, palette, &[]);
+        terminal.type_ahead(b"northroom-typed-ahead".to_vec());
+        let started = Instant::now();
+        let mut prompt_at = None;
+        loop {
+            assert!(
+                started.elapsed() < Duration::from_secs(60),
+                "the typed-ahead input never showed"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+            let text = terminal
+                .shared
+                .engine()
+                .map(|engine| engine.everything_shown())
+                .unwrap_or_default();
+            if prompt_at.is_none() && !text.trim().is_empty() {
+                prompt_at = Some(Instant::now());
+            }
+            if text.contains("northroom-typed-ahead") {
+                break;
+            }
+        }
+        let waited = prompt_at.expect("a prompt").elapsed();
+        eprintln!(
+            "typed ahead {waited:?} after the prompt, {:?} after the start",
+            started.elapsed()
+        );
+        assert!(waited < Duration::from_millis(400), "{waited:?}");
+    }
+
     /// A session runs under the platform's terminal (a pty, or ConPTY on Windows), reads input,
     /// and its frame sets the answer as text on the theme's background.
     #[test]
@@ -893,6 +1064,144 @@ mod tests {
             }
         );
         terminal.stop();
+    }
+
+    /// An emulator the size of the tests' session that has read `output`.
+    fn emulator_showing(output: &[u8]) -> Engine {
+        let shared = Shared::for_tests();
+        let engine = Engine::new(&shared, shared.text_area().grid);
+        engine.feed(output);
+        engine
+    }
+
+    /// A fresh emulator given `engine`'s state, as another computer following it is.
+    fn following(engine: &Engine) -> Engine {
+        let follower = emulator_showing(b"left over from before\r\n");
+        // The state arrives in pieces cut anywhere, a sequence included.
+        for piece in engine.state().chunks(7) {
+            follower.feed_on(piece);
+        }
+        follower
+    }
+
+    #[test]
+    fn a_followers_emulator_is_brought_to_the_same_text_colours_cursor_and_modes() {
+        let output = [
+            // More lines than the screen's three, so some are in the scrollback.
+            "one\r\ntwo\r\n\x1b[1;31mbold red\x1b[0m plain\r\n",
+            // A line longer than the twenty columns runs on without a break.
+            "a line that is longer than the screen is wide\r\n",
+            "\x1b[38;5;208;48;2;1;2;3mcolours\x1b[0m \x1b[4:3mcurly\x1b[0m 宽 e\u{301}\r\n",
+            // Bracketed paste, mouse reports with their modern form, and a hidden steady bar.
+            "\x1b[?2004h\x1b[?1002h\x1b[?1006h\x1b[?25l\x1b[6 q",
+            "\x1b[32mprompt> \x1b[2;5H",
+        ]
+        .concat();
+        let engine = emulator_showing(output.as_bytes());
+        let follower = following(&engine);
+        assert_eq!(follower.everything_shown(), engine.everything_shown());
+        // Its own state written out again is the same, colours and cursor included.
+        assert_eq!(
+            String::from_utf8_lossy(&follower.state()),
+            String::from_utf8_lossy(&engine.state())
+        );
+        assert_eq!(follower.modes(), engine.modes());
+        assert!(follower.modes().bracketed_paste && follower.modes().sgr_mouse);
+    }
+
+    #[test]
+    fn a_follower_of_a_full_screen_program_gets_that_screen() {
+        let engine = emulator_showing(b"shell\r\n\x1b[?1049h\x1b[2;3Hprogram\x1b[?1h");
+        let follower = following(&engine);
+        assert!(follower.modes().alt_screen && follower.modes().app_cursor);
+        assert_eq!(follower.everything_shown(), engine.everything_shown());
+        assert!(follower.everything_shown().contains("program"));
+    }
+
+    /// What a far session was sent from the terminal showing it.
+    #[derive(Default)]
+    struct FarSent {
+        typed: Mutex<Vec<u8>>,
+        fitted: Mutex<Vec<GridSize>>,
+        left: Mutex<bool>,
+    }
+
+    impl Far for FarSent {
+        fn input(&self, bytes: Vec<u8>) {
+            self.typed.relock().extend(bytes);
+        }
+
+        fn fit(&self, grid: GridSize) {
+            self.fitted.relock().push(grid);
+        }
+
+        fn leave(&self) {
+            *self.left.relock() = true;
+        }
+    }
+
+    fn shown_by(terminal: &Terminal) -> String {
+        terminal
+            .shared
+            .engine()
+            .map(|engine| engine.everything_shown())
+            .unwrap_or_default()
+    }
+
+    /// A real session followed the way another computer follows it: the terminal showing it
+    /// starts from its state, shows what it writes next, and types into it.
+    #[cfg(unix)]
+    #[test]
+    fn a_terminal_following_a_session_shows_it_and_types_into_it() {
+        let (session, _) = session_answering(b"echo northroom-$((6*7))\r", "northroom-42");
+        let view = ViewSize {
+            width: 800,
+            height: 240,
+            cell: CELL,
+        };
+        let palette = Palette::on([17, 17, 17], [238, 238, 240], [60, 60, 90]);
+        let sent = Arc::new(FarSent::default());
+        let far: Arc<dyn Far> = sent.clone();
+        let terminal = Terminal::of_far(view, far, palette);
+        assert_eq!(
+            *sent.fitted.relock(),
+            [GridSize {
+                columns: 50,
+                lines: 8
+            }]
+        );
+        let showing = terminal.same();
+        session.follow(1, Box::new(move |bytes| showing.heard_far(bytes)));
+        assert_eq!(
+            shown_by(&terminal).trim_end(),
+            shown_by(&session).trim_end()
+        );
+        // What is typed here goes to the far session, not to a shell here.
+        terminal.input(b"echo northroom-$((7*7))\r");
+        let typed = std::mem::take(&mut *sent.typed.relock());
+        assert_eq!(typed, b"echo northroom-$((7*7))\r");
+        session.input(&typed);
+        let started = Instant::now();
+        while !shown_by(&terminal)
+            .lines()
+            .any(|line| line.trim() == "northroom-49")
+        {
+            assert!(
+                started.elapsed() < Duration::from_secs(30),
+                "{}",
+                shown_by(&terminal)
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(
+            shown_by(&terminal).trim_end(),
+            shown_by(&session).trim_end()
+        );
+        // Once unfollowed, nothing more arrives; stopping the terminal here leaves the session.
+        session.unfollow(1);
+        terminal.stop();
+        assert!(*sent.left.relock());
+        session.stop();
     }
 
     /// The grid changes only when the view gains or loses a whole cell.

@@ -27,7 +27,9 @@ use alacritty_terminal::vte::ansi::{
 };
 use northroom_media::{MediaError, MediaResult};
 use std::borrow::Cow;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
+
+mod replay;
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
@@ -69,6 +71,28 @@ pub(super) struct Engine {
     term: Arc<FairMutex<Term<Listener>>>,
     /// Set while a process runs; input and replies go through it.
     sender: Mutex<Option<EventLoopSender>>,
+    /// Parses output that arrives in pieces from another computer (`Engine::feed_on`), so a
+    /// sequence cut between two pieces is still read whole.
+    parser: Mutex<Processor>,
+}
+
+/// Takes each piece of a session's output as it is read.
+pub(super) type Sink = Box<dyn Fn(&[u8]) + Send>;
+
+/// Who follows a session's output from elsewhere, each with the number it follows under.
+#[derive(Default)]
+pub(super) struct Followers(Vec<(u64, Sink)>);
+
+impl Followers {
+    pub(super) fn tell(&self, bytes: &[u8]) {
+        for (_, sink) in &self.0 {
+            sink(bytes);
+        }
+    }
+
+    pub(super) fn leave(&mut self, follower: u64) {
+        self.0.retain(|(number, _)| *number != follower);
+    }
 }
 
 impl Engine {
@@ -90,7 +114,33 @@ impl Engine {
         Self {
             term: Arc::new(FairMutex::new(term)),
             sender: Mutex::new(None),
+            parser: Mutex::new(Processor::new()),
         }
+    }
+
+    /// Hands `sink` the bytes that bring a fresh emulator of this size to this one's state
+    /// (`replay`), then the session's output as it is read. Nothing is lost or
+    /// told twice between the two: holding the followers stops the reader taking more output
+    /// (`TappedPty::read`), and the emulator's fair lock is given only once the reader has
+    /// parsed all it took. Output a program holds back for one update of its screen is the
+    /// exception: it is in neither, and the program's next update shows it.
+    pub(super) fn follow(&self, followers: &Mutex<Followers>, follower: u64, sink: Sink) {
+        let mut followers = followers.relock();
+        let term = self.term.lock();
+        sink(&replay::of(&term));
+        followers.leave(follower);
+        followers.0.push((follower, sink));
+    }
+
+    /// The emulator's state as a follower is first given it.
+    #[cfg(test)]
+    pub(super) fn state(&self) -> Vec<u8> {
+        replay::of(&self.term.lock())
+    }
+
+    /// Shows `bytes` from a session on another computer, which arrive in pieces.
+    pub(super) fn feed_on(&self, bytes: &[u8]) {
+        self.parser.relock().advance(&mut *self.term.lock(), bytes);
     }
 
     /// Starts `launch` on a pseudo-terminal `area` large, read by this emulator.
@@ -425,12 +475,12 @@ impl EventListener for Listener {
             Event::Title(title) => self.0.titled(title),
             Event::ResetTitle => self.0.titled(String::new()),
             Event::ChildExit(status) => self.0.exited(status.code()),
-            Event::PtyWrite(text) => self.0.send(text.into_bytes()),
+            Event::PtyWrite(text) => self.0.reply(text.into_bytes()),
             // A program querying the background or text colour (Codex does, to adapt) gets the
             // app's colours.
             Event::ColorRequest(index, format) => {
                 let colour = self.0.queried_colour(queried(index));
-                self.0.send(
+                self.0.reply(
                     format(Rgb {
                         r: colour.r,
                         g: colour.g,
@@ -441,7 +491,7 @@ impl EventListener for Listener {
             }
             Event::TextAreaSizeRequest(format) => {
                 self.0
-                    .send(format(window_size(self.0.text_area())).into_bytes());
+                    .reply(format(window_size(self.0.text_area())).into_bytes());
             }
             Event::CursorBlinkingChange => self.0.changed(),
             _ => {}
@@ -498,7 +548,17 @@ impl TappedPty {
 impl std::io::Read for TappedPty {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         use tty::EventedReadWrite;
+        // While someone starts following the session nothing more is read, so what they are
+        // given first and what they are told after meet exactly (`Engine::follow`).
+        let shared = Arc::clone(&self.shared);
+        let followers = match shared.followers.try_lock() {
+            Ok(followers) => followers,
+            Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => return Err(std::io::ErrorKind::WouldBlock.into()),
+        };
         let count = self.inner.reader().read(buffer)?;
+        followers.tell(&buffer[..count]);
+        drop(followers);
         // Check before applying what was read, so an agent's first output is attributed to it,
         // not to the previous program.
         #[cfg(unix)]
@@ -611,9 +671,20 @@ fn process_options(launch: &Launch) -> tty::Options {
 #[cfg(unix)]
 const FOREGROUND_EVERY: Duration = Duration::from_secs(1);
 
+/// How often to check while the shell starts, so what is typed ahead for the person
+/// (`Terminal::type_ahead`) appears as the prompt does, not up to a second after it.
+#[cfg(unix)]
+const STARTING_EVERY: Duration = Duration::from_millis(10);
+
+/// The longest a shell counts as starting: one that never turns its echo off is then looked at
+/// as any other.
+#[cfg(unix)]
+const STARTING_MOST: Duration = Duration::from_secs(5);
+
 /// Checks every `FOREGROUND_EVERY` whether something the person started holds the foreground,
 /// so a silent program is still noticed; output is also checked as it is read
-/// (`TappedPty::follow_agent`). Stops once the session or its shell is gone.
+/// (`TappedPty::follow_agent`). Until the shell first waits at its prompt it checks every
+/// `STARTING_EVERY`. Stops once the session or its shell is gone.
 #[cfg(unix)]
 fn watch_foreground(pty: &tty::Pty, shared: &Arc<Shared>) {
     use std::os::fd::{AsFd, AsRawFd};
@@ -622,13 +693,23 @@ fn watch_foreground(pty: &tty::Pty, shared: &Arc<Shared>) {
     };
     let shell = i32::try_from(pty.child().id()).unwrap_or_default();
     let shared = Arc::downgrade(shared);
-    let watching = move || loop {
-        std::thread::sleep(FOREGROUND_EVERY);
-        let Some(shared) = shared.upgrade() else {
-            return;
-        };
-        if !look_at_foreground(&shared, terminal.as_raw_fd(), shell) {
-            return;
+    let watching = move || {
+        let started = Instant::now();
+        let mut starting = true;
+        loop {
+            std::thread::sleep(if starting {
+                STARTING_EVERY
+            } else {
+                FOREGROUND_EVERY
+            });
+            let Some(shared) = shared.upgrade() else {
+                return;
+            };
+            let seen = look_at_foreground(&shared, terminal.as_raw_fd(), shell);
+            if !seen.alive {
+                return;
+            }
+            starting = starting && !seen.at_prompt && started.elapsed() < STARTING_MOST;
         }
     };
     if let Err(error) = std::thread::Builder::new()
@@ -639,11 +720,20 @@ fn watch_foreground(pty: &tty::Pty, shared: &Arc<Shared>) {
     }
 }
 
-/// Records whether something the person started holds the foreground of the terminal whose
-/// app side is `terminal`, with `shell` as the shell's process. Returns whether the shell is
-/// still alive.
+/// What one look at a terminal's foreground found.
 #[cfg(unix)]
-fn look_at_foreground(shared: &Shared, terminal: std::os::fd::RawFd, shell: i32) -> bool {
+struct Seen {
+    /// Whether the shell is still alive.
+    alive: bool,
+    /// Whether the shell waits at its prompt.
+    at_prompt: bool,
+}
+
+/// Records whether something the person started holds the foreground of the terminal whose
+/// app side is `terminal`, with `shell` as the shell's process, and sends what was typed ahead
+/// once the shell waits at its prompt.
+#[cfg(unix)]
+fn look_at_foreground(shared: &Shared, terminal: std::os::fd::RawFd, shell: i32) -> Seen {
     // SAFETY: signal 0 only checks that the process exists; nothing is sent.
     let alive = unsafe { libc::kill(shell, 0) } == 0;
     let foreground = crate::terminal::agent::foreground_group(terminal);
@@ -652,7 +742,7 @@ fn look_at_foreground(shared: &Shared, terminal: std::os::fd::RawFd, shell: i32)
     // A shell reading a line at its prompt turns the terminal's echo off to draw it itself.
     let at_prompt = alive && foreground == Some(shell) && !echoes(terminal);
     shared.send_typed_ahead(at_prompt);
-    alive
+    Seen { alive, at_prompt }
 }
 
 /// Whether the terminal whose app side is `terminal` echoes what is typed, as it does until a

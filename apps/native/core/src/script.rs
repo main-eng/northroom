@@ -383,7 +383,7 @@ pub enum Step {
     /// Opens the naming dialog and leaves it open: Rename for the first file of the shown column,
     /// as a board asks for a name.
     Dialog,
-    /// Connect Phone: the pairing dialog with its QR code.
+    /// Connect Device: the pairing dialog with its QR code.
     Phone,
     /// Shows the folder as a board, a list or columns.
     View(View),

@@ -1,20 +1,32 @@
 //! The command palette (⌘K): searches the commands the current screen offers and ranks them
-//! by `score`. The drive's commands come from `drive_commands`.
+//! by `score`. The drive's commands come from `drive_commands`, and one for each running session
+//! from `session_commands`.
 
 use crate::strings::{self, key};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Command {
-    pub id: &'static str,
-    pub title: &'static str,
-    /// Group heading: "Workspace" or "Navigation".
-    pub group: &'static str,
-    pub keywords: &'static [&'static str],
+    pub id: String,
+    pub title: String,
+    /// Group heading: "Workspace" or "Sessions".
+    pub group: String,
+    /// Words that find the command besides its title.
+    pub keywords: Vec<String>,
     /// Mac-style shortcut text (`menus::Shortcut::text` of the menu item), or empty.
-    pub shortcut: &'static str,
+    pub shortcut: String,
 }
 
 impl Command {
+    fn new(id: &str, title: &str, group: &str, keywords: &[&str], shortcut: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            title: title.to_owned(),
+            group: group.to_owned(),
+            keywords: keywords.iter().map(|&keyword| keyword.to_owned()).collect(),
+            shortcut: shortcut.to_owned(),
+        }
+    }
+
     /// The group heading in capitals, as displayed.
     pub fn heading(&self) -> String {
         self.group.to_uppercase()
@@ -26,21 +38,55 @@ impl Command {
 pub fn drive_commands(language: &str) -> Vec<Command> {
     let group = strings::text(language, key::PALETTE_GROUP_WORKSPACE);
     vec![
-        Command {
-            id: "drive.toggle-hidden-files",
-            title: strings::text(language, key::MENU_HIDDEN_FILES),
+        Command::new(
+            "drive.toggle-hidden-files",
+            strings::text(language, key::MENU_HIDDEN_FILES),
             group,
-            keywords: &["dot", "dotfiles", "invisible"],
-            shortcut: "⌘⇧.",
-        },
-        Command {
-            id: "drive.change-folder",
-            title: strings::text(language, key::MENU_CHANGE_DRIVE_FOLDER),
+            &["dot", "dotfiles", "invisible"],
+            "⌘⇧.",
+        ),
+        Command::new(
+            "drive.change-folder",
+            strings::text(language, key::MENU_CHANGE_DRIVE_FOLDER),
             group,
-            keywords: &["drive", "folder", "workspace", "location", "move"],
-            shortcut: "",
-        },
+            &["drive", "folder", "workspace", "location", "move"],
+            "",
+        ),
+        Command::new(
+            "drive.start-terminal",
+            strings::text(language, key::MENU_NEW_TERMINAL),
+            group,
+            &["terminal", "shell", "agent", "session", "start"],
+            "⌘N",
+        ),
     ]
+}
+
+/// One command for each session in `running`, in the sessions menu's order, under the
+/// "Sessions" heading: titled by the session's task or terminal name and then its folder, and
+/// found by its agent and terminal name too. Its id is its sessions menu row's
+/// (`menus::session_entry_of`), and choosing it shows the session as that row does.
+pub fn session_commands(running: &[crate::sessions::Running], language: &str) -> Vec<Command> {
+    let group = strings::text(language, key::PALETTE_GROUP_SESSIONS);
+    crate::sessions::grouped(running)
+        .into_iter()
+        .flat_map(|(_, listed)| listed)
+        .map(|session| Command {
+            id: crate::menus::session_entry_of(&session.id),
+            title: format!(
+                "{} · {}",
+                crate::sessions::heading_of(session),
+                session.folder
+            ),
+            group: group.to_owned(),
+            keywords: [&session.agent, &session.name]
+                .into_iter()
+                .filter(|word| !word.is_empty())
+                .cloned()
+                .collect(),
+            shortcut: String::new(),
+        })
+        .collect()
 }
 
 /// Score for a substring match. Every stronger kind of match scores higher.
@@ -91,7 +137,7 @@ pub fn score(command: &Command, query: &str) -> u32 {
     if needle.is_empty() {
         return 1;
     }
-    let title = score_text(command.title, &needle);
+    let title = score_text(&command.title, &needle);
     if title >= SUBSTRING_SCORE {
         return title;
     }
@@ -117,7 +163,7 @@ pub fn rank(commands: &[Command], query: &str) -> Vec<Command> {
     let mut scored: Vec<(usize, u32, Command)> = commands
         .iter()
         .enumerate()
-        .map(|(order, command)| (order, score(command, query), *command))
+        .map(|(order, command)| (order, score(command, query), command.clone()))
         .filter(|(_, score, _)| *score > 0)
         .collect();
     scored.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
@@ -140,21 +186,22 @@ pub enum PaletteKey {
     Escape,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaletteAnswer {
     /// Redraw: the selection moved, or there was nothing to run.
     Redraw,
     /// Close the palette and run the command with this id.
-    Run(&'static str),
+    Run(String),
     Close,
 }
 
 /// A rectangle in points from the window's top-left corner, y downwards.
 pub type Rect = crate::board::Frame;
 
-/// An open palette: the matching commands, best first, and the selected row, which ↑ and ↓
-/// move with wraparound.
+/// An open palette: the commands offered when it opened, the matching ones, best first, and the
+/// selected row, which ↑ and ↓ move with wraparound.
 pub struct Palette {
+    offered: Vec<Command>,
     rows: Vec<Command>,
     active: usize,
     panel: Rect,
@@ -163,8 +210,9 @@ pub struct Palette {
 
 impl Palette {
     /// Opens with every offered command listed and the first selected.
-    pub fn open(offered: &[Command]) -> Self {
+    pub fn open(offered: Vec<Command>) -> Self {
         let mut palette = Self {
+            offered,
             rows: Vec::new(),
             active: 0,
             panel: Rect {
@@ -175,13 +223,13 @@ impl Palette {
             },
             frames: Vec::new(),
         };
-        palette.search(offered, "");
+        palette.search("");
         palette
     }
 
-    /// Ranks `offered` for `query` and selects the best match.
-    pub fn search(&mut self, offered: &[Command], query: &str) {
-        self.rows = rank(offered, query);
+    /// Ranks the offered commands for `query` and selects the best match.
+    pub fn search(&mut self, query: &str) {
+        self.rows = rank(&self.offered, query);
         self.active = 0;
     }
 
@@ -204,7 +252,7 @@ impl Palette {
                     .rows
                     .get(self.active)
                     .map_or(PaletteAnswer::Redraw, |command| {
-                        PaletteAnswer::Run(command.id)
+                        PaletteAnswer::Run(command.id.clone())
                     })
             }
             PaletteKey::Escape => return PaletteAnswer::Close,
@@ -259,7 +307,7 @@ impl Palette {
                     bottom += 4.0;
                 }
                 bottom += 4.0 + HEADING_HEIGHT + 4.0;
-                group = row.group;
+                group = &row.group;
             }
             self.frames.push(Rect {
                 x: 4.0,
@@ -353,7 +401,7 @@ pub struct Heading {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PartsRow {
-    pub id: &'static str,
+    pub id: String,
     /// Highlight area and hit area.
     pub frame: Place,
     pub lit: bool,
@@ -455,9 +503,9 @@ impl Palette {
                 });
                 let mut right = frame.max_x() - ROW_WORDS_IN;
                 let key = (!command.shortcut.is_empty()).then(|| {
-                    let width = key_width(command.shortcut, measure);
+                    let width = key_width(&command.shortcut, measure);
                     right -= width;
-                    let key = key_cap(command.shortcut, right, frame.y + ROW_KEY_DOWN, width);
+                    let key = key_cap(&command.shortcut, right, frame.y + ROW_KEY_DOWN, width);
                     right -= ROW_KEY_GAP;
                     key
                 });
@@ -468,7 +516,7 @@ impl Palette {
                     Token::MutedForeground
                 };
                 let title = Line::new(
-                    command.title,
+                    command.title.as_str(),
                     x,
                     frame.y + ROW_WORDS_DOWN,
                     right - x,
@@ -477,7 +525,7 @@ impl Palette {
                     color,
                 );
                 Some(PartsRow {
-                    id: command.id,
+                    id: command.id.clone(),
                     frame,
                     lit,
                     heading,
@@ -508,32 +556,22 @@ impl Palette {
 mod tests {
     use super::*;
 
-    const LIST: &[Command] = &[
-        Command {
-            id: "a",
-            title: "Open Folder",
-            group: "Workspace",
-            keywords: &["browse"],
-            shortcut: "",
-        },
-        Command {
-            id: "b",
-            title: "Show or Hide Hidden Files",
-            group: "Workspace",
-            keywords: &["dot", "dotfiles"],
-            shortcut: "⌘⇧.",
-        },
-        Command {
-            id: "c",
-            title: "cloudflare:wrangler",
-            group: "Navigation",
-            keywords: &[],
-            shortcut: "",
-        },
-    ];
+    fn list() -> Vec<Command> {
+        vec![
+            Command::new("a", "Open Folder", "Workspace", &["browse"], ""),
+            Command::new(
+                "b",
+                "Show or Hide Hidden Files",
+                "Workspace",
+                &["dot", "dotfiles"],
+                "⌘⇧.",
+            ),
+            Command::new("c", "cloudflare:wrangler", "Navigation", &[], ""),
+        ]
+    }
 
-    fn ids(query: &str) -> Vec<&'static str> {
-        rank(LIST, query)
+    fn ids(query: &str) -> Vec<String> {
+        rank(&list(), query)
             .into_iter()
             .map(|command| command.id)
             .collect()
@@ -544,14 +582,97 @@ mod tests {
         let drive = drive_commands("en");
         assert_eq!(drive[0].shortcut, crate::menus::HIDDEN_FILES_KEYS.text());
         assert_eq!(
-            crate::menus::palette_command(drive[0].id),
+            crate::menus::palette_command(&drive[0].id),
             Some(crate::menus::BarCommand::ToggleHiddenFiles)
         );
     }
 
     #[test]
+    fn starting_a_terminal_is_a_command_with_its_menu_items_key() {
+        let drive = drive_commands("en");
+        let start = drive.last().expect("the command");
+        assert_eq!(start.title, "New terminal");
+        assert_eq!(start.shortcut, crate::menus::START_TERMINAL_KEYS.text());
+        assert_eq!(
+            crate::menus::palette_command(&start.id),
+            Some(crate::menus::BarCommand::StartTerminal)
+        );
+    }
+
+    #[test]
+    fn each_running_session_is_a_command_found_by_task_folder_agent_or_name() {
+        use crate::sessions::Running;
+        use crate::terminal::activity::Activity;
+        let session =
+            |id: &str, name: &str, folder: &str, doing: &str, agent: &str, activity| Running {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                folder: folder.to_owned(),
+                doing: doing.to_owned(),
+                agent: agent.to_owned(),
+                question: String::new(),
+                activity,
+            };
+        let running = [
+            session("s", "Terminal", "Drive", "", "", Activity::Working),
+            session(
+                "o",
+                "Outreach",
+                "Sales / Q4 leads",
+                "Draft the emails",
+                "Claude Code",
+                Activity::NeedsYou,
+            ),
+        ];
+        assert!(session_commands(&[], "en").is_empty());
+        let sessions = session_commands(&running, "en");
+        // In the sessions menu's order, each titled as its row and then its folder.
+        assert_eq!(
+            sessions
+                .iter()
+                .map(|command| (command.id.as_str(), command.title.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("session:o", "Draft the emails · Sales / Q4 leads"),
+                ("session:s", "Terminal · Drive"),
+            ]
+        );
+        assert_eq!(sessions[0].heading(), "SESSIONS");
+        assert_eq!(sessions[0].keywords, ["Claude Code", "Outreach"]);
+        assert_eq!(sessions[1].keywords, ["Terminal"]);
+        assert_eq!(crate::menus::session_entry(&sessions[0].id), Some("o"));
+        let mut offered = drive_commands("en");
+        offered.extend(sessions);
+        let found = |query: &str| -> Vec<String> {
+            rank(&offered, query)
+                .into_iter()
+                .map(|command| command.id)
+                .filter(|id| id.starts_with("session:"))
+                .collect()
+        };
+        assert_eq!(found("emails"), ["session:o"], "by its task");
+        assert_eq!(found("q4"), ["session:o"], "by its folder");
+        assert_eq!(found("claude"), ["session:o"], "by its agent");
+        assert_eq!(found("outr"), ["session:o"], "by its terminal's name");
+        assert_eq!(found("drive"), ["session:s"]);
+        // Opened with sessions offered, the palette heads them after the drive's commands.
+        let mut palette = Palette::open(offered);
+        palette.layout(1280.0, 800.0);
+        assert_eq!(palette.rows().len(), 5);
+        assert!(
+            palette.row_frame(3).expect("row").1,
+            "Sessions has a heading"
+        );
+        palette.search("emails");
+        assert_eq!(
+            palette.key(PaletteKey::Return),
+            PaletteAnswer::Run("session:o".to_owned())
+        );
+    }
+
+    #[test]
     fn the_keys_move_round_the_list_and_return_runs_the_lit_command() {
-        let mut palette = Palette::open(LIST);
+        let mut palette = Palette::open(list());
         assert_eq!((palette.rows().len(), palette.active()), (3, 0));
         assert_eq!(palette.key(PaletteKey::Up), PaletteAnswer::Redraw);
         assert_eq!(
@@ -562,16 +683,19 @@ mod tests {
         palette.key(PaletteKey::Down);
         assert_eq!(palette.active(), 0);
         palette.key(PaletteKey::Down);
-        assert_eq!(palette.key(PaletteKey::Return), PaletteAnswer::Run("b"));
+        assert_eq!(
+            palette.key(PaletteKey::Return),
+            PaletteAnswer::Run("b".to_owned())
+        );
         assert_eq!(palette.key(PaletteKey::Escape), PaletteAnswer::Close);
-        palette.search(LIST, "zzz");
+        palette.search("zzz");
         assert_eq!(palette.key(PaletteKey::Down), PaletteAnswer::Redraw);
         assert_eq!(
             (palette.active(), palette.key(PaletteKey::Return)),
             (0, PaletteAnswer::Redraw),
             "nothing to run"
         );
-        palette.search(LIST, "");
+        palette.search("");
         assert!(palette.point(2) && !palette.point(2) && !palette.point(7));
         assert_eq!(palette.active(), 2);
     }
@@ -585,7 +709,7 @@ mod tests {
 
     #[test]
     fn the_palette_sits_18_percent_down_with_each_group_under_its_heading() {
-        let mut palette = Palette::open(LIST);
+        let mut palette = Palette::open(list());
         palette.layout(1280.0, 800.0);
         assert_eq!(
             palette.panel(),
@@ -684,7 +808,7 @@ mod tests {
             ),
             (true, 822.0 - 12.0 - 429.0, Token::MutedForeground)
         );
-        palette.search(LIST, "zzz");
+        palette.search("zzz");
         palette.layout(1280.0, 800.0);
         let parts = palette.parts("en", &mut |text, _| text.chars().count() as f64 * 7.0);
         // "No matching commands" is 20 characters, centred 28 pt below the divider.
@@ -734,7 +858,7 @@ mod tests {
             "18 letters skipped"
         );
         assert_eq!(ids("dot"), ["b"], "a keyword finds what its title does not");
-        assert_eq!(score(&LIST[1], "otf"), 200, "inside a keyword");
+        assert_eq!(score(&list()[1], "otf"), 200, "inside a keyword");
         assert_eq!(
             ids("o"),
             ["a", "b", "c"],

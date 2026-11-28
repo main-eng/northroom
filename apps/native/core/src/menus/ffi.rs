@@ -289,6 +289,7 @@ fn run_bar(command: BarCommand) -> Effect {
             nr_tab_open();
             Effect::Changed
         }
+        BarCommand::StartTerminal => start_terminal(),
         // The last tab closes the window instead.
         BarCommand::CloseTab if nr_tab_closable(nr_tabs_active()) => {
             nr_tab_close(nr_tabs_active());
@@ -317,9 +318,74 @@ fn run_bar(command: BarCommand) -> Effect {
 
 // MARK: The sessions' menu
 
-/// The title bar sessions button's menu for the current sessions (`menus::sessions_menu`).
+/// Starts a terminal in the folder on screen (`Columns::start_terminal`), with the command of
+/// the agent the person started last typed at its prompt, not run: Return starts it. Nothing
+/// happens before a drive is open.
+fn start_terminal() -> Effect {
+    let started = with_columns(|columns| columns.start_terminal(language()));
+    if let Some(Ok(id)) = &started {
+        if let Some(command) = crate::ffi::agent_started_last() {
+            crate::ffi::type_at_start(id, command.into_bytes());
+        }
+    }
+    changed(started.map(|made| made.map(|_| ())))
+}
+
+/// The title bar sessions button's menu for the current sessions and the recent conversations
+/// that are not running (`menus::sessions_menu`).
 pub fn menu_sessions() -> menus::Menu {
-    menus::sessions_menu(&crate::sessions::ffi::running_now(), language())
+    let mut menu = menus::sessions_menu(
+        &crate::sessions::ffi::running_now(),
+        &crate::sessions::recent::ffi::recent_rows(),
+        language(),
+    );
+    menus::far::add(&mut menu, &crate::remote::app::computers(), language());
+    menu
+}
+
+/// Runs sessions menu entry `id` when it is of a paired computer (`menus::far`): starts a
+/// terminal there, which opens here once that computer says which it is, or opens one of its
+/// sessions here. `None` for any other entry.
+fn run_far(id: &str) -> Option<Effect> {
+    match menus::far::chosen(id)? {
+        menus::far::Chosen::Start(computer) => crate::remote::app::start_far(computer),
+        menus::far::Chosen::Session(computer, session) => {
+            crate::ffi::show_far_session(computer, session);
+        }
+    }
+    Some(Effect::Changed)
+}
+
+/// Runs sessions menu entry `id` when it is a recent conversation's row or its X
+/// (`menus::recent_entry`, `menus::forget_recent_entry`); `None` for any other entry.
+fn run_recent(id: &str) -> Option<Effect> {
+    if let Some(conversation) = menus::recent_entry(id) {
+        return Some(resume_recent(conversation));
+    }
+    let forgotten = menus::forget_recent_entry(id)?;
+    crate::sessions::recent::ffi::forget_recent(forgotten);
+    Some(Effect::Changed)
+}
+
+/// Opens recent conversation `id` again: a new terminal in the conversation's folder, or at the
+/// top of the drive when that folder is outside the drive or gone, with the command that resumes
+/// it typed and run at its prompt. Nothing happens for a conversation the list no longer holds.
+fn resume_recent(id: &str) -> Effect {
+    let Some(conversation) = crate::sessions::recent::ffi::recent_conversation(id) else {
+        return Effect::Nothing;
+    };
+    let started = with_columns(|columns| {
+        let location = columns
+            .workspace()
+            .location_at(std::path::Path::new(&conversation.folder))
+            .unwrap_or(crate::workspace::Location::ROOT);
+        columns.start_terminal_in(&location, language())
+    });
+    // The terminal's session starts when its tab is drawn, after this.
+    if let Some(Ok(terminal)) = &started {
+        crate::ffi::type_at_start(terminal, format!("{}\r", conversation.command).into_bytes());
+    }
+    changed(started.map(|made| made.map(|_| ())))
 }
 
 /// Shows terminal file `id`'s session in its own tab (`Columns::show_in_tab`).
@@ -356,7 +422,7 @@ fn show_next_session() -> Effect {
 }
 
 /// Runs a command palette command (`nr_palette_key`'s `run`), with the same effect as its menu
-/// item.
+/// item. A running session's command shows that session, as its row in the sessions menu does.
 ///
 /// # Safety
 /// `id` must point to a NUL-terminated string.
@@ -364,7 +430,10 @@ fn show_next_session() -> Effect {
 pub unsafe extern "C" fn nr_palette_run(id: *const c_char) -> NrMenuEffect {
     // SAFETY: the caller passes a NUL-terminated string.
     let id = unsafe { text_of(id) };
-    hand_over(menus::palette_command(&id).map_or(Effect::Nothing, run_bar))
+    hand_over(match menus::session_entry(&id) {
+        Some(file) => show_session(file),
+        None => menus::palette_command(&id).map_or(Effect::Nothing, run_bar),
+    })
 }
 
 // MARK: A folder's menus
@@ -625,7 +694,9 @@ pub unsafe extern "C" fn nr_menu_run(which: NrMenu, id: *const c_char) -> NrMenu
         NrMenu::Sessions => match (menus::session_entry(&id), menus::end_session_entry(&id)) {
             (Some(file), _) => show_session(file),
             (_, Some(file)) => end_session_or_ask(file),
-            _ => menus::bar_command(&id).map_or(Effect::Nothing, run_bar),
+            _ => run_recent(&id)
+                .or_else(|| run_far(&id))
+                .unwrap_or_else(|| menus::bar_command(&id).map_or(Effect::Nothing, run_bar)),
         },
         NrMenu::PageBlock => menus::page_block_command(&id).map_or(Effect::Nothing, |command| {
             crate::ffi::run_page_block_menu(command);
@@ -1021,12 +1092,63 @@ pub extern "C" fn nr_prompt_unlock() -> NrMenuEffect {
 /// Shows a phone the pairing link as a QR code (`menus::pair_prompt`), or says why the link
 /// could not start.
 fn connect_phone() -> Effect {
-    let code = crate::remote::app::invite()
-        .and_then(|link| crate::remote::code::modules(&link).ok_or_else(String::new));
-    match code {
-        Ok(code) => ask(Ask::Pair, menus::pair_prompt(code, language())),
+    let shown = crate::remote::app::invite().and_then(|link| {
+        let code = crate::remote::code::modules(&link).ok_or_else(String::new)?;
+        Ok((link, code))
+    });
+    match shown {
+        Ok((link, code)) => {
+            *PAIR_LINK.relock() = link;
+            ask(Ask::Pair, menus::pair_prompt(code, language()))
+        }
         Err(why) => Effect::Toast(menus::pair_failed(language()), why),
     }
+}
+
+/// The pairing link the dialog last showed as a code.
+static PAIR_LINK: Mutex<String> = Mutex::new(String::new());
+
+/// The pairing link the open dialog shows, for the shell to copy when its code is pressed:
+/// another computer has no camera to read the code with, so it is given the link instead.
+#[no_mangle]
+pub extern "C" fn nr_pair_link() -> NrText {
+    static LENT: Mutex<String> = Mutex::new(String::new());
+    NrText::lend_into(&LENT, PAIR_LINK.relock().clone())
+}
+
+/// The notice once the shell has copied the pairing link, which says where it goes.
+#[no_mangle]
+pub extern "C" fn nr_pair_copied() -> NrMenuEffect {
+    hand_over(Effect::Toast(
+        menus::say(language(), crate::strings::key::DIALOG_PAIR_COPIED),
+        menus::say(language(), crate::strings::key::DIALOG_PAIR_COPIED_DETAIL).to_owned(),
+    ))
+}
+
+/// Pairs this computer with the one whose pairing link was pasted into the dialog. `Changed`
+/// when the text was such a link, after which the shell closes the dialog; otherwise a notice
+/// that says where a link comes from. This computer's own link is neither.
+///
+/// # Safety
+/// `pasted` must point to a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn nr_pair_paste(pasted: *const c_char) -> NrMenuEffect {
+    // SAFETY: the caller passes a NUL-terminated string.
+    let pasted = unsafe { text_of(pasted) };
+    if pasted.trim() == PAIR_LINK.relock().as_str() {
+        return hand_over(Effect::Nothing);
+    }
+    if crate::remote::app::pair_with(&pasted) {
+        return hand_over(Effect::Changed);
+    }
+    hand_over(Effect::Toast(
+        menus::say(language(), crate::strings::key::DIALOG_PAIR_NOT_A_LINK),
+        menus::say(
+            language(),
+            crate::strings::key::DIALOG_PAIR_NOT_A_LINK_DETAIL,
+        )
+        .to_owned(),
+    ))
 }
 
 /// Asks before forgetting the paired phone with `key` (`menus::forget_phone_prompt`). Nothing

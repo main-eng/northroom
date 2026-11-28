@@ -4,7 +4,9 @@
 //! naming prompt has a close mark in its corner; a `destructive` alert uses the warning colour
 //! for its action. The pairing code is drawn alone instead: a light card of round dots with a
 //! line around it that runs down while the code can be used. It closes by Escape or a press
-//! outside it, and by itself once the code is used or stale (`nr_pair_left`).
+//! outside it, and by itself once the code is used or stale (`nr_pair_left`). A press on the
+//! code, or Copy, copies the pairing link for another computer; Paste pairs with the computer
+//! whose link is on the clipboard.
 //!
 //! The core owns the layout (`menus::ffi::prompt_layout`), keys and focus (`nr_dialog_key`,
 //! `nr_dialog_focus`), whether the action is available (`nr_prompt_takes`) and what answering
@@ -30,8 +32,8 @@ use northroom_core::dialog::layout::{Button, CodePlace, CornerMark, Foot, Prompt
 use northroom_core::ffi::{NrKeyPress, NrMotion};
 use northroom_core::menus::ffi::{
     NrDialog, NrDialogIntent, NrEffect, NrMenuEffect, nr_dialog_close, nr_dialog_focus,
-    nr_dialog_key, nr_dialog_open, nr_pair_left, nr_prompt, nr_prompt_answer, nr_prompt_takes,
-    prompt_layout,
+    nr_dialog_key, nr_dialog_open, nr_pair_copied, nr_pair_left, nr_pair_link, nr_pair_paste,
+    nr_prompt, nr_prompt_answer, nr_prompt_takes, prompt_layout,
 };
 use std::rc::Rc;
 use std::time::Duration;
@@ -57,6 +59,8 @@ enum Part {
     Close,
     /// Anywhere off a code's card.
     Outside,
+    /// A code's card: a press copies the pairing link.
+    Card,
 }
 
 /// How often the line around a code is drawn again, and the code checked for being used.
@@ -86,6 +90,7 @@ impl Open {
             Part::Action => self.foot().map(|foot| foot.action.frame.bounds()),
             Part::Close => self.placed.close.map(|close| close.bounds()),
             Part::Outside => None,
+            Part::Card => self.placed.code.as_ref().map(|code| code.ground.bounds()),
         }
     }
 
@@ -107,9 +112,15 @@ impl Open {
     }
 
     fn part_at(&self, at: Point<Pixels>) -> Option<Part> {
-        [Part::Cancel, Part::Action, Part::Close, Part::Outside]
-            .into_iter()
-            .find(|&part| self.is_on(part, at))
+        [
+            Part::Cancel,
+            Part::Action,
+            Part::Close,
+            Part::Card,
+            Part::Outside,
+        ]
+        .into_iter()
+        .find(|&part| self.is_on(part, at))
     }
 
     fn typed(&self, cx: &App) -> String {
@@ -274,6 +285,9 @@ impl Dialogs {
         }
         // Keys the dialog ignores still do not reach anything underneath.
         cx.stop_propagation();
+        if self.code_key(&event.keystroke, window, cx) {
+            return;
+        }
         let press = crate::keys::press(&event.keystroke);
         #[cfg(not(target_os = "macos"))]
         if self.alert.is_some() {
@@ -358,7 +372,63 @@ impl Dialogs {
         if !open.is_on(part, at) {
             return;
         }
+        if part == Part::Card {
+            self.copy_code(window, cx);
+            return;
+        }
         self.finish(part == Part::Action, window, cx);
+    }
+
+    /// Copies the pairing link the code carries, for another computer, which cannot read a
+    /// code, and shows the notice that says where it goes.
+    fn copy_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(open) = &self.open else {
+            return;
+        };
+        crate::platform::write_clipboard(&text(&nr_pair_link()), cx);
+        let (done, copied) = (open.done.clone(), nr_pair_copied());
+        window.defer(cx, move |window, cx| done(copied, window, cx));
+    }
+
+    /// Pairs with the computer whose pairing link is on the clipboard, and closes the dialog;
+    /// with anything else there, shows the notice that says what to paste.
+    fn paste_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(open) = &self.open else {
+            return;
+        };
+        let pasted = c(&crate::platform::read_clipboard(cx).unwrap_or_default());
+        // SAFETY: a NUL-terminated string.
+        let answer = unsafe { nr_pair_paste(pasted.as_ptr()) };
+        match answer.effect {
+            NrEffect::Changed => self.finish(false, window, cx),
+            NrEffect::Nothing => {}
+            _ => {
+                let done = open.done.clone();
+                window.defer(cx, move |window, cx| done(answer, window, cx));
+            }
+        }
+    }
+
+    /// Handles Copy and Paste on a code: true when `keystroke` was one of them.
+    fn code_key(
+        &mut self,
+        keystroke: &gpui::Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let on_code = self
+            .open
+            .as_ref()
+            .is_some_and(|open| open.placed.code.is_some());
+        if !on_code || !keystroke.modifiers.secondary(cx) {
+            return false;
+        }
+        match keystroke.key.as_str() {
+            "c" => self.copy_code(window, cx),
+            "v" => self.paste_code(window, cx),
+            _ => return false,
+        }
+        true
     }
 
     // MARK: Drawing

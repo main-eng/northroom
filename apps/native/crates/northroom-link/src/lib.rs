@@ -11,7 +11,7 @@ mod client;
 mod host;
 mod wire;
 
-pub use client::Client;
+pub use client::{Client, Heard, Sending};
 pub use host::{Event, Host};
 
 use iroh::endpoint::presets;

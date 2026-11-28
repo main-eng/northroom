@@ -6,9 +6,9 @@ use crate::deck::{Deck, Kind};
 use crate::remote::devices::{Devices, Key, FILE};
 use crate::remote::pages::{Drawn, Pages};
 use crate::remote::pairing::Invite;
-use crate::remote::protocol::{Item, Listing, Piece, Pressed};
+use crate::remote::protocol::{Item, Listing, Piece, Pressed, Tell};
 use crate::remote::screen::Screen;
-use crate::remote::service::{Desk, Out, Service};
+use crate::remote::service::{Desk, Out, Service, Sink};
 use crate::remote::tables::{Head, Row};
 use crate::sessions::Running;
 use crate::sheets::layout::Table;
@@ -197,6 +197,31 @@ impl Desk for AppDesk {
         }
     }
 
+    fn follow(&self, session: &str, follower: u64, sink: Sink) -> bool {
+        // The session is taken out of the list first: following waits for its reader.
+        let terminal = crate::app()
+            .sessions
+            .relock()
+            .get(session)
+            .map(crate::terminal::Terminal::same);
+        terminal.is_some_and(|terminal| {
+            terminal.follow(follower, sink);
+            true
+        })
+    }
+
+    fn unfollow(&self, session: &str, follower: u64) {
+        if let Some(terminal) = crate::app().sessions.relock().get(session) {
+            terminal.unfollow(follower);
+        }
+    }
+
+    fn input(&self, session: &str, bytes: &[u8]) {
+        if let Some(terminal) = crate::app().sessions.relock().get(session) {
+            terminal.input(bytes);
+        }
+    }
+
     fn folder(&self, folder: Option<&str>) -> Option<Listing> {
         let location = crate::workspace::Location {
             folder_id: folder.map(str::to_owned),
@@ -337,7 +362,16 @@ impl Link {
         let (events, happened) = std::sync::mpsc::channel();
         let relayed = relays != Relays::None;
         let host = Arc::new(Host::start(secret, relays, events)?);
-        let service = Arc::new(Mutex::new(Service::new(name.clone(), devices)));
+        let mut service = Service::new(name.clone(), devices);
+        // A followed session's output goes out as it is written, not with the answers. The
+        // hold on the host is weak, so it does not keep the link alive.
+        let carrying = Arc::downgrade(&host);
+        service.carried_by(Arc::new(move |link, tell: Tell| {
+            if let Some(host) = carrying.upgrade() {
+                host.send(link, tell.encoded());
+            }
+        }));
+        let service = Arc::new(Mutex::new(service));
         let (serving, served) = (Arc::clone(&host), Arc::clone(&service));
         // The thread is left to itself: it ends within `CHANGES_EVERY` of this link's drop.
         std::thread::Builder::new()
@@ -485,7 +519,7 @@ fn serve(host: &Arc<Host>, service: &Mutex<Service>, happened: &Receiver<Event>,
 }
 
 /// This computer's name as the person knows it, without a network suffix.
-fn computer_name() -> String {
+pub(crate) fn computer_name() -> String {
     let name = system_name().unwrap_or_default();
     let short = name.split('.').next().unwrap_or_default().trim();
     if short.is_empty() {
@@ -513,4 +547,4 @@ fn system_name() -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

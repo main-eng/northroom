@@ -621,7 +621,7 @@ fn save_menus_when_drawn(runner: &mut Runner, prefix: &str) {
     }
 }
 
-/// Opens Connect Phone's dialog, for the shell to show when the link started.
+/// Opens Connect Device's dialog, for the shell to show when the link started.
 fn pairing_dialog() -> Shell {
     if crate::menus::ffi::prompt_pairing() {
         Shell::Dialog

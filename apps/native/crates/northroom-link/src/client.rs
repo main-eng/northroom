@@ -1,12 +1,36 @@
-//! The dialling end: what a phone does, written here for the checks and for anyone building a
-//! device of their own. A client holds one link to one host.
+//! The dialling end: what a phone does, and what one computer does to reach another. A client
+//! holds one link to one host.
 
 use crate::{dialled, endpoint, error, runtime, wire, Address, Error, Relays, Secret, PROTOCOL};
 use iroh::endpoint::{RecvStream, SendStream};
 use iroh::Endpoint;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+/// How long dialling a host may take before it counts as out of reach.
+const DIAL_MOST: Duration = Duration::from_secs(15);
+
+/// What a wait for the host's next message ended with.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Heard {
+    Message(Vec<u8>),
+    /// Nothing came in the time waited.
+    Quiet,
+    /// The link has closed; nothing more will come.
+    Closed,
+}
+
+/// Sends messages over a client's link from any thread, for as long as the link is open.
+#[derive(Clone)]
+pub struct Sending(UnboundedSender<Vec<u8>>);
+
+impl Sending {
+    /// Sends `bytes` as one message. Nothing happens once the link has closed.
+    pub fn send(&self, bytes: Vec<u8>) {
+        let _ = self.0.send(bytes);
+    }
+}
 
 /// An open link to a host. Dropping it closes the link.
 pub struct Client {
@@ -44,6 +68,20 @@ impl Client {
     /// link has closed.
     pub fn receive(&self, most: Duration) -> Option<Vec<u8>> {
         self.incoming.recv_timeout(most).ok()
+    }
+
+    /// The host's next message, waiting up to `most`, or why there is none.
+    pub fn hear(&self, most: Duration) -> Heard {
+        match self.incoming.recv_timeout(most) {
+            Ok(bytes) => Heard::Message(bytes),
+            Err(RecvTimeoutError::Timeout) => Heard::Quiet,
+            Err(RecvTimeoutError::Disconnected) => Heard::Closed,
+        }
+    }
+
+    /// A way to send over this link from other threads.
+    pub fn sending(&self) -> Option<Sending> {
+        self.outgoing.clone().map(Sending)
     }
 }
 
@@ -91,11 +129,16 @@ async fn open(
     address: &Address,
 ) -> Result<(Endpoint, SendStream, RecvStream), Error> {
     let endpoint = endpoint(secret, relays, false).await?;
-    let connection = endpoint
-        .connect(dialled(address)?, PROTOCOL)
+    let dial = async {
+        let connection = endpoint
+            .connect(dialled(address)?, PROTOCOL)
+            .await
+            .map_err(error)?;
+        connection.open_bi().await.map_err(error)
+    };
+    let (send, receive) = tokio::time::timeout(DIAL_MOST, dial)
         .await
-        .map_err(error)?;
-    let (send, receive) = connection.open_bi().await.map_err(error)?;
+        .map_err(|_| Error("the host did not answer".to_owned()))??;
     Ok((endpoint, send, receive))
 }
 

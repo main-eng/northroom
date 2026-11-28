@@ -13,7 +13,7 @@ use crate::workspace::{Entry, EntryKind};
 use serde::{Deserialize, Serialize};
 
 /// What a device asks.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Ask {
     /// Pair this device, proving it read the code this computer showed. `name` is what the
@@ -79,6 +79,25 @@ pub enum Ask {
     /// Move through `session`'s earlier output by `lines`, towards older output when positive,
     /// as the wheel does on this computer.
     Scroll { session: String, lines: i32 },
+    /// Follow `session` as another computer's own terminal shows it: fit it to `columns` by
+    /// `lines`, then send its output as `output`, first what brings a fresh terminal of that
+    /// size to its state now and from then on each piece as the session writes it. A device
+    /// may follow several sessions at once.
+    Follow {
+        session: String,
+        columns: usize,
+        lines: usize,
+    },
+    /// Fit a followed `session` to `columns` by `lines`, as the terminal showing it now is.
+    Fit {
+        session: String,
+        columns: usize,
+        lines: usize,
+    },
+    /// Stop following `session`. It keeps running.
+    Unfollow { session: String },
+    /// Send `session` the bytes `data` carries as base64, as if typed at its terminal.
+    Input { session: String, data: String },
 }
 
 /// Why a device was turned away.
@@ -199,6 +218,8 @@ pub enum Tell {
     Screen { session: String, screen: Screen },
     /// The watched session has ended or its terminal is gone.
     Gone { session: String },
+    /// Output of a followed session, as base64: the bytes its terminal reads, in order.
+    Output { session: String, data: String },
     /// The session a `start` made, already in the `sessions` sent just before.
     Started { session: String },
     /// What is in `folder`, or at the top of the drive when it names none.
@@ -347,6 +368,7 @@ mod tests {
             folder: "Work".to_owned(),
             doing: "Fixing the tests".to_owned(),
             agent: "Claude Code".to_owned(),
+            question: String::new(),
             activity: Activity::Starting,
         };
         assert_eq!(Session::of(&running).activity, "idle");

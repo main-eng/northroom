@@ -58,6 +58,10 @@ reason it was rejected.
 - No built-in assistant, skills, models or MCP server.
 - A `.nterm` file names nothing to run. Opening a received one starts only the person's shell.
 - Never pass on the app's environment (on Windows the emulator library adds the app's variables the fresh environment does not name, as other terminals do), read agent credentials, edit agent settings, or write into PATH or folders.
+- ⌘N starts a terminal in the folder on screen and opens it in a tab. The command of the agent the person started last (its name and the flags that carry over, never its prompt) is typed at the prompt and not run. Nothing about it is kept in the `.nterm` file, and there is no list of agents to pick from.
+- The sessions menu is the one list of sessions: the entry that starts a terminal, the running ones by what they need, then Recent, the last conversations that are not running. Choosing a recent one opens a terminal in its folder and resumes it. The command palette finds a running session by its task or folder.
+- A session that needs the person shows what it asks on its row, and a highlighted row shows the terminal's last lines beside the menu. Northroom never answers an agent for the person.
+- Known limits: Recent lists only conversations whose id the agent reported, which today is Claude Code through the plugin. What a session asks is known from the plugin or a notification; other agents show their folder as before.
 - Known limits: Claude Code older than 2.1.280 ignores the plugin. Codex shows approvals only through OSC 9. Codex can't be hooked without editing its config (no environment-only hooks or `notify`), so what it is doing is read from its title and notifications only. Agents inside tmux or ssh aren't seen.
 - **Why:** people already pay for their agent. The terminal works for every vendor; not every agent speaks MCP. Bundled models freeze at release.
 - **Rejected:**
@@ -66,6 +70,9 @@ reason it was rejected.
   - Skills or instruction files in folders: copies that go stale.
   - Northroom-only command-line tools or a local MCP server: they drift from the files.
   - Split panes, side panels or session sidebars: layouts to maintain, and they hide waiting sessions.
+  - A box that takes the task and starts the agent with it: a chat window and a choice of agent under another name.
+  - Allow and Deny buttons on a waiting row: keys pressed in the person's agent for a command they have not read, and each agent draws its questions differently.
+  - Keeping every ended terminal as a file named by its task: folders fill with terminal files.
 
 ## ADR-0006: Production is a static site and GitHub releases
 
@@ -204,6 +211,6 @@ reason it was rejected.
 
 ## Open
 
-- **Phone link (ADR-0016).** Built: pairing by QR code, the sessions list (shells at their prompt too), a full-screen terminal typed into directly with scrolling, starting a terminal, browsing the drive, and opening files (pages, tables, pictures, film and sound, pages and text, SVG and HTML). Checked end to end in the simulator against the running app, and by the owner on an iPhone on the home network. Not yet tried: a connection from outside the home network, and on any phone the SVG and HTML view and the "can't play" message. Northroom > Forget Phone lists the paired phones and forgets one once confirmed. Still to build: selecting and finding text in a document; a password prompt for a locked PDF; film kinds the phone's system can't play (Matroska, WebM, Ogg, Opus) and playing a film before it has all arrived; 3D models. To decide: which relays ship as the default. iroh's public relays are not meant for production, and a relay of our own is a server (ADR-0006).
+- **Phone link (ADR-0016).** Built: pairing by QR code, the sessions list (shells at their prompt too), a full-screen terminal typed into directly with scrolling, starting a terminal, browsing the drive, and opening files (pages, tables, pictures, film and sound, pages and text, SVG and HTML). Checked end to end in the simulator against the running app, and by the owner on an iPhone on the home network. Not yet tried: a connection from outside the home network, and on any phone the SVG and HTML view and the "can't play" message. Northroom > Forget Device lists what is paired and forgets one once confirmed. One computer also reaches another (2026-11-27): Connect Device… on each, the link copied from one and pasted into the other, then the other's sessions are in the sessions menu and open as terminals that follow them byte for byte (`remote::reach`, `docs/phone-link.md`). Checked with two copies of the app on one Mac; not yet tried with a Windows computer as either side, or across networks. Left for it: the other computer's folders and files in the window, ending a far session from here, its agent and activity on the tab, and a bound on output queued for a slow link. Still to build: selecting and finding text in a document; a password prompt for a locked PDF; film kinds the phone's system can't play (Matroska, WebM, Ogg, Opus) and playing a film before it has all arrived; 3D models. To decide: which relays ship as the default. iroh's public relays are not meant for production, and a relay of our own is a server (ADR-0006).
 - **Cloud cleanup.** Done on 2026-11-21 except the download Worker (`northroom-server`), its container and its one secret, which go once GitHub releases serve downloads. Then apply `northroom-infra`; its first apply turns on the www redirect, firewall and rate limit.
 - **Decide what makes Northroom 10x better** before the next release.

@@ -13,28 +13,47 @@ use crate::Relock;
 /// `sessions::device_activity`).
 type Listed = fn(Activity, bool, bool) -> Option<Activity>;
 
-/// What every session `listed` keeps is doing, the title its program set and the agent running
-/// in it, by its terminal file's id.
-fn session_states(listed: Listed) -> Vec<(String, Activity, String, &'static str)> {
+/// A session as its terminal reports it, before the drive says where its file is.
+struct State {
+    /// The terminal file's id.
+    id: String,
+    /// What it is listed as doing.
+    activity: Activity,
+    /// The title its program set.
+    title: String,
+    /// The agent running in it (`Agent::label`), or empty.
+    agent: &'static str,
+    /// What it asks the person (`Terminal::question`), or empty.
+    question: String,
+}
+
+/// Every session `listed` keeps.
+fn session_states(listed: Listed) -> Vec<State> {
+    let language = crate::ffi::interface_language();
     crate::app()
         .sessions
         .relock()
         .iter()
         .filter_map(|(id, session)| {
-            let listed = listed(
+            let activity = listed(
                 session.activity(),
                 session.agent().is_some(),
                 session.busy(),
             )?;
-            let agent = session.agent().map_or("", |agent| agent.label());
-            Some((id.clone(), listed, session.title(), agent))
+            Some(State {
+                id: id.clone(),
+                activity,
+                title: session.title(),
+                agent: session.agent().map_or("", |agent| agent.label()),
+                question: session.question(language).unwrap_or_default(),
+            })
         })
         .collect()
 }
 
 /// A file's folder path as the sessions list writes it, joined with " / ", or the drive's name
 /// for a file at the top of the drive.
-fn folder_words(folders: &[crate::workspace::Crumb]) -> String {
+pub(crate) fn folder_words(folders: &[crate::workspace::Crumb]) -> String {
     let below: Vec<&str> = folders
         .iter()
         .skip(1)
@@ -46,23 +65,18 @@ fn folder_words(folders: &[crate::workspace::Crumb]) -> String {
     }
 }
 
-/// The session of terminal file `id` as the list shows it. `None` when the file is not in the
-/// drive, for example after it was trashed while its session ran.
-fn placed_session(
-    workspace: &mut Workspace,
-    id: String,
-    activity: Activity,
-    title: &str,
-    agent: &str,
-) -> Option<Running> {
-    let placed = workspace.place_of(&id).ok()?;
+/// The session `state` as the list shows it. `None` when its file is not in the drive, for
+/// example after it was trashed while its session ran.
+fn placed_session(workspace: &mut Workspace, state: State) -> Option<Running> {
+    let placed = workspace.place_of(&state.id).ok()?;
     Some(Running {
-        id,
+        id: state.id,
         name: placed.title,
         folder: folder_words(&placed.folders),
-        doing: sessions::doing_of(title),
-        agent: agent.to_owned(),
-        activity,
+        doing: sessions::doing_of(&state.title),
+        agent: state.agent.to_owned(),
+        question: state.question,
+        activity: state.activity,
     })
 }
 
@@ -84,9 +98,7 @@ fn running_listed(listed: Listed) -> Vec<Running> {
         let workspace = columns.workspace();
         states
             .into_iter()
-            .filter_map(|(id, activity, title, agent)| {
-                placed_session(workspace, id, activity, &title, agent)
-            })
+            .filter_map(|state| placed_session(workspace, state))
             .collect()
     })
     .unwrap_or_default()
@@ -112,6 +124,7 @@ pub fn tab_task(id: &str, name: &str) -> Option<String> {
         folder: String::new(),
         doing: sessions::doing_of(&title),
         agent: agent.to_owned(),
+        question: String::new(),
         activity: Activity::Working,
     };
     sessions::task_of(&session).map(|task| sessions::shortened(task, TAB_TASK_CHARACTERS))
@@ -136,13 +149,14 @@ pub struct SessionsButton {
 fn counted_sessions() -> Vec<Running> {
     session_states(sessions::listed_activity)
         .into_iter()
-        .map(|(id, activity, _, _)| Running {
-            id,
+        .map(|state| Running {
+            id: state.id,
             name: String::new(),
             folder: String::new(),
             doing: String::new(),
             agent: String::new(),
-            activity,
+            question: String::new(),
+            activity: state.activity,
         })
         .collect()
 }
@@ -186,7 +200,7 @@ pub fn sessions_summary() -> String {
 pub fn sessions_waiting() -> usize {
     session_states(sessions::listed_activity)
         .iter()
-        .filter(|(_, activity, _, _)| matches!(activity, Activity::NeedsYou | Activity::Finished))
+        .filter(|state| matches!(state.activity, Activity::NeedsYou | Activity::Finished))
         .count()
 }
 
@@ -199,18 +213,21 @@ pub struct SessionNotice {
     pub entry: String,
     /// The session's task, or the terminal's name when it reports none (`sessions::heading_of`).
     pub title: String,
-    /// What it asks, and the folder it is in.
+    /// What it asks the person when it said (`Running::question`), else what it waits for and
+    /// the folder it is in.
     pub body: String,
 }
 
 /// Sessions that started needing the person, or finished, since the last call
 /// (`sessions::Watch`). `at_window` says whether the person is at the app's window, in which
-/// case the session on screen is not news.
+/// case the session on screen is not news. The shell asks whenever a session changes, so the
+/// conversations that changed are recorded here too (`recent::ffi::keep_changed`).
 pub fn session_news(at_window: bool) -> Vec<SessionNotice> {
+    sessions::recent::ffi::keep_changed();
     let app = crate::app();
     let states: Vec<(String, Activity)> = session_states(sessions::listed_activity)
         .into_iter()
-        .map(|(id, activity, _, _)| (id, activity))
+        .map(|state| (state.id, state.activity))
         .collect();
     let on_screen = app
         .shown_terminals
@@ -231,10 +248,20 @@ pub fn session_news(at_window: bool) -> Vec<SessionNotice> {
         .filter(|session| news.contains(&session.id))
         .map(|session| SessionNotice {
             entry: crate::menus::session_entry_of(&session.id),
-            body: format!("{} · {}", session.activity.label(language), session.folder),
+            body: notice_body(&session, language),
             title: sessions::heading_of(&session),
         })
         .collect()
+}
+
+/// What a notice of `session` says under its title: its question when it said one, else what
+/// it waits for and its folder.
+fn notice_body(session: &Running, language: &str) -> String {
+    if session.question.is_empty() {
+        format!("{} · {}", session.activity.label(language), session.folder)
+    } else {
+        session.question.clone()
+    }
 }
 
 #[cfg(test)]
@@ -263,6 +290,25 @@ mod tests {
         let idle = button_of(Signal::Idle, "en");
         assert_eq!((idle.dot, idle.quiet), (None, false));
         assert!(button_of(Signal::Nothing, "en").quiet);
+    }
+
+    #[test]
+    fn a_notice_says_what_the_session_asks_when_it_is_known() {
+        let mut session = Running {
+            id: "a".to_owned(),
+            name: "Outreach".to_owned(),
+            folder: "Sales".to_owned(),
+            doing: String::new(),
+            agent: String::new(),
+            question: String::new(),
+            activity: Activity::NeedsYou,
+        };
+        assert_eq!(notice_body(&session, "en"), "Needs you · Sales");
+        session.question = "Allow Bash: rm -rf build/?".to_owned();
+        assert_eq!(notice_body(&session, "en"), "Allow Bash: rm -rf build/?");
+        session.question.clear();
+        session.activity = Activity::Finished;
+        assert_eq!(notice_body(&session, "en"), "Finished · Sales");
     }
 
     #[test]

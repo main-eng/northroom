@@ -12,7 +12,8 @@ use crate::remote::screen::Screen;
 use crate::remote::tables::{Head, Row, ROWS_MOST};
 use crate::sessions::{self, Running};
 use crate::terminal::cells::GridSize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// The smallest and largest grid a device may fit a terminal to.
@@ -58,6 +59,12 @@ pub trait Desk {
     /// What page `page` of `file` draws laid out `width` points wide; `None` as for `pages`.
     fn marks(&self, file: &str, page: usize, width: f64) -> Option<Vec<Drawn>>;
     fn press(&self, session: &str, pressed: Pressed);
+    /// Hands `sink` what brings a fresh terminal to `session`'s state now, then each piece of
+    /// its output as it is written, until `follower` unfollows. False when it is not running.
+    fn follow(&self, session: &str, follower: u64, sink: Sink) -> bool;
+    fn unfollow(&self, session: &str, follower: u64);
+    /// Sends `session` bytes as if typed at its terminal.
+    fn input(&self, session: &str, bytes: &[u8]);
     /// Moves `session`'s terminal by `lines` as the wheel does, towards older output when
     /// positive.
     fn scroll(&self, session: &str, lines: i32);
@@ -70,12 +77,24 @@ pub enum Out {
     Close(u64),
 }
 
+/// Takes a followed session's output, a piece at a time.
+pub type Sink = Box<dyn Fn(&[u8]) + Send>;
+
+/// Sends a device something outside the answer to what it asked: a followed session's output,
+/// which comes when the session writes it.
+pub type Carry = Arc<dyn Fn(u64, Tell) + Send + Sync>;
+
+/// The most bytes of a session's output one `output` message carries.
+const OUTPUT_MOST_BYTES: usize = 256 * 1024;
+
 /// One connected device.
 struct Linked {
     peer: Key,
     paired: bool,
     /// The session it watches.
     watching: Option<String>,
+    /// The sessions it follows as another computer's terminals.
+    following: BTreeSet<String>,
     /// What it was last told, so only changes are sent.
     sessions_told: Option<Vec<Session>>,
     screen_told: Option<Screen>,
@@ -88,6 +107,7 @@ pub struct Service {
     devices: Devices,
     offer: Option<Offer>,
     links: HashMap<u64, Linked>,
+    carry: Carry,
 }
 
 /// `running` as devices are told it, in the order the sessions list shows.
@@ -216,7 +236,13 @@ impl Service {
             devices,
             offer: None,
             links: HashMap::new(),
+            carry: Arc::new(|_, _| {}),
         }
+    }
+
+    /// Sends followed sessions' output through `carry` from now on.
+    pub fn carried_by(&mut self, carry: Carry) {
+        self.carry = carry;
     }
 
     pub fn devices(&self) -> &Devices {
@@ -268,6 +294,7 @@ impl Service {
                 peer,
                 paired,
                 watching: None,
+                following: BTreeSet::new(),
                 sessions_told: None,
                 screen_told: None,
             },
@@ -276,18 +303,22 @@ impl Service {
 
     /// `link` ended. A terminal its device watched gets its own size back.
     pub fn closed(&mut self, link: u64, desk: &dyn Desk) {
-        let watched = self.links.remove(&link).and_then(|linked| linked.watching);
-        if let Some(session) = watched {
-            self.release(&session, desk);
+        let Some(linked) = self.links.remove(&link) else {
+            return;
+        };
+        for session in &linked.following {
+            desk.unfollow(session, link);
+        }
+        for session in linked.watching.iter().chain(&linked.following) {
+            self.release(session, desk);
         }
     }
 
     /// Gives `session`'s terminal its own size back unless another device still watches it.
     fn release(&self, session: &str, desk: &dyn Desk) {
-        let watched = self
-            .links
-            .values()
-            .any(|linked| linked.watching.as_deref() == Some(session));
+        let watched = self.links.values().any(|linked| {
+            linked.watching.as_deref() == Some(session) || linked.following.contains(session)
+        });
         if !watched {
             desk.fit(session, None);
         }
@@ -395,7 +426,91 @@ impl Service {
                 // What scrolled into view is sent now, not at the next look for changes.
                 self.tell_screen(link, desk)
             }
+            Ask::Follow {
+                session,
+                columns,
+                lines,
+            } => self.follow(link, session, normalize_grid(columns, lines), desk),
+            Ask::Fit {
+                session,
+                columns,
+                lines,
+            } => {
+                if self.follows(link, &session) {
+                    desk.fit(&session, Some(normalize_grid(columns, lines)));
+                }
+                Vec::new()
+            }
+            Ask::Unfollow { session } => {
+                self.unfollow(link, &session, desk);
+                Vec::new()
+            }
+            Ask::Input { session, data } => {
+                if let Some(bytes) = crate::remote::bytes::read(&data) {
+                    desk.input(&session, &bytes);
+                }
+                Vec::new()
+            }
         }
+    }
+
+    fn follows(&self, link: u64, session: &str) -> bool {
+        self.links
+            .get(&link)
+            .is_some_and(|linked| linked.following.contains(session))
+    }
+
+    /// Fits `session` to `grid` and starts sending `link`'s device its output, or says it is
+    /// gone.
+    fn follow(&mut self, link: u64, session: String, grid: GridSize, desk: &dyn Desk) -> Vec<Out> {
+        let Some(linked) = self.links.get_mut(&link) else {
+            return Vec::new();
+        };
+        desk.fit(&session, Some(grid));
+        let (carry, named) = (Arc::clone(&self.carry), session.clone());
+        let sink: Sink = Box::new(move |bytes| {
+            for piece in bytes.chunks(OUTPUT_MOST_BYTES) {
+                let output = Tell::Output {
+                    session: named.clone(),
+                    data: crate::remote::bytes::written(piece),
+                };
+                carry(link, output);
+            }
+        });
+        if desk.follow(&session, link, sink) {
+            linked.following.insert(session);
+            return Vec::new();
+        }
+        self.release(&session, desk);
+        vec![Out::Tell(link, Tell::Gone { session })]
+    }
+
+    fn unfollow(&mut self, link: u64, session: &str, desk: &dyn Desk) {
+        let followed = self
+            .links
+            .get_mut(&link)
+            .is_some_and(|linked| linked.following.remove(session));
+        if followed {
+            desk.unfollow(session, link);
+            self.release(session, desk);
+        }
+    }
+
+    /// Tells `link`'s device which of the sessions it follows are gone, and stops following
+    /// them.
+    fn tell_gone(&mut self, link: u64, desk: &dyn Desk) -> Vec<Out> {
+        let running: BTreeSet<String> = desk.sessions().into_iter().map(|one| one.id).collect();
+        let Some(linked) = self.links.get_mut(&link) else {
+            return Vec::new();
+        };
+        let gone: Vec<String> = linked.following.difference(&running).cloned().collect();
+        for session in &gone {
+            linked.following.remove(session);
+            desk.unfollow(session, link);
+        }
+        gone.into_iter()
+            .map(|session| Out::Tell(link, Tell::Gone { session }))
+            .collect()
     }
 
     /// Starts a session and tells `link`'s device which it is, after the list that holds it.
@@ -475,6 +590,7 @@ impl Service {
         for link in paired {
             out.extend(self.tell_sessions(link, desk));
             out.extend(self.tell_screen(link, desk));
+            out.extend(self.tell_gone(link, desk));
         }
         out
     }

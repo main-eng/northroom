@@ -28,6 +28,10 @@ const FALLBACK_LANG: &str = "en_US.UTF-8";
 const BASE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 /// Set in every session, so a launch hook acts only inside a Northroom terminal.
 pub const MARKER_VARIABLE: &str = "NORTHROOM_TERMINAL";
+/// Makes Claude Code draw full screen, as Codex, Antigravity and OpenCode do unasked; set in
+/// every session. It outranks the person's own `tui` setting, so one who wants the classic
+/// renderer unsets it in their shell's profile.
+const CLAUDE_FULL_SCREEN_VARIABLE: &str = "CLAUDE_CODE_NO_FLICKER";
 
 const KEPT_NAMES: [&str; 15] = [
     "HOME",
@@ -67,6 +71,42 @@ pub const HOST_SHELL: ShellKind = if cfg!(windows) {
 /// A terminal file's bytes: two-space JSON and a newline. The file names nothing to run, so a
 /// file from elsewhere can only start the person's own shell.
 pub const TERMINAL_FILE: &str = "{\n  \"terminal\": 1\n}\n";
+
+/// The session on another computer a terminal file shows: that computer's key, as hex, and
+/// the session's name there. Only a computer the person paired with is ever reached, so a
+/// file from elsewhere that names another shows nothing.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Elsewhere {
+    pub computer: String,
+    pub session: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct FarFile {
+    terminal: u32,
+    #[serde(flatten)]
+    elsewhere: Elsewhere,
+}
+
+impl Elsewhere {
+    /// What the terminal file `bytes` says of a session elsewhere. `None` for a terminal of
+    /// this computer's own.
+    pub fn read(bytes: &[u8]) -> Option<Self> {
+        let file: FarFile = serde_json::from_slice(bytes).ok()?;
+        Some(file.elsewhere)
+    }
+
+    /// The bytes of the terminal file that shows this session.
+    pub fn file(&self) -> String {
+        let file = FarFile {
+            terminal: 1,
+            elsewhere: self.clone(),
+        };
+        let mut written = serde_json::to_string_pretty(&file).unwrap_or_default();
+        written.push('\n');
+        written
+    }
+}
 
 /// What a session runs: an absolute program, its argv, its environment and its folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -249,6 +289,7 @@ fn build_launch_in(
     variables.set("COLORTERM", "truecolor");
     variables.set("TERM_PROGRAM", "Northroom");
     variables.set(MARKER_VARIABLE, "1");
+    variables.set(CLAUDE_FULL_SCREEN_VARIABLE, "1");
     for (name, value) in session {
         variables.set(name, value);
     }
@@ -316,6 +357,7 @@ mod tests {
         assert_eq!(value("TERM"), Some("xterm-256color"));
         assert_eq!(value("TERM_PROGRAM"), Some("Northroom"));
         assert_eq!(value(MARKER_VARIABLE), Some("1"));
+        assert_eq!(value("CLAUDE_CODE_NO_FLICKER"), Some("1"));
         assert_eq!(value("CLAUDE_CODE_PLUGIN_DIRS"), Some("/support/plugin"));
 
         let german = build_launch_in(

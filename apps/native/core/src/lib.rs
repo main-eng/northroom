@@ -75,6 +75,9 @@ pub(crate) struct App {
     pub shown_terminals: Mutex<crate::terminal::screen::Shown>,
     /// Each session's state as of the last "waiting" notification.
     pub session_watch: Mutex<sessions::Watch>,
+    /// What to type into a terminal file's first shell once it waits at its prompt, by the
+    /// file's id (`ffi::type_at_start`).
+    pub typed_at_start: Mutex<std::collections::HashMap<String, Vec<u8>>>,
     /// The drive's columns, once a workspace folder is open.
     pub columns: Mutex<Option<columns::Columns>>,
     /// Watches the folders the open columns list.
@@ -158,6 +161,7 @@ pub(crate) fn start() {
         preview: Mutex::new(None),
         sessions: Mutex::new(std::collections::HashMap::new()),
         session_watch: Mutex::new(sessions::Watch::default()),
+        typed_at_start: Mutex::new(std::collections::HashMap::new()),
         shown_terminals: Mutex::new(crate::terminal::screen::Shown::default()),
         columns: Mutex::new(None),
         page: Mutex::new(None),

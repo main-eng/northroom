@@ -25,9 +25,10 @@ pub fn quote_shell_word(word: &str) -> String {
     format!("'{}'", word.replace('\'', "'\\''"))
 }
 
-/// The hook Claude Code runs on each event. It writes the activity to the agent's terminal as
-/// an escape sequence the core reads and the screen ignores, so no socket or port is needed,
-/// and does nothing outside a Northroom terminal. Claude Code runs hooks without a terminal, so
+/// The hook Claude Code runs on each event. It writes the activity, and what a waiting agent
+/// asks, to the agent's terminal as escape sequences the core reads and the screen ignores, so
+/// no socket or port is needed, and does nothing outside a Northroom terminal. What it asks is
+/// sent as the pieces Claude Code gave, which the core puts into words (`activity::Asked`). Claude Code runs hooks without a terminal, so
 /// the hook uses the terminal of its nearest ancestor that has one. It prints nothing for
 /// Claude to read.
 pub fn activity_hook_script() -> String {
@@ -37,14 +38,28 @@ pub fn activity_hook_script() -> String {
         "[ -n \"$NORTHROOM_TERMINAL\" ] || exit 0",
         "input=$(cat)",
         "q='\"'",
-        "# The text of the first JSON field named $1.",
+        "# The text of the first JSON field named $1, read through the quotes it escapes.",
         "field() {",
         "  for sep in \":$q\" \": $q\"; do",
         "    case \"$input\" in",
-        "      *\"$q$1$q$sep\"*) rest=${input#*\"$q$1$q$sep\"}; printf '%s' \"${rest%%\"$q\"*}\"; return ;;",
+        "      *\"$q$1$q$sep\"*)",
+        "        rest=${input#*\"$q$1$q$sep\"}",
+        "        text=",
+        "        while :; do",
+        "          piece=${rest%%\"$q\"*}",
+        "          text=$text$piece",
+        r"          case $piece in",
+        r"            *\\\\) break ;;",
+        r"            *\\) case $rest in *$q*) rest=${rest#*$q}; text=$text$q ;; *) break ;; esac ;;",
+        "            *) break ;;",
+        "          esac",
+        "        done",
+        "        printf '%s' \"$text\"; return ;;",
         "    esac",
         "  done",
         "}",
+        "# One line of what was read: no control characters, and no longer than a row shows.",
+        r"clean() { tr -d '\000-\037\177' | cut -b1-400; }",
         "case \"$1\" in",
         "  SessionStart) activity=idle ;;",
         "  UserPromptSubmit) activity=working ;;",
@@ -66,6 +81,24 @@ pub fn activity_hook_script() -> String {
         "done",
         "[ -n \"$terminal\" ] || exit 0",
         "printf '\\033]6973;northroom;activity=%s\\007' \"$activity\" > \"$terminal\" 2>/dev/null",
+        "# What the agent asks: a tool and what it would run or touch, its question, or its notice.",
+        "asked=",
+        "case \"$1\" in",
+        "  PermissionRequest)",
+        "    tool=$(field tool_name | clean | tr -d ';')",
+        "    for name in command file_path url; do",
+        "      what=$(field \"$name\" | clean)",
+        "      [ -z \"$what\" ] || break",
+        "    done",
+        "    case \"$tool\" in",
+        "      '') ;;",
+        "      AskUserQuestion) asked=\"question=$(field question | clean)\" ;;",
+        "      *) asked=\"allow=$tool;$what\" ;;",
+        "    esac ;;",
+        "  Notification) asked=\"notice=$(field message | clean)\" ;;",
+        "  PreToolUse) [ \"$activity\" != needs-you ] || asked=\"question=$(field question | clean)\" ;;",
+        "esac",
+        "[ -z \"$asked\" ] || printf '\\033]6973;northroom;%s\\007' \"$asked\" > \"$terminal\" 2>/dev/null",
         "# The conversation and its folder, so a relaunch can resume it (terminal::resume).",
         "session=$(field session_id | tr -d '\\007\\033')",
         "folder=$(field cwd | tr -d '\\007\\033')",
@@ -353,6 +386,103 @@ mod tests {
                 used.conversation_folder.as_deref()
             ),
             (Some("s"), Some("/p"))
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_waiting_agent_s_hook_says_what_it_asks() {
+        use crate::terminal::activity::Asked;
+        let directory = tempfile::tempdir().expect("directory");
+        let asked = |event: &str, input: &str| {
+            let said = report_changes(directory.path(), event, input, TerminalContext::Northroom);
+            assert_eq!(said.activity, Some(Activity::NeedsYou), "{event} {input}");
+            said.asked
+        };
+        let permission = |tool: &str, what: &str| {
+            Some(Asked::Permission {
+                tool: tool.to_owned(),
+                what: what.to_owned(),
+            })
+        };
+        // A command, with the quotes and line end its JSON escapes, as Claude Code writes it.
+        assert_eq!(
+            asked(
+                "PermissionRequest",
+                r#"{"session_id":"s","cwd":"/p","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf \"build dir\"\nls","description":"Clean"},"permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"rm"}]}]}"#
+            ),
+            permission("Bash", r#"rm -rf "build dir" ls"#)
+        );
+        // A file, from JSON set out over lines.
+        assert_eq!(
+            asked(
+                "PermissionRequest",
+                "{\n  \"tool_name\": \"Write\",\n  \"tool_input\": {\n    \"file_path\": \"/p/notes.md\",\n    \"content\": \"a\"\n  }\n}"
+            ),
+            permission("Write", "/p/notes.md")
+        );
+        assert_eq!(
+            asked(
+                "PermissionRequest",
+                r#"{"tool_name":"WebFetch","tool_input":{"url":"https://example.com/a","prompt":"Read"}}"#
+            ),
+            permission("WebFetch", "https://example.com/a")
+        );
+        // A tool that names none of the three.
+        assert_eq!(
+            asked(
+                "PermissionRequest",
+                r#"{"tool_name":"mcp__mail__send","tool_input":{"to":"a@b.c"}}"#
+            ),
+            permission("mcp__mail__send", "")
+        );
+        // Escape sequences in what it would run reach the terminal as plain text.
+        assert_eq!(
+            asked(
+                "PermissionRequest",
+                "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \u{1b}]0;x\u{7}hi\"}}"
+            ),
+            permission("Bash", "echo ]0;xhi")
+        );
+        // A long command is cut before it is sent, and again to what a row shows.
+        let long = format!(
+            r#"{{"tool_name":"Bash","tool_input":{{"command":"{}"}}}}"#,
+            "y".repeat(5000)
+        );
+        let Some(Asked::Permission { what, .. }) = asked("PermissionRequest", &long) else {
+            panic!("a permission");
+        };
+        assert_eq!(what.chars().count(), 160);
+        // Its own question: the first one.
+        let question = r#"{"tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which framework?","header":"Framework","options":[{"label":"React","description":"x"}],"multiSelect":false},{"question":"Second?","header":"S","options":[]}]}}"#;
+        assert_eq!(
+            asked("PreToolUse", question),
+            Some(Asked::Question("Which framework?".to_owned()))
+        );
+        assert_eq!(
+            asked("PermissionRequest", question),
+            Some(Asked::Question("Which framework?".to_owned()))
+        );
+        // A notification's message.
+        assert_eq!(
+            asked(
+                "Notification",
+                r#"{"hook_event_name":"Notification","message":"Claude needs your permission to use Bash","notification_type":"permission_prompt"}"#
+            ),
+            Some(Asked::Notice(
+                "Claude needs your permission to use Bash".to_owned()
+            ))
+        );
+        // An event that is not waiting says no question.
+        let working = report_changes(
+            directory.path(),
+            "PreToolUse",
+            r#"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#,
+            TerminalContext::Northroom,
+        );
+        assert_eq!(
+            (working.activity, working.asked),
+            (Some(Activity::Working), None)
         );
     }
 

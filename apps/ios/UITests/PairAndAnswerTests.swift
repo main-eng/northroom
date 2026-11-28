@@ -2,7 +2,7 @@ import XCTest
 
 /// The whole app against a running Northroom: pair, open a session, answer it.
 ///
-/// Needs a computer showing Connect Phone… with one session running. Pass its pairing link as
+/// Needs a computer showing Connect Device… with one session running. Pass its pairing link as
 /// `TEST_RUNNER_NR_PAIR_LINK` to `xcodebuild test`; without it the test is skipped.
 final class PairAndAnswerTests: XCTestCase {
     @MainActor

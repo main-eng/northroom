@@ -13,6 +13,18 @@ const BYTE_UNITS: [&str; 5] = ["bytes", "KB", "MB", "GB", "TB"];
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
+const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/// The short name of `month`, which counts from 0: "Nov".
+pub(crate) fn month_of(month: usize) -> &'static str {
+    MONTHS[month.min(11)]
+}
+
+/// The short name of the weekday of `Local::day_number`: "Tue".
+pub(crate) fn weekday_of(day_number: i64) -> &'static str {
+    // Day 0 is 1 January 1970, a Thursday.
+    WEEKDAYS[(day_number + 4).rem_euclid(7) as usize]
+}
 
 /// Formats a size as Finder does: decimal units, one decimal place from MB up, "--" if unknown.
 pub fn format_size(size_bytes: Option<u64>) -> String {

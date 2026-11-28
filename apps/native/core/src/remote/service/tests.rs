@@ -5,7 +5,9 @@ use crate::remote::protocol::{Item, Piece};
 use crate::remote::tables::Shown;
 use crate::terminal::activity::Activity;
 use crate::terminal::input::Key as Pressable;
+use crate::Relock;
 use std::cell::RefCell;
+use std::sync::Mutex;
 use std::time::Duration;
 
 const PHONE: Key = [1; 32];
@@ -18,9 +20,20 @@ struct FakeDesk {
     /// The text each running session's screen shows.
     shows: RefCell<HashMap<String, String>>,
     done: RefCell<Vec<String>>,
+    /// Who follows which session's output.
+    followed: RefCell<Vec<(String, u64, Sink)>>,
 }
 
 impl FakeDesk {
+    /// `session` writes `bytes`, as its followers hear it.
+    fn writes(&self, session: &str, bytes: &[u8]) {
+        for (followed, _, sink) in self.followed.borrow().iter() {
+            if followed == session {
+                sink(bytes);
+            }
+        }
+    }
+
     fn with(sessions: &[(&str, Activity)]) -> Self {
         let desk = Self::default();
         for (id, activity) in sessions {
@@ -30,6 +43,7 @@ impl FakeDesk {
                 folder: "Work".to_owned(),
                 doing: String::new(),
                 agent: "Claude Code".to_owned(),
+                question: String::new(),
                 activity: *activity,
             });
             desk.shows
@@ -71,6 +85,7 @@ impl Desk for FakeDesk {
             folder: "Work".to_owned(),
             doing: String::new(),
             agent: String::new(),
+            question: String::new(),
             activity: Activity::Idle,
         });
         Some(id)
@@ -197,6 +212,33 @@ impl Desk for FakeDesk {
             .borrow_mut()
             .push(format!("scroll {session} {lines}"));
     }
+
+    /// A running session's state is its screen's text.
+    fn follow(&self, session: &str, follower: u64, sink: Sink) -> bool {
+        let Some(shown) = self.shows.borrow().get(session).cloned() else {
+            return false;
+        };
+        sink(shown.as_bytes());
+        self.followed
+            .borrow_mut()
+            .push((session.to_owned(), follower, sink));
+        true
+    }
+
+    fn unfollow(&self, session: &str, follower: u64) {
+        self.followed
+            .borrow_mut()
+            .retain(|(followed, by, _)| !(followed == session && *by == follower));
+        self.done
+            .borrow_mut()
+            .push(format!("unfollow {session} {follower}"));
+    }
+
+    fn input(&self, session: &str, bytes: &[u8]) {
+        self.done
+            .borrow_mut()
+            .push(format!("input {session} {bytes:?}"));
+    }
 }
 
 struct Fixture {
@@ -242,6 +284,127 @@ fn welcome() -> Tell {
     Tell::Welcome {
         host: "Mac".to_owned(),
     }
+}
+
+/// What a followed session's output was carried to each device as: (link, session, bytes).
+type Carried = Arc<Mutex<Vec<(u64, String, Vec<u8>)>>>;
+
+impl Fixture {
+    /// Keeps what the service carries outside its answers.
+    fn carried(&mut self) -> Carried {
+        let carried = Carried::default();
+        let keeping = Arc::clone(&carried);
+        self.service.carried_by(Arc::new(move |link, tell| {
+            if let Tell::Output { session, data } = tell {
+                let bytes = crate::remote::bytes::read(&data).expect("output is base64");
+                keeping.relock().push((link, session, bytes));
+            }
+        }));
+        carried
+    }
+}
+
+const FOLLOW_S1: &str = r#"{"type":"follow","session":"s1","columns":120,"lines":40}"#;
+
+#[test]
+fn a_followed_session_sends_its_state_then_its_output_and_takes_raw_input() {
+    let mut fixture = fixture(&[("s1", Activity::Working), ("s2", Activity::Idle)]);
+    let carried = fixture.carried();
+    fixture.paired(1);
+    assert_eq!(fixture.ask(1, FOLLOW_S1), []);
+    fixture.desk.writes("s1", b"\x1b[31mred");
+    // Another session's output is not this device's to hear.
+    fixture.desk.writes("s2", b"elsewhere");
+    assert_eq!(
+        *carried.relock(),
+        [
+            (1, "s1".to_owned(), b"s1 screen".to_vec()),
+            (1, "s1".to_owned(), b"\x1b[31mred".to_vec()),
+        ]
+    );
+    // Typed bytes arrive as they are, an escape sequence included; the view's size follows.
+    let typed = crate::remote::bytes::written(b"\x1b[A\r");
+    fixture.ask(
+        1,
+        &format!(r#"{{"type":"input","session":"s1","data":"{typed}"}}"#),
+    );
+    fixture.ask(
+        1,
+        r#"{"type":"fit","session":"s1","columns":80,"lines":24}"#,
+    );
+    // A session the device does not follow is not fitted to it.
+    fixture.ask(
+        1,
+        r#"{"type":"fit","session":"s2","columns":80,"lines":24}"#,
+    );
+    assert_eq!(
+        fixture.desk.done(),
+        ["fit s1 120x40", "input s1 [27, 91, 65, 13]", "fit s1 80x24"]
+    );
+}
+
+#[test]
+fn a_device_follows_several_sessions_and_each_is_let_go_alone_or_with_the_link() {
+    let mut fixture = fixture(&[("s1", Activity::Working), ("s2", Activity::Idle)]);
+    let carried = fixture.carried();
+    fixture.paired(1);
+    fixture.ask(1, FOLLOW_S1);
+    fixture.ask(
+        1,
+        r#"{"type":"follow","session":"s2","columns":90,"lines":30}"#,
+    );
+    fixture.ask(1, r#"{"type":"unfollow","session":"s1"}"#);
+    fixture.desk.writes("s1", b"unheard");
+    fixture.desk.writes("s2", b"heard");
+    assert_eq!(
+        carried.relock().last().map(|last| last.2.clone()),
+        Some(b"heard".to_vec())
+    );
+    assert_eq!(
+        carried.relock().len(),
+        3,
+        "two states and one piece of output"
+    );
+    fixture.service.closed(1, &fixture.desk);
+    assert_eq!(
+        fixture.desk.done(),
+        [
+            "fit s1 120x40",
+            "fit s2 90x30",
+            "unfollow s1 1",
+            "fit s1 own size",
+            "unfollow s2 1",
+            "fit s2 own size",
+        ]
+    );
+}
+
+#[test]
+fn a_followed_session_that_is_not_running_or_ends_is_reported_gone() {
+    let mut fixture = fixture(&[("s1", Activity::Working)]);
+    fixture.paired(1);
+    let gone = |session: &str| {
+        vec![Out::Tell(
+            1,
+            Tell::Gone {
+                session: session.to_owned(),
+            },
+        )]
+    };
+    assert_eq!(
+        fixture.ask(
+            1,
+            r#"{"type":"follow","session":"none","columns":80,"lines":24}"#
+        ),
+        gone("none")
+    );
+    fixture.ask(1, FOLLOW_S1);
+    fixture.desk.running.borrow_mut().clear();
+    fixture.desk.shows.borrow_mut().clear();
+    let changes = fixture.service.changes(&fixture.desk);
+    assert!(changes.ends_with(&gone("s1")), "{changes:?}");
+    // Told once: it is no longer followed.
+    assert_eq!(fixture.service.changes(&fixture.desk), []);
 }
 
 #[test]
