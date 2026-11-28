@@ -218,8 +218,10 @@ fn code_place(code: &[Vec<bool>], width: f64, height: f64) -> CodePlace {
         .iter()
         .enumerate()
         .flat_map(|(line, row)| {
-            row.iter().enumerate().filter_map(move |(column, dark)| {
-                (*dark && !in_corner_mark(line, column, code.len())).then(|| {
+            row.iter()
+                .enumerate()
+                .filter(move |(column, dark)| **dark && !in_corner_mark(line, *column, code.len()))
+                .map(move |(column, _)| {
                     Rect::new(
                         left + column as f64 * square,
                         top + line as f64 * square,
@@ -227,7 +229,6 @@ fn code_place(code: &[Vec<bool>], width: f64, height: f64) -> CodePlace {
                         square,
                     )
                 })
-            })
         })
         .collect();
     CodePlace {

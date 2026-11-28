@@ -34,7 +34,7 @@ test("the shipped highlighter colors source without an engine-provided base64 de
 test("a highlight coloured in steps is coloured as a whole file is", async () => {
   const engine = { WebAssembly, TextDecoder, TextEncoder };
   runInNewContext(script, engine);
-  const source = "/* a comment\n   over lines */\nfn main() {\n    let text = \"two\nlines\";\n}";
+  const source = '/* a comment\n   over lines */\nfn main() {\n    let text = "two\nlines";\n}';
   const answer: { lines: [string, string, number][][] } = JSON.parse(
     await highlight(engine, source, "rust"),
   );

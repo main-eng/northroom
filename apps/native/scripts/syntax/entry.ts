@@ -47,7 +47,9 @@ const highlighter = createHighlighterCore({
     tsx,
     jsx,
   ],
-  engine: createOnigurumaEngine(Uint8Array.from(atob(onigBase64), (letter) => letter.charCodeAt(0))),
+  engine: createOnigurumaEngine(
+    Uint8Array.from(atob(onigBase64), (letter) => letter.charCodeAt(0)),
+  ),
 });
 
 /** About how long one step colours for, in milliseconds. */
