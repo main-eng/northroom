@@ -38,7 +38,7 @@ jobs:
         working-directory: apps/native
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -76,7 +76,7 @@ jobs:
           cat "$RUNNER_TEMP/windows-release/native-windows.yml.NOT-FOR-RELEASE"
 
       - name: Upload the setup
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-windows-setup
           path: |
@@ -101,7 +101,7 @@ jobs:
           echo "The installed app started and drew its window." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the build for the update check
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-windows-build
           path: |
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload what the install saw
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-windows-checks
           path: ${{ runner.temp }}/smoke/board
@@ -132,7 +132,7 @@ jobs:
         working-directory: apps/native
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Windows tools
         run: |
@@ -144,7 +144,7 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
       - name: Download the build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: northroom-windows-build
           path: apps/native/gpui/target/release
@@ -162,7 +162,7 @@ jobs:
 
       - name: Upload what the check saw
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-windows-update-check
           path: ${{ runner.temp }}/nr-update-check/cases/*/stderr.txt
@@ -193,7 +193,7 @@ jobs:
         libgtk-3-dev libwebkit2gtk-4.1-dev libsqlite3-dev squashfs-tools
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install the pinned Rust toolchain
         run: |
@@ -220,7 +220,7 @@ jobs:
           cat "$RUNNER_TEMP/linux-release/native-linux.yml.NOT-FOR-RELEASE"
 
       - name: Upload the AppImage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-linux-appimage
           path: |
@@ -265,7 +265,7 @@ jobs:
 
       - name: Upload what the checks saw
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-linux-checks
           path: |

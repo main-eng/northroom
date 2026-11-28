@@ -34,7 +34,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install signing and archive tools
         run: |
           sudo apt-get update
@@ -62,7 +62,7 @@ jobs:
           printf '%s\n' "$LINUX_UPDATE_KEY_PASSWORD" | \
             minisign -R -s "$NR_MINISIGN_KEY" -p "$RUNNER_TEMP/northroom-update.pub"
       - name: Upload the public update key
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-linux-update-public-key
           path: ${{ runner.temp }}/northroom-update.pub
@@ -100,7 +100,7 @@ jobs:
               --from "$RUNNER_TEMP/package/$name" "$RUNNER_TEMP/northroom-release"
       - name: Upload the signed release files
         if: inputs.operation == 'release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: northroom-native-linux-${{ github.sha }}
           path: ${{ runner.temp }}/northroom-release/*
